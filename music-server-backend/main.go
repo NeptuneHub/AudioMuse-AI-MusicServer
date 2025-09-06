@@ -30,9 +30,11 @@ func main() {
 	{
 		rest.GET("/ping.view", subsonicPing)
 		rest.GET("/getLicense.view", subsonicGetLicense)
-		rest.GET("/getSongs.view", subsonicGetSongs)
 		rest.GET("/stream.view", subsonicStream)
-		// Add other subsonic routes here as needed
+		rest.GET("/getArtists.view", subsonicGetArtists)
+		rest.GET("/getAlbumList2.view", subsonicGetAlbumList2)
+		rest.GET("/getPlaylists.view", subsonicGetPlaylists)
+		// Note: getSongs.view is deprecated and getAlbum.view is used to get songs for an album.
 	}
 
 	// JSON API routes for the web UI
