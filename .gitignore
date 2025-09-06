@@ -96,3 +96,6 @@ musi-server
 #go
 go.sum
 go.mod
+
+#npm
+music-server-frontend/package-lock.json
