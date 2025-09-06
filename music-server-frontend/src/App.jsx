@@ -85,7 +85,7 @@ function Login({ onLogin }) {
 	return (
 		<div className="flex items-center justify-center h-screen">
 			<div className="bg-gray-800 p-8 rounded-lg shadow-xl w-96">
-				<h2 className="text-2xl font-bold mb-6 text-center text-teal-400">AudioMuse Server</h2>
+				<h2 className="text-2xl font-bold mb-6 text-center text-teal-400">AudioMuse-AI</h2>
 				<form onSubmit={handleSubmit}>
 					<div className="mb-4">
 						<label className="block text-gray-400 mb-2" htmlFor="username">Username</label>
@@ -147,7 +147,7 @@ function Dashboard({ onLogout, isAdmin }) {
 		<div className="flex flex-col h-screen">
 			<nav className="bg-gray-800 shadow-md">
                 <div className="container mx-auto px-6 py-3 flex justify-between items-center">
-                    <h1 className="text-xl font-bold text-teal-400">AudioMuse</h1>
+                    <h1 className="text-xl font-bold text-teal-400">AudioMuse-AI</h1>
                     <div className="flex items-center space-x-4">
                         <button onClick={() => handleResetNavigation('songs', 'All Songs')} className={`px-3 py-2 rounded font-semibold transition duration-300 ${currentView.page === 'songs' && navigation.length === 1 ? 'bg-teal-500 text-white' : 'text-gray-300 hover:bg-gray-700'}`}>Songs</button>
                         <button onClick={() => handleResetNavigation('albums', 'All Albums')} className={`px-3 py-2 rounded font-semibold transition duration-300 ${currentView.page === 'albums' && navigation.length === 1 ? 'bg-teal-500 text-white' : 'text-gray-300 hover:bg-gray-700'}`}>Albums</button>
