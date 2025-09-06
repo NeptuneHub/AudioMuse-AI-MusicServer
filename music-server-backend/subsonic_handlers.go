@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dhowden/tag"
 	"github.com/gin-gonic/gin"
@@ -93,7 +94,6 @@ func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 	}
 }
 
-// subsonicAuthenticate checks for JWT (for web UI) or standard Subsonic credentials.
 func subsonicAuthenticate(c *gin.Context) (User, bool) {
 	// First, check for JWT Bearer token for web UI integration.
 	authHeader := c.GetHeader("Authorization")
@@ -378,7 +378,6 @@ func subsonicStartScan(c *gin.Context) {
 
 	if !isScanning {
 		var libraryPath string
-		// The Web UI will POST the path for the initial scan.
 		if c.Request.Method == "POST" {
 			var req struct {
 				Path string `json:"path"`
@@ -392,7 +391,7 @@ func subsonicStartScan(c *gin.Context) {
 			if err != nil {
 				log.Printf("Warning: Could not save library path to settings: %v", err)
 			}
-		} else { // Subsonic clients will GET to trigger a re-scan.
+		} else {
 			err := db.QueryRow("SELECT value FROM settings WHERE key = 'library_path'").Scan(&libraryPath)
 			if err != nil || libraryPath == "" {
 				msg := "Music library path not configured. Please perform an initial scan from the admin web panel first."
@@ -400,6 +399,15 @@ func subsonicStartScan(c *gin.Context) {
 				return
 			}
 		}
+
+		// Set status to scanning BEFORE starting the goroutine to avoid race condition.
+		_, err := db.Exec("UPDATE scan_status SET is_scanning = 1, songs_added = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+		if err != nil {
+			log.Printf("Error starting scan in DB: %v", err)
+			subsonicRespond(c, newSubsonicErrorResponse(0, "Database error starting scan."))
+			return
+		}
+
 		log.Printf("Library scan triggered for path: %s", libraryPath)
 		go scanLibrary(libraryPath)
 	} else {

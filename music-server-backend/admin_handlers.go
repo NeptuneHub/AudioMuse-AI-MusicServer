@@ -18,13 +18,7 @@ import (
 func scanLibrary(scanPath string) {
 	isScanCancelled.Store(false) // Reset cancellation flag for this new scan.
 
-	// 1. Set scan status to 'scanning' and reset counters
-	_, err := db.Exec("UPDATE scan_status SET is_scanning = 1, songs_added = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
-	if err != nil {
-		log.Printf("Error starting scan in DB: %v", err)
-		return
-	}
-
+	// The status is now set to 'scanning' by the handler that calls this function.
 	log.Printf("Background scan started for path: %s", scanPath)
 	var songsAdded int64
 
@@ -83,9 +77,14 @@ func scanLibrary(scanPath string) {
 		log.Printf("Error walking directory %s: %v", scanPath, walkErr)
 	}
 
-	// Final update and status change, regardless of how the scan finished.
-	db.Exec("UPDATE scan_status SET is_scanning = 0, songs_added = ?, last_update_time = ? WHERE id = 1", songsAdded, time.Now().Format(time.RFC3339))
-	log.Printf("Scan finished or was cancelled. Total songs added in this run: %d.", songsAdded)
+	// Final update and status change, but only if the scan was not cancelled.
+	// If it was cancelled, the cancel handler has already updated the status.
+	if !isScanCancelled.Load() {
+		db.Exec("UPDATE scan_status SET is_scanning = 0, songs_added = ?, last_update_time = ? WHERE id = 1", songsAdded, time.Now().Format(time.RFC3339))
+		log.Printf("Scan finished. Total songs added in this run: %d.", songsAdded)
+	} else {
+		log.Printf("Scan was cancelled. Total songs added before cancellation: %d.", songsAdded)
+	}
 }
 
 // browseFiles is a UI helper not part of the Subsonic API standard.
