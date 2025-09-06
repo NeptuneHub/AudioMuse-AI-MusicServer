@@ -14,15 +14,17 @@ import (
 var jwtKey = []byte("a_very_secret_and_consistent_key")
 
 type Claims struct {
+	UserID   int    `json:"user_id"`
 	Username string `json:"username"`
 	IsAdmin  bool   `json:"is_admin"`
 	jwt.RegisteredClaims
 }
 
 // GenerateJWT creates a new JWT for a given user.
-func GenerateJWT(username string, isAdmin bool) (string, error) {
+func GenerateJWT(userID int, username string, isAdmin bool) (string, error) {
 	expirationTime := time.Now().Add(24 * time.Hour)
 	claims := &Claims{
+		UserID:   userID,
 		Username: username,
 		IsAdmin:  isAdmin,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -66,9 +68,9 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		c.Set("userID", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("isAdmin", claims.IsAdmin)
 		c.Next()
 	}
 }
-
