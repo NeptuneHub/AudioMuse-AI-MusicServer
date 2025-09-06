@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/mattn/go-sqlite3"
@@ -34,43 +35,35 @@ func main() {
 		rest.GET("/getArtists.view", subsonicGetArtists)
 		rest.GET("/getAlbumList2.view", subsonicGetAlbumList2)
 		rest.GET("/getPlaylists.view", subsonicGetPlaylists)
-		// Note: getSongs.view is deprecated and getAlbum.view is used to get songs for an album.
+		// Add stubs for other common endpoints to avoid 404s
+		rest.GET("/getAlbum.view", subsonicGetAlbum) // To get songs in an album
+		rest.GET("/search2.view", subsonicSearch)
+		rest.GET("/search3.view", subsonicSearch)
+		rest.GET("/getRandomSongs.view", subsonicGetRandomSongs)
+		rest.GET("/getCoverArt.view", subsonicGetCoverArt)
+		rest.GET("/tokenInfo.view", subsonicTokenInfo)
+		rest.GET("/startScan.view", subsonicStartScan)
+		rest.GET("/getScanStatus.view", subsonicGetScanStatus)
 	}
 
 	// JSON API routes for the web UI
 	v1 := r.Group("/api/v1")
 	{
+		// This route is a bridge for the web UI to get a JWT after a successful
+		// Subsonic password authentication. It's not used by external clients.
 		userRoutes := v1.Group("/user")
 		{
-			// userRoutes.POST("/register", registerUser) // Should we allow public registration?
 			userRoutes.POST("/login", loginUser)
 		}
-
-		// Authenticated routes
-		musicRoutes := v1.Group("/music")
-		musicRoutes.Use(AuthMiddleware())
-		{
-			musicRoutes.GET("/artists", getArtists)
-			musicRoutes.GET("/albums", getAlbums)
-			musicRoutes.GET("/songs", getSongs)
-			musicRoutes.GET("/stream/:songID", streamSong)
-		}
-
-		playlistRoutes := v1.Group("/playlists")
-		playlistRoutes.Use(AuthMiddleware())
-		{
-			playlistRoutes.GET("", getPlaylists)
-			playlistRoutes.POST("", createPlaylist)
-			playlistRoutes.POST("/:id/songs", addSongToPlaylist)
-		}
-
 		// Admin routes
 		adminRoutes := v1.Group("/admin")
 		adminRoutes.Use(AuthMiddleware(), adminOnly())
 		{
-			adminRoutes.POST("/library/scan", scanLibrary)
+			// Filesystem browsing for library selection
 			adminRoutes.GET("/browse", browseFiles)
-
+			// Library Scanning for Web UI
+			adminRoutes.POST("/scan/start", startAdminScan)
+			adminRoutes.GET("/scan/status", getAdminScanStatus)
 			// User Management Routes
 			adminRoutes.GET("/users", getUsers)
 			adminRoutes.POST("/users", createUser)
@@ -101,12 +94,35 @@ func initDB() {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			username TEXT UNIQUE,
 			password_hash TEXT,
-			is_admin BOOLEAN
+			password_plain TEXT, -- WARNING: Storing plaintext passwords is a security risk. Required for Subsonic token auth.
+			is_admin BOOLEAN 
 		);
 	`)
 	if err != nil {
 		log.Fatal("Failed to create users table:", err)
 	}
+
+	// Add password_plain column for Subsonic token auth if it doesn't exist.
+	// This is a simple migration for existing databases.
+	_, err = db.Exec("ALTER TABLE users ADD COLUMN password_plain TEXT")
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		log.Printf("Warning: Could not add password_plain column, token auth may fail if not already present: %v", err)
+	}
+
+	// Create scan_status table to track library scans
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS scan_status (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			is_scanning BOOLEAN NOT NULL DEFAULT 0,
+			songs_added INTEGER NOT NULL DEFAULT 0,
+			last_update_time TEXT
+		);
+	`)
+	if err != nil {
+		log.Fatal("Failed to create scan_status table:", err)
+	}
+	// Ensure the single row exists for tracking status
+	db.Exec(`INSERT OR IGNORE INTO scan_status (id) VALUES (1);`)
 
 	// Create songs table
 	_, err = db.Exec(`
@@ -154,7 +170,7 @@ func initDB() {
 	row := db.QueryRow("SELECT COUNT(*) FROM users WHERE username = 'admin'")
 	if err := row.Scan(&count); err == nil && count == 0 {
 		hashedPassword, _ := hashPassword("admin")
-		_, err := db.Exec("INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)", "admin", hashedPassword, true)
+		_, err := db.Exec("INSERT INTO users (username, password_hash, password_plain, is_admin) VALUES (?, ?, ?, ?)", "admin", hashedPassword, "admin", true)
 		if err != nil {
 			log.Println("Could not create default admin user:", err)
 		} else {

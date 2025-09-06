@@ -43,6 +43,9 @@ type SubsonicResponse struct {
 	Status  string   `xml:"status,attr" json:"status"`
 	Version string   `xml:"version,attr" json:"version"`
 	Xmlns   string   `xml:"xmlns,attr" json:"xmlns,omitempty"`
+	Type          string   `xml:"type,attr,omitempty" json:"type,omitempty"`
+	ServerVersion string   `xml:"serverVersion,attr,omitempty"json:"serverVersion,omitempty"`
+	OpenSubsonic  bool     `xml:"openSubsonic,attr,omitempty" json:"openSubsonic,omitempty"`
 	Body    interface{}
 }
 
@@ -62,6 +65,9 @@ type SubsonicLicense struct {
 // SubsonicDirectory represents a container for songs.
 type SubsonicDirectory struct {
 	XMLName   xml.Name       `xml:"directory" json:"-"`
+	ID        string         `xml:"id,attr,omitempty" json:"id,omitempty"`
+	Name      string         `xml:"name,attr,omitempty" json:"name,omitempty"`
+	CoverArt  string         `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
 	SongCount int            `xml:"songCount,attr" json:"songCount"`
 	Songs     []SubsonicSong `xml:"song" json:"song"`
 }
@@ -70,6 +76,7 @@ type SubsonicDirectory struct {
 type SubsonicSong struct {
 	XMLName xml.Name `xml:"song" json:"-"`
 	ID      int      `xml:"id,attr" json:"id"`
+	CoverArt string  `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
 	Title   string   `xml:"title,attr" json:"title"`
 	Artist  string   `xml:"artist,attr" json:"artist"`
 	Album   string   `xml:"album,attr" json:"album"`
@@ -100,6 +107,7 @@ type SubsonicAlbum struct {
 	ID      string   `xml:"id,attr" json:"id"`
 	Name    string   `xml:"name,attr" json:"name"`
 	Artist  string   `xml:"artist,attr" json:"artist"`
+	CoverArt string  `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
 }
 
 // SubsonicPlaylists represents a list of playlists.
@@ -117,4 +125,17 @@ type SubsonicPlaylist struct {
 	Public    bool     `xml:"public,attr" json:"public"`
 	SongCount int      `xml:"songCount,attr" json:"songCount"`
 	Duration  int      `xml:"duration,attr" json:"duration"`
+}
+
+// SubsonicTokenInfo represents information about an API key.
+type SubsonicTokenInfo struct {
+	XMLName  xml.Name `xml:"tokenInfo" json:"-"`
+	Username string   `xml:"username,attr" json:"username"`
+}
+
+// SubsonicScanStatus represents the status of a library scan.
+type SubsonicScanStatus struct {
+	XMLName  xml.Name `xml:"scanStatus" json:"-"`
+	Scanning bool     `xml:"scanning,attr" json:"scanning"`
+	Count    int64    `xml:"count,attr" json:"count"`
 }

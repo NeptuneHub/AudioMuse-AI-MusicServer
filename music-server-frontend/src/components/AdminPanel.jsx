@@ -30,8 +30,14 @@ function FileBrowser({ onSelect, onClose }) {
             }
             const data = await response.json();
             let dirItems = (data.items || []).filter(i => i.type === 'dir');
-            if (path !== '/' && !dirItems.some(i => i.name === '..')) {
-                dirItems.unshift({ name: '..', type: 'dir' });
+            
+            const isWindowsRoot = /^[a-zA-Z]:\\?$/.test(data.path);
+            const isUnixRoot = data.path === '/';
+
+            if (!isUnixRoot && !isWindowsRoot) {
+                 if (!dirItems.some(i => i.name === '..')) {
+                    dirItems.unshift({ name: '..', type: 'dir' });
+                }
             }
             setItems(dirItems);
             setCurrentPath(data.path || path);
@@ -47,11 +53,31 @@ function FileBrowser({ onSelect, onClose }) {
 
     const handleItemClick = (item) => {
         let newPath;
+        const isWindows = currentPath.includes('\\');
+        const separator = isWindows ? '\\' : '/';
+
         if (item.name === '..') {
-            if (currentPath === '/') return;
-            newPath = currentPath.split('/').slice(0, -1).join('/') || '/';
+            const parts = currentPath.split(separator).filter(p => p && p !== ':');
+            parts.pop();
+            if (isWindows) {
+                if (parts.length === 1 && parts[0].endsWith(':')) {
+                    newPath = parts[0] + separator;
+                } else if (parts.length === 0) {
+                    // This case is tricky, might need to list drives. For now, go to '/'
+                    newPath = '/';
+                }
+                else {
+                    newPath = parts.join(separator);
+                }
+            } else {
+                newPath = separator + parts.join(separator);
+            }
         } else {
-            newPath = currentPath === '/' ? `/${item.name}` : `${currentPath}/${item.name}`;
+            if (currentPath.endsWith(separator)) {
+                newPath = `${currentPath}${item.name}`;
+            } else {
+                newPath = `${currentPath}${separator}${item.name}`;
+            }
         }
         fetchDirectory(newPath);
     };
@@ -75,49 +101,83 @@ function FileBrowser({ onSelect, onClose }) {
 }
 
 function LibraryManagement() {
+    const [scanStatus, setScanStatus] = useState({ scanning: false, count: 0 });
+    const [message, setMessage] = useState('');
     const [path, setPath] = useState('');
-	const [message, setMessage] = useState('');
-    const [isScanning, setIsScanning] = useState(false);
-	const [showBrowser, setShowBrowser] = useState(false);
+    const [showBrowser, setShowBrowser] = useState(false);
 
-    const startScan = async () => {
+    const adminApiFetch = async (method, endpoint, body = null) => {
+        const token = localStorage.getItem('token');
+        const options = {
+            method,
+            headers: { 'Authorization': `Bearer ${token}` }
+        };
+        if (body) {
+            options.headers['Content-Type'] = 'application/json';
+            options.body = JSON.stringify(body);
+        }
+        return fetch(`/api/v1/admin/${endpoint}`, options);
+    };
+
+    const fetchStatus = useCallback(async (isInitialFetch = false) => {
+        try {
+            const response = await adminApiFetch('GET', 'scan/status');
+            if (!response.ok) throw new Error('Status endpoint failed');
+            const data = await response.json();
+            setScanStatus({ scanning: data.scanning, count: data.count });
+        } catch (e) {
+            if (!isInitialFetch) {
+                setMessage('Error fetching scan status.');
+            } else {
+                // Silently fail on initial fetch, as the server might just be starting up.
+                console.error("Initial scan status fetch failed. This may be normal.", e);
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchStatus(true); // Initial fetch to see if a scan is already running.
+
+        if (scanStatus.scanning) {
+            const intervalId = setInterval(() => fetchStatus(false), 3000);
+            return () => clearInterval(intervalId);
+        }
+    }, [scanStatus.scanning, fetchStatus]);
+
+    const handleStartScan = async () => {
         if (!path) {
             setMessage('Please select a directory to scan first.');
             return;
         }
-		setMessage('');
-        setIsScanning(true);
-		const token = localStorage.getItem('token');
-		try {
-			const response = await fetch('/api/v1/admin/library/scan', {
-				method: 'POST',
-				headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ path })
-			});
-			const data = await response.json();
-			setMessage(response.ok ? data.message : `Error: ${data.error}`);
-		} catch (err) {
-			setMessage('Network error during scan');
-		} finally {
-            setIsScanning(false);
+        setMessage('');
+        try {
+            const response = await adminApiFetch('POST', 'scan/start', { path });
+            if (!response.ok) throw new Error('Failed to start scan');
+            // After starting, immediately fetch the new status
+            await fetchStatus();
+            setMessage('Scan started in the background...');
+        } catch (e) {
+            setMessage('Error starting scan.');
         }
-	};
+    };
 
     return (
         <div className="bg-gray-800 p-6 rounded-lg">
             <h3 className="text-xl font-bold mb-4">Library Management</h3>
             <div className="flex flex-col space-y-4">
                 <div className="flex space-x-2">
-                    <input type="text" value={path} placeholder="Select a library path by browsing..." className="flex-grow p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500" readOnly />
-                    <button onClick={() => setShowBrowser(true)} disabled={isScanning} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:bg-blue-400 disabled:cursor-not-allowed">Browse</button>
+                    <input type="text" value={path} placeholder="Select a folder to scan..." className="flex-grow p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500" readOnly />
+                    <button onClick={() => setShowBrowser(true)} disabled={scanStatus.scanning} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:bg-blue-400 disabled:cursor-not-allowed">Browse</button>
                 </div>
-                <button onClick={startScan} disabled={isScanning} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-green-400 disabled:cursor-not-allowed">
-                    {isScanning ? 'Scanning...' : 'Scan Library'}
+                <button onClick={handleStartScan} disabled={scanStatus.scanning || !path} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-green-400 disabled:cursor-not-allowed disabled:opacity-50">
+                    {scanStatus.scanning ? 'Scan in Progress...' : 'Scan Selected Folder'}
                 </button>
-                {message && <p className="text-sm text-center mt-2 p-3 bg-gray-700 rounded">{message}</p>}
+                {scanStatus.scanning && (
+                    <p className="text-sm text-center mt-2 p-3 bg-gray-700 rounded">
+                        Scanning... {scanStatus.count} new songs found so far.
+                    </p>
+                )}
+                {message && !scanStatus.scanning && <p className="text-sm text-center mt-2 p-3 bg-gray-700 rounded">{message}</p>}
             </div>
             {showBrowser && <FileBrowser
 				onSelect={(selectedPath) => { setPath(selectedPath); setShowBrowser(false); }}

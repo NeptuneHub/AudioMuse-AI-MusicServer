@@ -1,53 +1,48 @@
 // Suggested path: music-server-frontend/src/App.jsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-
-// --- Helper Components ---
-const Modal = ({ children, onClose }) => (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
-        <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md relative">
-            <button onClick={onClose} className="absolute top-2 right-2 text-gray-400 hover:text-white">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-            </button>
-            {children}
-        </div>
-    </div>
-);
-
+import AdminPanel from './components/AdminPanel';
 
 // --- Main App Component ---
 function App() {
-	const [token, setToken] = useState(localStorage.getItem('token'));
-	const [isAdmin, setIsAdmin] = useState(localStorage.getItem('isAdmin') === 'true');
+	// Subsonic auth is session-based; we store credentials for the session.
+	const [credentials, setCredentials] = useState(null);
+	const [isAdmin, setIsAdmin] = useState(false);
 
-	const handleLogin = (newToken, adminStatus) => {
-		localStorage.setItem('token', newToken);
-		localStorage.setItem('isAdmin', adminStatus);
-		setToken(newToken);
-		setIsAdmin(adminStatus);
+	const handleLogin = (creds) => {
+		setCredentials(creds);
+		setIsAdmin(false); // Default to false until we verify
+		localStorage.removeItem('token'); // Clear any old token
+
+		// After successful Subsonic auth, get a JWT for the admin panel
+		// and the user's actual admin status.
+		fetch('/api/v1/user/login', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(creds)
+		}).then(res => {
+			if (res.ok) return res.json();
+			return Promise.reject('Failed to get JWT for admin panel');
+		}).then(data => {
+			if (data.token) {
+				localStorage.setItem('token', data.token);
+				setIsAdmin(data.is_admin);
+			}
+		}).catch(err => {
+			console.error("Could not retrieve JWT for admin panel:", err);
+		});
 	};
 
 	const handleLogout = () => {
-		localStorage.removeItem('token');
-		localStorage.removeItem('isAdmin');
-		setToken(null);
+		localStorage.removeItem('token'); // For admin panel
+		setCredentials(null);
 		setIsAdmin(false);
 	};
-
-	// Check for token on initial load
-	useEffect(() => {
-		const storedToken = localStorage.getItem('token');
-		const storedIsAdmin = localStorage.getItem('isAdmin') === 'true';
-		if (storedToken) {
-			setToken(storedToken);
-			setIsAdmin(storedIsAdmin);
-		}
-	}, []);
 
 
 	return (
 		<div className="bg-gray-900 text-white min-h-screen font-sans">
-			{token ? (
-				<Dashboard onLogout={handleLogout} isAdmin={isAdmin} />
+			{credentials ? (
+				<Dashboard onLogout={handleLogout} isAdmin={isAdmin} credentials={credentials} />
 			) : (
 				<Login onLogin={handleLogin} />
 			)}
@@ -56,6 +51,13 @@ function App() {
 }
 
 
+// --- Subsonic API Helper ---
+const subsonicFetch = async (endpoint, creds, params = {}) => {
+    const allParams = new URLSearchParams({
+        u: creds.username, p: creds.password, v: '1.16.1', c: 'AudioMuse-AI', f: 'json', ...params
+    });
+    return fetch(`/rest/${endpoint}?${allParams.toString()}`);
+};
 // --- Login Component ---
 function Login({ onLogin }) {
 	const [username, setUsername] = useState('');
@@ -66,19 +68,30 @@ function Login({ onLogin }) {
 		e.preventDefault();
 		setError('');
 		try {
-			const response = await fetch('/api/v1/user/login', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ username, password })
-			});
+			// Use getLicense.view for login validation, as it's lightweight and requires auth.
+			// ping.view is now unauthenticated and cannot be used to verify credentials.
+			const response = await subsonicFetch('getLicense.view', { username, password });
+
+			if (!response.ok) { // Check HTTP status first
+				// The server now sends 401 for bad creds
+				const data = await response.json();
+				const subsonicResponse = data['subsonic-response'];
+				setError(subsonicResponse?.error?.message || 'Login failed: Invalid credentials');
+				return;
+			}
+
 			const data = await response.json();
-			if (response.ok) {
-				onLogin(data.token, data.is_admin);
+			const subsonicResponse = data['subsonic-response'];
+
+			if (subsonicResponse.status === 'ok') {
+				// The Subsonic login is successful. Now call the parent handler.
+				onLogin({ username, password });
 			} else {
-				setError(data.error || 'Login failed');
+				// This case might happen if server sends 200 OK but status: "failed"
+				setError(subsonicResponse?.error?.message || 'Login failed');
 			}
 		} catch (err) {
-			setError('Network error');
+			setError('Network error. Could not connect to server.');
 		}
 	};
 
@@ -118,7 +131,7 @@ function Login({ onLogin }) {
 }
 
 // --- Dashboard Component ---
-function Dashboard({ onLogout, isAdmin }) {
+function Dashboard({ onLogout, isAdmin, credentials }) {
     const [navigation, setNavigation] = useState([{ page: 'artists', title: 'Artists' }]);
     const [playQueue, setPlayQueue] = useState([]);
     const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -165,37 +178,44 @@ function Dashboard({ onLogout, isAdmin }) {
                     )}
                     <h2 className="text-3xl font-bold">{currentView.title}</h2>
                 </div>
-				{currentView.page === 'songs' && <Songs filter={currentView.filter} onPlay={handlePlaySong} currentSong={currentSong} />}
-				{currentView.page === 'albums' && <Albums filter={currentView.filter} onNavigate={handleNavigate} />}
-				{currentView.page === 'artists' && <Artists onNavigate={handleNavigate} />}
-				{currentView.page === 'playlists' && <Playlists />}
+				{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} currentSong={currentSong} />}
+				{currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
+				{currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
+				{currentView.page === 'playlists' && <Playlists credentials={credentials} />}
                 {currentView.page === 'admin' && isAdmin && <AdminPanel />}
 			</main>
-            <AudioPlayer song={currentSong} onEnded={handlePlayNext} />
+            <AudioPlayer song={currentSong} onEnded={handlePlayNext} credentials={credentials} />
 		</div>
 	);
 }
 
 // --- Content Components ---
-function Songs({ filter, onPlay, currentSong }) {
+function Songs({ credentials, filter, onPlay, currentSong }) {
     const [songs, setSongs] = useState([]);
 
     useEffect(() => {
         const fetchSongs = async () => {
-            const token = localStorage.getItem('token');
-            let url = '/api/v1/music/songs';
-            if (filter) {
-                const params = new URLSearchParams(filter);
-                url += `?${params.toString()}`;
-            }
-            const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-            if(response.ok) {
+            // In Subsonic, you get songs by getting an album's content.
+            if (!filter || !filter.album) return;
+
+            try {
+                const response = await subsonicFetch('getAlbum.view', credentials, { id: filter.album });
                 const data = await response.json();
-                setSongs(data || []);
+                const directory = data['subsonic-response']?.directory;
+                if (directory && directory.song) {
+                    // Subsonic can return a single object or an array.
+                    const songList = Array.isArray(directory.song) ? directory.song : [directory.song];
+                    setSongs(songList);
+                } else {
+                    setSongs([]);
+                }
+            } catch (e) {
+                console.error("Failed to fetch songs:", e);
+                setSongs([]);
             }
         };
         fetchSongs();
-    }, [filter]);
+    }, [credentials, filter]);
 
     const handlePlayAlbum = () => {
         if (songs.length > 0) {
@@ -245,30 +265,45 @@ function Songs({ filter, onPlay, currentSong }) {
     );
 }
 
-function Albums({ filter, onNavigate }) {
+function Albums({ credentials, filter, onNavigate }) {
     const [albums, setAlbums] = useState([]);
     useEffect(() => {
         const fetchAlbums = async () => {
-            const token = localStorage.getItem('token');
-            let url = '/api/v1/music/albums';
-            if (filter) {
-                url += `?artist=${encodeURIComponent(filter)}`;
-            }
-            const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-            if(response.ok) {
+            try {
+                // Subsonic uses getAlbumList2 for this. The 'type' param tells it how to sort.
+                // We can filter by artist on the frontend if needed, as getAlbumList2 returns all albums.
+                const response = await subsonicFetch('getAlbumList2.view', credentials, { type: 'alphabeticalByName' });
                 const data = await response.json();
-                setAlbums(data || []);
+                const albumList = data['subsonic-response']?.albumList2;
+                if (albumList && albumList.album) {
+                    const allAlbums = Array.isArray(albumList.album) ? albumList.album : [albumList.album];
+                    const filteredAlbums = filter ? allAlbums.filter(a => a.artist === filter) : allAlbums;
+                    setAlbums(filteredAlbums);
+                } else {
+                    setAlbums([]);
+                }
+            } catch (e) {
+                console.error("Failed to fetch albums:", e);
+                setAlbums([]);
             }
         };
         fetchAlbums();
-    }, [filter]);
+    }, [credentials, filter]);
 
     return (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
-            {albums.map((album, index) => (
-                <button key={index} onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { album: album.name, artist: album.artist } })} className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
-                    <div className="w-full h-auto bg-gray-700 rounded aspect-square flex items-center justify-center mb-2">
-                        <svg className="w-1/2 h-1/2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 6l12-3"></path></svg>
+            {albums.map((album) => (
+                <button key={album.id} onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { album: album.name, artist: album.artist } })} className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
+                    <div className="w-full bg-gray-700 rounded aspect-square flex items-center justify-center mb-2 overflow-hidden">
+                        {album.coverArt ? (
+                            <img 
+                                src={`/rest/getCoverArt.view?id=${album.coverArt}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI`}
+                                alt={album.name} 
+                                className="w-full h-full object-cover"
+                            />
+                        ) : (
+                            <svg className="w-1/2 h-1/2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 6l12-3"></path></svg>
+                        )}
                     </div>
                     <p className="font-bold text-white truncate">{album.name}</p>
                     <p className="text-sm text-gray-400 truncate">{album.artist}</p>
@@ -278,26 +313,34 @@ function Albums({ filter, onNavigate }) {
     );
 }
 
-function Artists({ onNavigate }) {
+function Artists({ credentials, onNavigate }) {
     const [artists, setArtists] = useState([]);
      useEffect(() => {
         const fetchArtists = async () => {
-            const token = localStorage.getItem('token');
-            const response = await fetch('/api/v1/music/artists', { headers: { 'Authorization': `Bearer ${token}` } });
-            if(response.ok) {
+            try {
+                const response = await subsonicFetch('getArtists.view', credentials);
                 const data = await response.json();
-                setArtists(data || []);
+                const artistsContainer = data['subsonic-response']?.artists;
+                if (artistsContainer && artistsContainer.artist) {
+                    const artistList = Array.isArray(artistsContainer.artist) ? artistsContainer.artist : [artistsContainer.artist];
+                    setArtists(artistList);
+                } else {
+                    setArtists([]);
+                }
+            } catch(e) {
+                console.error("Failed to fetch artists:", e);
+                setArtists([]);
             }
         };
         fetchArtists();
-    }, []);
+    }, [credentials]);
 
     return (
         <ul className="space-y-2">
-            {artists.map((artist, index) => (
-                <li key={index}>
-                    <button onClick={() => onNavigate({ page: 'albums', title: artist, filter: artist })} className="w-full text-left bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-colors">
-                        {artist}
+            {artists.map((artist) => (
+                <li key={artist.id}>
+                    <button onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: artist.name })} className="w-full text-left bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-colors">
+                        {artist.name}
                     </button>
                 </li>
             ))}
@@ -309,9 +352,8 @@ function Playlists() {
 	return (<p>Playlist functionality is not yet implemented.</p>);
 }
 
-function AudioPlayer({ song, onEnded }) {
+function AudioPlayer({ song, onEnded, credentials }) {
     const [audioSrc, setAudioSrc] = useState(null);
-    const token = localStorage.getItem('token');
 
     useEffect(() => {
         if (!song) {
@@ -322,9 +364,7 @@ function AudioPlayer({ song, onEnded }) {
         let objectUrl;
         const fetchAndSetAudio = async () => {
             try {
-                const response = await fetch(`/api/v1/music/stream/${song.id}`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
+                const response = await subsonicFetch('stream.view', credentials, { id: song.id });
                 if (!response.ok) throw new Error('Failed to fetch song');
                 const blob = await response.blob();
                 objectUrl = URL.createObjectURL(blob);
@@ -339,7 +379,7 @@ function AudioPlayer({ song, onEnded }) {
         return () => { // Cleanup function
             if (objectUrl) URL.revokeObjectURL(objectUrl);
         };
-    }, [song, token]);
+    }, [song, credentials]);
 
     if (!song) {
         return (
@@ -362,330 +402,5 @@ function AudioPlayer({ song, onEnded }) {
     );
 }
 
-
-// --- File Browser Component ---
-function FileBrowser({ onSelect, onClose }) {
-    const [currentPath, setCurrentPath] = useState('/');
-    const [items, setItems] = useState([]);
-    const [error, setError] = useState('');
-
-    const fetchDirectory = useCallback(async (path) => {
-        setError('');
-        const token = localStorage.getItem('token');
-        try {
-            const response = await fetch(`/api/v1/admin/browse?path=${encodeURIComponent(path)}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (!response.ok) {
-                const data = await response.json();
-                throw new Error(data.error || `Server error: ${response.status}`);
-            }
-            const data = await response.json();
-            let dirItems = (data.items || []).filter(i => i.type === 'dir');
-            if (path !== '/' && !dirItems.some(i => i.name === '..')) {
-                dirItems.unshift({ name: '..', type: 'dir' });
-            }
-            setItems(dirItems);
-            setCurrentPath(data.path || path);
-        } catch (err) {
-            setError(err.message);
-            setItems([]);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchDirectory('/');
-    }, [fetchDirectory]);
-
-    const handleItemClick = (item) => {
-        let newPath;
-        if (item.name === '..') {
-            if (currentPath === '/') return;
-            newPath = currentPath.split('/').slice(0, -1).join('/') || '/';
-        } else {
-            newPath = currentPath === '/' ? `/${item.name}` : `${currentPath}/${item.name}`;
-        }
-        fetchDirectory(newPath);
-    };
-
-    return (
-        <Modal onClose={onClose}>
-             <h3 className="text-xl font-bold mb-4 text-teal-400">Browse For Folder</h3>
-             <div className="bg-gray-900 p-2 rounded mb-4 font-mono text-sm">Path: {currentPath}</div>
-             {error && <p className="text-red-500 mb-4">Error: {error}</p>}
-             <ul className="h-64 overflow-y-auto border border-gray-700 rounded p-2 mb-4">
-                 {items.map((item, index) => (
-                     <li key={index} onClick={() => handleItemClick(item)} className="p-2 hover:bg-gray-700 rounded cursor-pointer flex items-center"><svg className="w-5 h-5 mr-2 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>{item.name}</li>
-                 ))}
-             </ul>
-             <div className="flex justify-end space-x-4">
-                 <button onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
-                 <button onClick={() => onSelect(currentPath)} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Select Folder</button>
-             </div>
-        </Modal>
-    );
-}
-
-// --- Admin Panel Component ---
-function AdminPanel() {
-	return (
-		<div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <LibraryManagement />
-            <UserManagement />
-        </div>
-	);
-}
-
-function LibraryManagement() {
-    const [path, setPath] = useState('');
-	const [message, setMessage] = useState('');
-    const [isScanning, setIsScanning] = useState(false);
-	const [showBrowser, setShowBrowser] = useState(false);
-
-    const startScan = async () => {
-        if (!path) {
-            setMessage('Please select a directory to scan first.');
-            return;
-        }
-		setMessage('');
-        setIsScanning(true);
-		const token = localStorage.getItem('token');
-		try {
-			const response = await fetch('/api/v1/admin/library/scan', {
-				method: 'POST',
-				headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ path })
-			});
-			const data = await response.json();
-			setMessage(response.ok ? data.message : `Error: ${data.error}`);
-		} catch (err) {
-			setMessage('Network error during scan');
-		} finally {
-            setIsScanning(false);
-        }
-	};
-
-    return (
-        <div className="bg-gray-800 p-6 rounded-lg">
-            <h3 className="text-xl font-bold mb-4">Library Management</h3>
-            <div className="flex flex-col space-y-4">
-                <div className="flex space-x-2">
-                    <input type="text" value={path} placeholder="Select a library path by browsing..." className="flex-grow p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500" readOnly />
-                    <button onClick={() => setShowBrowser(true)} disabled={isScanning} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:bg-blue-400 disabled:cursor-not-allowed">Browse</button>
-                </div>
-                <button onClick={startScan} disabled={isScanning} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-green-400 disabled:cursor-not-allowed">
-                    {isScanning ? 'Scanning...' : 'Scan Library'}
-                </button>
-                {message && <p className="text-sm text-center mt-2 p-3 bg-gray-700 rounded">{message}</p>}
-            </div>
-            {showBrowser && <FileBrowser
-				onSelect={(selectedPath) => { setPath(selectedPath); setShowBrowser(false); }}
-				onClose={() => setShowBrowser(false)}
-			/>}
-        </div>
-    );
-}
-
-function UserManagement() {
-	const [users, setUsers] = useState([]);
-	const [editingUser, setEditingUser] = useState(null);
-    const [isCreatingUser, setIsCreatingUser] = useState(false);
-	const [error, setError] = useState('');
-
-	const fetchUsers = useCallback(async () => {
-		const token = localStorage.getItem('token');
-		try {
-			const response = await fetch('/api/v1/admin/users', {
-				headers: { 'Authorization': `Bearer ${token}` }
-			});
-			if (response.ok) {
-				const data = await response.json();
-				setUsers(data || []);
-			} else {
-				const data = await response.json();
-				setError(data.error || 'Failed to fetch users');
-			}
-		} catch (err) {
-			setError('Network error');
-		}
-	}, []);
-
-	useEffect(() => {
-		fetchUsers();
-	}, [fetchUsers]);
-
-    const handleCreate = async (userData) => {
-        const token = localStorage.getItem('token');
-        try {
-            const response = await fetch('/api/v1/admin/users', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify(userData)
-            });
-            if (response.ok) {
-                setIsCreatingUser(false);
-                fetchUsers();
-            } else {
-                const data = await response.json();
-                alert(`Error: ${data.error}`);
-            }
-        } catch (err) {
-            alert('Network Error');
-        }
-    };
-
-	const handlePasswordChange = async (userId, password) => {
-        const token = localStorage.getItem('token');
-        try {
-            const response = await fetch(`/api/v1/admin/users/${userId}/password`, {
-                method: 'PUT',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password })
-            });
-            if (response.ok) {
-                setEditingUser(null);
-            } else {
-                 const data = await response.json();
-                alert(`Error: ${data.error}`);
-            }
-        } catch (err) {
-            alert('Network Error');
-        }
-    };
-
-	const handleDelete = async (userId) => {
-		if (window.confirm('Are you sure you want to delete this user?')) {
-			const token = localStorage.getItem('token');
-			try {
-				const response = await fetch(`/api/v1/admin/users/${userId}`, {
-					method: 'DELETE',
-					headers: { 'Authorization': `Bearer ${token}` }
-				});
-				if(response.ok) {
-					fetchUsers();
-				} else {
-                    const data = await response.json();
-                    alert(`Error: ${data.error}`);
-                }
-			} catch (err) {
-                alert('Network Error');
-			}
-		}
-	};
-
-	return (
-		<div className="bg-gray-800 p-6 rounded-lg">
-			<div className="flex justify-between items-center mb-4">
-				<h3 className="text-xl font-bold">User Management</h3>
-				<button onClick={() => setIsCreatingUser(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded">Create User</button>
-			</div>
-			{error && <p className="text-red-500">{error}</p>}
-			<div className="overflow-x-auto">
-				<table className="min-w-full text-sm text-left text-gray-400">
-					<thead className="text-xs text-gray-300 uppercase bg-gray-700">
-						<tr>
-							<th scope="col" className="px-6 py-3">Username</th>
-							<th scope="col" className="px-6 py-3">Admin</th>
-							<th scope="col" className="px-6 py-3 text-right">Actions</th>
-						</tr>
-					</thead>
-					<tbody>
-						{users.map(user => (
-							<tr key={user.id} className="bg-gray-800 border-b border-gray-700 hover:bg-gray-600">
-								<td className="px-6 py-4 font-medium text-white">{user.username}</td>
-								<td className="px-6 py-4">{user.is_admin ? 'Yes' : 'No'}</td>
-								<td className="px-6 py-4 text-right space-x-2">
-									<button onClick={() => setEditingUser(user)} className="font-medium text-blue-500 hover:underline">Edit Password</button>
-									<button onClick={() => handleDelete(user.id)} className="font-medium text-red-500 hover:underline">Delete</button>
-								</td>
-							</tr>
-						))}
-					</tbody>
-				</table>
-			</div>
-            {isCreatingUser && (
-                <UserFormModal
-                    onClose={() => setIsCreatingUser(false)}
-                    onSubmit={handleCreate}
-                    title="Create New User"
-                />
-            )}
-			{editingUser && (
-				<PasswordEditModal
-					user={editingUser}
-					onClose={() => setEditingUser(null)}
-					onSubmit={handlePasswordChange}
-				/>
-			)}
-		</div>
-	);
-}
-
-const UserFormModal = ({ onClose, onSubmit, title }) => {
-    const [username, setUsername] = useState('');
-    const [password, setPassword] = useState('');
-    const [isAdmin, setIsAdmin] = useState(false);
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        onSubmit({ username, password, is_admin: isAdmin });
-    };
-
-    return (
-        <Modal onClose={onClose}>
-            <h3 className="text-xl font-bold mb-4">{title}</h3>
-            <form onSubmit={handleSubmit}>
-                <div className="mb-4">
-                    <label className="block text-gray-400 mb-2">Username</label>
-                    <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full p-2 bg-gray-700 rounded" required/>
-                </div>
-                <div className="mb-4">
-                    <label className="block text-gray-400 mb-2">Password</label>
-                    <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-2 bg-gray-700 rounded" required />
-                </div>
-                <div className="mb-4 flex items-center">
-                    <input type="checkbox" checked={isAdmin} onChange={e => setIsAdmin(e.target.checked)} id="isAdminCheck" className="w-4 h-4 text-teal-600 bg-gray-700 border-gray-600 rounded focus:ring-teal-500" />
-                    <label htmlFor="isAdminCheck" className="ml-2 text-sm font-medium text-gray-300">Is Admin?</label>
-                </div>
-                <div className="flex justify-end space-x-4">
-                    <button type="button" onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
-                    <button type="submit" className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Save</button>
-                </div>
-            </form>
-        </Modal>
-    )
-}
-
-const PasswordEditModal = ({ user, onClose, onSubmit }) => {
-	const [password, setPassword] = useState('');
-	const handleSubmit = (e) => {
-		e.preventDefault();
-		onSubmit(user.id, password);
-	};
-	return (
-		<Modal onClose={onClose}>
-			<h3 className="text-xl font-bold mb-4">Edit Password for {user.username}</h3>
-			<form onSubmit={handleSubmit}>
-				<div className="mb-4">
-					<label className="block text-gray-400 mb-2">New Password</label>
-					<input
-						type="password"
-						value={password}
-						onChange={(e) => setPassword(e.target.value)}
-						className="w-full p-2 bg-gray-700 rounded"
-						required
-					/>
-				</div>
-                <div className="flex justify-end space-x-4">
-                    <button type="button" onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
-                    <button type="submit" className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Update Password</button>
-                </div>
-			</form>
-		</Modal>
-	);
-};
 
 export default App;

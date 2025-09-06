@@ -2,13 +2,14 @@
 package main
 
 import (
-	"fmt"
+	"database/sql"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dhowden/tag"
 	"github.com/gin-gonic/gin"
@@ -17,28 +18,21 @@ import (
 
 // --- Admin Handlers (JSON API) ---
 
-func scanLibrary(c *gin.Context) {
-	var req struct {
-		Path string `json:"path"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path provided"})
+// scanLibrary is a background worker function that scans the library path.
+func scanLibrary(scanPath string) {
+	// 1. Set scan status to 'scanning' and reset counters
+	_, err := db.Exec("UPDATE scan_status SET is_scanning = 1, songs_added = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+	if err != nil {
+		log.Printf("Error starting scan in DB: %v", err)
 		return
 	}
 
-	if req.Path == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Path cannot be empty"})
-		return
-	}
+	log.Printf("Background scan started for path: %s", scanPath)
+	var songsAdded int64
 
-	log.Printf("Starting library scan for path: %s", req.Path)
-
-	var songsAdded, filesScanned, errorsEncountered int
-
-	err := filepath.WalkDir(req.Path, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(scanPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			log.Printf("Error accessing path %q: %v\n", path, err)
-			errorsEncountered++
 			return nil
 		}
 
@@ -47,13 +41,9 @@ func scanLibrary(c *gin.Context) {
 			supportedExts := map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".ogg": true}
 
 			if supportedExts[ext] {
-				filesScanned++
-				log.Printf("-> Found audio file: %s", path)
-
 				file, err := os.Open(path)
 				if err != nil {
 					log.Printf("Error opening file %s: %v", path, err)
-					errorsEncountered++
 					return nil
 				}
 				defer file.Close()
@@ -61,7 +51,6 @@ func scanLibrary(c *gin.Context) {
 				meta, err := tag.ReadFrom(file)
 				if err != nil {
 					log.Printf("Error reading tags from %s: %v", path, err)
-					errorsEncountered++
 					return nil
 				}
 
@@ -69,43 +58,76 @@ func scanLibrary(c *gin.Context) {
 					meta.Title(), meta.Artist(), meta.Album(), path)
 				if err != nil {
 					log.Printf("Error inserting song from %s into DB: %v", path, err)
-					errorsEncountered++
 					return nil
 				}
 
 				rowsAffected, _ := res.RowsAffected()
 				if rowsAffected > 0 {
 					songsAdded++
-					log.Printf("   Added to DB: %s - %s", meta.Artist(), meta.Title())
+					// Update DB with new count
+					db.Exec("UPDATE scan_status SET songs_added = ? WHERE id = 1", songsAdded)
 				}
 			}
 		}
 		return nil
 	})
 
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "An unexpected error occurred during the scan."})
+	// 3. Set scan status to 'finished'
+	db.Exec("UPDATE scan_status SET is_scanning = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+	log.Printf("Background scan finished. Added %d new songs.", songsAdded)
+}
+
+func startAdminScan(c *gin.Context) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "A valid path is required."})
 		return
 	}
 
-	responseMessage := fmt.Sprintf("Scan complete. Scanned %d audio files, added %d new songs. Encountered %d errors.", filesScanned, songsAdded, errorsEncountered)
-	log.Println(responseMessage)
-	c.JSON(http.StatusOK, gin.H{"message": responseMessage})
+	var isScanning bool
+	err := db.QueryRow("SELECT is_scanning FROM scan_status WHERE id = 1").Scan(&isScanning)
+	if err != nil && err != sql.ErrNoRows {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error checking scan status."})
+		return
+	}
+
+	if !isScanning {
+		log.Println("Starting new library scan in background from Admin Panel.")
+		go scanLibrary(req.Path)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Scan initiated."})
+}
+
+func getAdminScanStatus(c *gin.Context) {
+	var isScanning bool
+	var songsAdded int64
+	err := db.QueryRow("SELECT is_scanning, songs_added FROM scan_status WHERE id = 1").Scan(&isScanning, &songsAdded)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not retrieve scan status."})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"scanning": isScanning, "count": songsAdded})
 }
 
 func browseFiles(c *gin.Context) {
-	browseRoot := "/"
-	userPath := c.Query("path")
-
-	absPath, err := filepath.Abs(filepath.Join(browseRoot, userPath))
-	if err != nil || !filepath.HasPrefix(absPath, browseRoot) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or forbidden path"})
-		return
+	// Security: In a real multi-user or internet-facing app, this should be heavily restricted.
+	// For this self-hosted app, we allow browsing from the filesystem root.
+	path := c.DefaultQuery("path", "/")
+	if path == "" {
+		path = "/"
 	}
 
-	dirEntries, err := os.ReadDir(absPath)
+	// On Windows, a path like "C:" needs to be "C:\" to be read.
+	if len(path) == 2 && path[1] == ':' {
+		path += "\\"
+	}
+
+	dirEntries, err := os.ReadDir(path)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not read directory"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not read directory: " + err.Error()})
 		return
 	}
 
@@ -116,13 +138,14 @@ func browseFiles(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"path": absPath, "items": items})
+	c.JSON(http.StatusOK, gin.H{"path": path, "items": items})
 }
 
 func getUsers(c *gin.Context) {
 	rows, err := db.Query("SELECT id, username, is_admin FROM users ORDER BY username")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query users"})
+		log.Printf("Error querying users: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error while fetching users."})
 		return
 	}
 	defer rows.Close()
@@ -130,11 +153,18 @@ func getUsers(c *gin.Context) {
 	var users []User
 	for rows.Next() {
 		var user User
+		// We explicitly scan into fields, ensuring password hashes are never sent.
 		if err := rows.Scan(&user.ID, &user.Username, &user.IsAdmin); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan user row"})
+			log.Printf("Error scanning user row: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process user data."})
 			return
 		}
 		users = append(users, user)
+	}
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating user rows: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error while processing users."})
+		return
 	}
 	c.JSON(http.StatusOK, users)
 }
@@ -157,13 +187,13 @@ func createUser(c *gin.Context) {
 		return
 	}
 
-	_, err = db.Exec("INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)", user.Username, hashedPassword, user.IsAdmin)
+	_, err = db.Exec("INSERT INTO users (username, password_hash, password_plain, is_admin) VALUES (?, ?, ?, ?)", user.Username, hashedPassword, user.Password, user.IsAdmin)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create user, username might already exist"})
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully"})
+	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully."})
 }
 
 func updateUserPassword(c *gin.Context) {
@@ -188,7 +218,7 @@ func updateUserPassword(c *gin.Context) {
 		return
 	}
 
-	res, err := db.Exec("UPDATE users SET password_hash = ? WHERE id = ?", hashedPassword, userID)
+	res, err := db.Exec("UPDATE users SET password_hash = ?, password_plain = ? WHERE id = ?", hashedPassword, req.Password, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
 		return
@@ -200,7 +230,7 @@ func updateUserPassword(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Password updated successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Password updated successfully."})
 }
 
 func deleteUser(c *gin.Context) {
@@ -255,5 +285,5 @@ func deleteUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully."})
 }
