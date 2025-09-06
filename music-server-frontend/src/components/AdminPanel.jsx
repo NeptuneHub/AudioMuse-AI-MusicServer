@@ -21,6 +21,7 @@ function FileBrowser({ onSelect, onClose }) {
         setError('');
         const token = localStorage.getItem('token');
         try {
+            // This is a UI helper and remains a non-subsonic endpoint.
             const response = await fetch(`/api/v1/admin/browse?path=${encodeURIComponent(path)}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -171,6 +172,25 @@ function LibraryManagement() {
         }
     };
 
+    const handleCancelScan = async () => {
+        setMessage('Cancelling scan...');
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch('/api/v1/admin/scan/cancel', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.error || 'Failed to cancel scan');
+            }
+            setMessage('Cancellation signal sent. Scan will stop shortly.');
+            await fetchStatus(); // Fetch status immediately for a quicker UI update
+        } catch (e) {
+            setMessage(e.message);
+        }
+    };
+
     return (
         <div className="bg-gray-800 p-6 rounded-lg">
             <h3 className="text-xl font-bold mb-4">Library Management</h3>
@@ -179,9 +199,16 @@ function LibraryManagement() {
                     <input type="text" value={path} placeholder="Select a folder to scan..." className="flex-grow p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500" readOnly />
                     <button onClick={() => setShowBrowser(true)} disabled={scanStatus.scanning} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:bg-blue-400 disabled:cursor-not-allowed">Browse</button>
                 </div>
-                <button onClick={handleStartScan} disabled={scanStatus.scanning || !path} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-green-400 disabled:cursor-not-allowed disabled:opacity-50">
-                    {scanStatus.scanning ? 'Scan in Progress...' : 'Scan Selected Folder'}
-                </button>
+                <div className="flex space-x-4">
+                    <button onClick={handleStartScan} disabled={scanStatus.scanning || !path} className="flex-grow bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-green-400 disabled:cursor-not-allowed disabled:opacity-50">
+                        {scanStatus.scanning ? 'Scan in Progress...' : 'Scan Selected Folder'}
+                    </button>
+                    {scanStatus.scanning && (
+                        <button onClick={handleCancelScan} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
+                            Cancel Scan
+                        </button>
+                    )}
+                </div>
                 {scanStatus.scanning && (
                     <p className="text-sm text-center mt-2 p-3 bg-gray-700 rounded">
                         Scanning... {scanStatus.count} new songs found so far.

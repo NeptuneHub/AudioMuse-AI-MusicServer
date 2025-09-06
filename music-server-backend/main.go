@@ -6,12 +6,14 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 var db *sql.DB
+var isScanCancelled atomic.Bool // Global flag to signal scan cancellation.
 
 func main() {
 	var err error
@@ -23,6 +25,12 @@ func main() {
 	defer db.Close()
 
 	initDB()
+
+	// On startup, always reset scan status to ensure a clean state.
+	// This prevents the UI from getting stuck if the server crashed mid-scan.
+	if _, err := db.Exec("UPDATE scan_status SET is_scanning = 0 WHERE id = 1"); err != nil {
+		log.Fatalf("Failed to reset scan status on startup: %v", err)
+	}
 
 	r := gin.Default()
 
@@ -67,6 +75,8 @@ func main() {
 		{
 			// Filesystem browsing is a UI helper not in the Subsonic spec.
 			adminRoutes.GET("/browse", browseFiles)
+			// Add a non-standard endpoint to cancel a scan from the UI.
+			adminRoutes.POST("/scan/cancel", cancelAdminScan)
 		}
 	}
 
@@ -86,6 +96,7 @@ func adminOnly() gin.HandlerFunc {
 }
 
 func initDB() {
+	// ... existing initDB code ...
 	// Create users table
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
