@@ -63,7 +63,6 @@ function FileBrowser({ onSelect, onClose }) {
                 if (parts.length === 1 && parts[0].endsWith(':')) {
                     newPath = parts[0] + separator;
                 } else if (parts.length === 0) {
-                    // This case is tricky, might need to list drives. For now, go to '/'
                     newPath = '/';
                 }
                 else {
@@ -106,42 +105,55 @@ function LibraryManagement() {
     const [path, setPath] = useState('');
     const [showBrowser, setShowBrowser] = useState(false);
 
-    const adminApiFetch = async (method, endpoint, body = null) => {
+    const subsonicApiRequest = useCallback(async (method, endpoint, body = null) => {
         const token = localStorage.getItem('token');
         const options = {
             method,
             headers: { 'Authorization': `Bearer ${token}` }
         };
+
         if (body) {
             options.headers['Content-Type'] = 'application/json';
             options.body = JSON.stringify(body);
         }
-        return fetch(`/api/v1/admin/${endpoint}`, options);
-    };
+        
+        const response = await fetch(`/rest/${endpoint}?f=json`, options);
+        const data = await response.json();
+
+        if (!response.ok || data?.["subsonic-response"]?.status === 'failed') {
+            const error = data?.["subsonic-response"]?.error;
+            throw new Error(error?.message || `Server error: ${response.status}`);
+        }
+        
+        return data["subsonic-response"];
+    }, []);
 
     const fetchStatus = useCallback(async (isInitialFetch = false) => {
         try {
-            const response = await adminApiFetch('GET', 'scan/status');
-            if (!response.ok) throw new Error('Status endpoint failed');
-            const data = await response.json();
-            setScanStatus({ scanning: data.scanning, count: data.count });
+            const data = await subsonicApiRequest('GET', 'getScanStatus.view');
+            if (data && data.scanStatus) {
+                setScanStatus({ scanning: data.scanStatus.scanning, count: data.scanStatus.count });
+            } else {
+                 throw new Error('Invalid response from server.');
+            }
         } catch (e) {
             if (!isInitialFetch) {
-                setMessage('Error fetching scan status.');
+                setMessage(`Error fetching scan status: ${e.message}`);
             } else {
-                // Silently fail on initial fetch, as the server might just be starting up.
                 console.error("Initial scan status fetch failed. This may be normal.", e);
             }
         }
-    }, []);
+    }, [subsonicApiRequest]);
 
     useEffect(() => {
-        fetchStatus(true); // Initial fetch to see if a scan is already running.
-
+        fetchStatus(true);
+        let intervalId = null;
         if (scanStatus.scanning) {
-            const intervalId = setInterval(() => fetchStatus(false), 3000);
-            return () => clearInterval(intervalId);
+            intervalId = setInterval(() => fetchStatus(false), 3000);
         }
+        return () => {
+            if (intervalId) clearInterval(intervalId);
+        };
     }, [scanStatus.scanning, fetchStatus]);
 
     const handleStartScan = async () => {
@@ -150,14 +162,12 @@ function LibraryManagement() {
             return;
         }
         setMessage('');
+        setScanStatus(prev => ({ ...prev, scanning: true, count: 0 }));
         try {
-            const response = await adminApiFetch('POST', 'scan/start', { path });
-            if (!response.ok) throw new Error('Failed to start scan');
-            // After starting, immediately fetch the new status
-            await fetchStatus();
-            setMessage('Scan started in the background...');
+            await subsonicApiRequest('POST', 'startScan.view', { path });
         } catch (e) {
-            setMessage('Error starting scan.');
+            setScanStatus(prev => ({ ...prev, scanning: false }));
+            setMessage(e.message || 'Error starting scan.');
         }
     };
 
@@ -194,23 +204,33 @@ function UserManagement() {
 	const [error, setError] = useState('');
     const [successMessage, setSuccessMessage] = useState('');
 
+    const subsonicApiRequest = useCallback(async (endpoint, params = {}) => {
+        const token = localStorage.getItem('token');
+        const query = new URLSearchParams(params);
+        query.append('f', 'json');
+
+        const response = await fetch(`/rest/${endpoint}?${query.toString()}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        const subsonicResponse = data["subsonic-response"];
+
+        if (!response.ok || subsonicResponse.status === 'failed') {
+            const error = subsonicResponse?.error;
+            throw new Error(error?.message || `Server error: ${response.status}`);
+        }
+        return subsonicResponse;
+    }, []);
+
 	const fetchUsers = useCallback(async () => {
-		const token = localStorage.getItem('token');
 		try {
-			const response = await fetch('/api/v1/admin/users', {
-				headers: { 'Authorization': `Bearer ${token}` }
-			});
-			if (response.ok) {
-				const data = await response.json();
-				setUsers(data || []);
-			} else {
-				const data = await response.json();
-				setError(data.error || 'Failed to fetch users');
-			}
+			const data = await subsonicApiRequest('getUsers.view');
+			const userList = data?.users?.user || [];
+			setUsers(userList.map(u => ({ username: u.username, is_admin: u.adminRole })));
 		} catch (err) {
-			setError('Network error');
+			setError(err.message || 'Failed to fetch users');
 		}
-	}, []);
+	}, [subsonicApiRequest]);
 
 	useEffect(() => {
 		fetchUsers();
@@ -219,67 +239,42 @@ function UserManagement() {
     const handleCreate = async (userData) => {
         setError('');
         setSuccessMessage('');
-        const token = localStorage.getItem('token');
         try {
-            const response = await fetch('/api/v1/admin/users', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify(userData)
+            await subsonicApiRequest('createUser.view', {
+                username: userData.username,
+                password: userData.password,
+                adminRole: userData.is_admin,
             });
-            if (response.ok) {
-                setIsCreatingUser(false);
-                setSuccessMessage(`User ${userData.username} created successfully.`);
-                fetchUsers();
-            } else {
-                const data = await response.json();
-                setError(data.error || 'Failed to create user.');
-            }
+            setIsCreatingUser(false);
+            setSuccessMessage(`User ${userData.username} created successfully.`);
+            fetchUsers();
         } catch (err) {
-            setError('Network error while creating user.');
+            setError(err.message || 'Failed to create user.');
         }
     };
 
-	const handlePasswordChange = async (userId, password) => {
+	const handlePasswordChange = async (username, password) => {
         setError('');
         setSuccessMessage('');
-        const token = localStorage.getItem('token');
         try {
-            const response = await fetch(`/api/v1/admin/users/${userId}/password`, {
-                method: 'PUT',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password })
-            });
-            if (response.ok) {
-                setEditingUser(null);
-                setSuccessMessage('Password updated successfully.');
-            } else {
-                 const data = await response.json();
-                setError(data.error || 'Failed to update password.');
-            }
+            await subsonicApiRequest('updateUser.view', { username, password });
+            setEditingUser(null);
+            setSuccessMessage('Password updated successfully.');
         } catch (err) {
-            setError('Network error while updating password.');
+            setError(err.message || 'Failed to update password.');
         }
     };
 
-	const handleDelete = async (userId) => {
+	const handleDelete = async (username) => {
         setError('');
         setSuccessMessage('');
-		if (window.confirm('Are you sure you want to delete this user?')) {
-			const token = localStorage.getItem('token');
+		if (window.confirm(`Are you sure you want to delete user: ${username}?`)) {
 			try {
-				const response = await fetch(`/api/v1/admin/users/${userId}`, {
-					method: 'DELETE',
-					headers: { 'Authorization': `Bearer ${token}` }
-				});
-				if(response.ok) {
-                    setSuccessMessage('User deleted successfully.');
-					fetchUsers();
-				} else {
-                    const data = await response.json();
-                    setError(data.error || 'Failed to delete user.');
-                }
+                await subsonicApiRequest('deleteUser.view', { username });
+				setSuccessMessage('User deleted successfully.');
+				fetchUsers();
 			} catch (err) {
-                setError('Network error while deleting user.');
+                setError(err.message || 'Failed to delete user.');
 			}
 		}
 	};
@@ -303,12 +298,12 @@ function UserManagement() {
 					</thead>
 					<tbody>
 						{users.map(user => (
-							<tr key={user.id} className="bg-gray-800 border-b border-gray-700 hover:bg-gray-600">
+							<tr key={user.username} className="bg-gray-800 border-b border-gray-700 hover:bg-gray-600">
 								<td className="px-6 py-4 font-medium text-white">{user.username}</td>
 								<td className="px-6 py-4">{user.is_admin ? 'Yes' : 'No'}</td>
 								<td className="px-6 py-4 text-right space-x-2">
 									<button onClick={() => setEditingUser(user)} className="font-medium text-blue-500 hover:underline">Edit Password</button>
-									<button onClick={() => handleDelete(user.id)} className="font-medium text-red-500 hover:underline">Delete</button>
+									<button onClick={() => handleDelete(user.username)} className="font-medium text-red-500 hover:underline">Delete</button>
 								</td>
 							</tr>
 						))}
@@ -365,14 +360,14 @@ const UserFormModal = ({ onClose, onSubmit, title }) => {
                 </div>
             </form>
         </Modal>
-    )
-}
+    );
+};
 
 const PasswordEditModal = ({ user, onClose, onSubmit }) => {
 	const [password, setPassword] = useState('');
 	const handleSubmit = (e) => {
 		e.preventDefault();
-		onSubmit(user.id, password);
+		onSubmit(user.username, password);
 	};
 	return (
 		<Modal onClose={onClose}>
@@ -397,7 +392,6 @@ const PasswordEditModal = ({ user, onClose, onSubmit }) => {
 	);
 };
 
-
 export default function AdminPanel() {
 	return (
 		<div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -406,3 +400,4 @@ export default function AdminPanel() {
         </div>
 	);
 }
+

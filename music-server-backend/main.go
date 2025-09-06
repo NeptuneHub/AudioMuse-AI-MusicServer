@@ -35,40 +35,38 @@ func main() {
 		rest.GET("/getArtists.view", subsonicGetArtists)
 		rest.GET("/getAlbumList2.view", subsonicGetAlbumList2)
 		rest.GET("/getPlaylists.view", subsonicGetPlaylists)
-		// Add stubs for other common endpoints to avoid 404s
-		rest.GET("/getAlbum.view", subsonicGetAlbum) // To get songs in an album
+		rest.GET("/getAlbum.view", subsonicGetAlbum)
 		rest.GET("/search2.view", subsonicSearch)
 		rest.GET("/search3.view", subsonicSearch)
 		rest.GET("/getRandomSongs.view", subsonicGetRandomSongs)
 		rest.GET("/getCoverArt.view", subsonicGetCoverArt)
 		rest.GET("/tokenInfo.view", subsonicTokenInfo)
-		rest.GET("/startScan.view", subsonicStartScan)
+		rest.Any("/startScan.view", subsonicStartScan)
 		rest.GET("/getScanStatus.view", subsonicGetScanStatus)
+
+		// User Management Endpoints (OpenSubsonic Standard)
+		rest.GET("/getUsers.view", subsonicGetUsers)
+		rest.GET("/createUser.view", subsonicCreateUser)
+		rest.GET("/updateUser.view", subsonicUpdateUser)
+		rest.GET("/deleteUser.view", subsonicDeleteUser)
+		rest.GET("/changePassword.view", subsonicChangePassword)
 	}
 
 	// JSON API routes for the web UI
 	v1 := r.Group("/api/v1")
 	{
-		// This route is a bridge for the web UI to get a JWT after a successful
-		// Subsonic password authentication. It's not used by external clients.
+		// This login endpoint remains as a bridge to get a JWT for the UI.
 		userRoutes := v1.Group("/user")
 		{
 			userRoutes.POST("/login", loginUser)
 		}
-		// Admin routes
+
+		// Admin routes - only non-Subsonic helpers remain
 		adminRoutes := v1.Group("/admin")
 		adminRoutes.Use(AuthMiddleware(), adminOnly())
 		{
-			// Filesystem browsing for library selection
+			// Filesystem browsing is a UI helper not in the Subsonic spec.
 			adminRoutes.GET("/browse", browseFiles)
-			// Library Scanning for Web UI
-			adminRoutes.POST("/scan/start", startAdminScan)
-			adminRoutes.GET("/scan/status", getAdminScanStatus)
-			// User Management Routes
-			adminRoutes.GET("/users", getUsers)
-			adminRoutes.POST("/users", createUser)
-			adminRoutes.PUT("/users/:id/password", updateUserPassword)
-			adminRoutes.DELETE("/users/:id", deleteUser)
 		}
 	}
 
@@ -103,7 +101,6 @@ func initDB() {
 	}
 
 	// Add password_plain column for Subsonic token auth if it doesn't exist.
-	// This is a simple migration for existing databases.
 	_, err = db.Exec("ALTER TABLE users ADD COLUMN password_plain TEXT")
 	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		log.Printf("Warning: Could not add password_plain column, token auth may fail if not already present: %v", err)
@@ -165,6 +162,17 @@ func initDB() {
 		log.Fatal("Failed to create playlist_songs table:", err)
 	}
 
+	// Create settings table to store application settings like library path
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT
+		);
+	`)
+	if err != nil {
+		log.Fatal("Failed to create settings table:", err)
+	}
+
 	// Create initial admin user if not exists
 	var count int
 	row := db.QueryRow("SELECT COUNT(*) FROM users WHERE username = 'admin'")
@@ -178,3 +186,4 @@ func initDB() {
 		}
 	}
 }
+

@@ -9,9 +9,10 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/dhowden/tag"
+	"github.com/gin-gonic/gin"
 )
 
 const subsonicVersion = "1.16.1"
@@ -35,25 +36,18 @@ func newSubsonicErrorResponse(code int, message string) SubsonicResponse {
 	}
 }
 
-// subsonicRespond sends a response in the format requested by the client (XML or JSON).
 func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 	httpStatus := http.StatusOK
-
-	// If the response is an authentication error, use a 401 status code.
-	// While the spec often wraps errors in a 200 OK, modern clients respond better to standard HTTP codes.
-	if errBody, ok := response.Body.(*SubsonicError); ok && (errBody.Code == 10 || errBody.Code == 40) { // 10: Required parameter missing, 40: Wrong credentials
+	if errBody, ok := response.Body.(*SubsonicError); ok && (errBody.Code == 10 || errBody.Code == 40) {
 		httpStatus = http.StatusUnauthorized
 	}
 
-	// Subsonic clients can request JSON or JSONP.
 	if c.Query("f") == "json" || c.Query("f") == "jsonp" {
-		// Build the inner response object that will be nested inside "subsonic-response"
 		inner := gin.H{
 			"status":  response.Status,
 			"version": response.Version,
 		}
 
-		// Add optional ping fields if they are set in the response struct
 		if response.Type != "" {
 			inner["type"] = response.Type
 		}
@@ -64,7 +58,6 @@ func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 			inner["openSubsonic"] = response.OpenSubsonic
 		}
 
-		// Add the body to the inner object, using the correct key for each type.
 		switch body := response.Body.(type) {
 		case *SubsonicError:
 			inner["error"] = body
@@ -82,37 +75,43 @@ func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 			inner["tokenInfo"] = body
 		case *SubsonicScanStatus:
 			inner["scanStatus"] = body
+		case *SubsonicUsers:
+			inner["users"] = body
 		case nil:
-			// No body, do nothing (e.g., for a successful ping).
 		default:
 			log.Printf("Warning: Unhandled Subsonic body type for JSON response: %T", body)
 		}
 
 		finalResponse := gin.H{"subsonic-response": inner}
-
 		if c.Query("f") == "jsonp" && c.Query("callback") != "" {
 			c.JSONP(httpStatus, finalResponse)
 		} else {
 			c.JSON(httpStatus, finalResponse)
 		}
 	} else {
-		// Default to XML if format is not specified or is 'xml'.
 		c.XML(httpStatus, response)
 	}
 }
 
-// subsonicAuthenticate checks username and password from query params.
+// subsonicAuthenticate checks for JWT (for web UI) or standard Subsonic credentials.
 func subsonicAuthenticate(c *gin.Context) (User, bool) {
+	// First, check for JWT Bearer token for web UI integration.
+	authHeader := c.GetHeader("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		claims, err := parseJWT(tokenString)
+		if err == nil {
+			user := User{ID: claims.UserID, Username: claims.Username, IsAdmin: claims.IsAdmin}
+			return user, true
+		}
+	}
+
+	// Fallback to standard Subsonic authentication methods.
 	username := c.Query("u")
 	password := c.Query("p")
 	token := c.Query("t")
 	salt := c.Query("s")
 
-	// This server supports both password-based and token-based authentication.
-	// Password-based is for clients that support it ("Legacy Login").
-	// Token-based is for clients that require it ("New Login").
-
-	// Handle password-based authentication
 	if password != "" {
 		var storedUser User
 		var passwordHash string
@@ -121,42 +120,30 @@ func subsonicAuthenticate(c *gin.Context) (User, bool) {
 		if err != nil {
 			return User{}, false
 		}
-
-		if !checkPasswordHash(password, passwordHash) {
-			return User{}, false
-		}
-		return storedUser, true
+		return storedUser, checkPasswordHash(password, passwordHash)
 	}
 
-	// Handle token-based authentication
 	if token != "" && salt != "" {
 		var storedUser User
 		var passwordPlain string
-		// WARNING: This requires fetching the plaintext password from the DB.
 		row := db.QueryRow("SELECT id, username, password_plain, is_admin FROM users WHERE username = ?", username)
 		err := row.Scan(&storedUser.ID, &storedUser.Username, &passwordPlain, &storedUser.IsAdmin)
 		if err != nil || passwordPlain == "" {
 			return User{}, false
 		}
-
 		hasher := md5.New()
 		hasher.Write([]byte(passwordPlain + salt))
 		expectedToken := hex.EncodeToString(hasher.Sum(nil))
-
 		return storedUser, token == expectedToken
 	}
 
-	// No valid authentication method provided
 	return User{}, false
 }
 
 func subsonicPing(c *gin.Context) {
-	// Per the Subsonic API spec, ping is used to test connectivity and does not
-	// require authentication. It should always return a successful response.
-	// This allows clients to verify the server URL and capabilities before authenticating.
 	response := newSubsonicResponse(nil)
 	response.Type = "AudioMuse-AI"
-	response.ServerVersion = "0.1.0" // Using a placeholder version
+	response.ServerVersion = "0.1.0"
 	response.OpenSubsonic = true
 	subsonicRespond(c, response)
 }
@@ -166,7 +153,6 @@ func subsonicGetLicense(c *gin.Context) {
 		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
 		return
 	}
-	// We are a free, open-source server, so the license is always valid.
 	subsonicRespond(c, newSubsonicResponse(&SubsonicLicense{Valid: true}))
 }
 
@@ -190,13 +176,8 @@ func subsonicGetArtists(c *gin.Context) {
 			log.Printf("Error scanning artist row for Subsonic: %v", err)
 			continue
 		}
-		// The ID can be the artist name itself for simplicity
-		artists = append(artists, SubsonicArtist{
-			ID:   artistName,
-			Name: artistName,
-		})
+		artists = append(artists, SubsonicArtist{ID: artistName, Name: artistName})
 	}
-
 	subsonicRespond(c, newSubsonicResponse(&SubsonicArtists{Artists: artists}))
 }
 
@@ -206,9 +187,17 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		return
 	}
 
-	// The 'type' parameter is required by the spec (e.g., 'alphabeticalByName')
-	// We will return albums sorted by name regardless for this implementation.
-	rows, err := db.Query("SELECT DISTINCT album, artist FROM songs WHERE album != '' ORDER BY album")
+	artistFilter := c.Query("id")
+	query := "SELECT DISTINCT album, artist FROM songs WHERE album != ''"
+	args := []interface{}{}
+
+	if artistFilter != "" {
+		query += " AND artist = ?"
+		args = append(args, artistFilter)
+	}
+	query += " ORDER BY album"
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error"))
 		return
@@ -222,34 +211,17 @@ func subsonicGetAlbumList2(c *gin.Context) {
 			log.Printf("Error scanning album row for Subsonic: %v", err)
 			continue
 		}
-		// The ID can be a combination for uniqueness, though just the name is often fine
-		albums = append(albums, SubsonicAlbum{
-			ID:     albumName,
-			Name:   albumName,
-			Artist: artistName,
-			CoverArt: albumName, // The ID for getCoverArt is the album name
-		})
+		albums = append(albums, SubsonicAlbum{ID: albumName, Name: albumName, Artist: artistName, CoverArt: albumName})
 	}
-
 	subsonicRespond(c, newSubsonicResponse(&SubsonicAlbumList2{Albums: albums}))
 }
 
 func subsonicGetPlaylists(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok {
+	if _, ok := subsonicAuthenticate(c); !ok {
 		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
 		return
 	}
-
-	// For now, this is a placeholder as playlist implementation is minimal.
-	// In a full implementation, you would query the playlists for the authenticated user.
-	log.Printf("User %s requested playlists. Returning empty list as placeholder.", user.Username)
-
-	playlists := SubsonicPlaylists{
-		Playlists: []SubsonicPlaylist{},
-	}
-
-	subsonicRespond(c, newSubsonicResponse(&playlists))
+	subsonicRespond(c, newSubsonicResponse(&SubsonicPlaylists{Playlists: []SubsonicPlaylist{}}))
 }
 
 func subsonicGetAlbum(c *gin.Context) {
@@ -258,7 +230,7 @@ func subsonicGetAlbum(c *gin.Context) {
 		return
 	}
 
-	albumID := c.Query("id") // In our case, this is the album name
+	albumID := c.Query("id")
 	if albumID == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter 'id' is missing."))
 		return
@@ -278,24 +250,10 @@ func subsonicGetAlbum(c *gin.Context) {
 			log.Printf("Error scanning song row for Subsonic getAlbum: %v", err)
 			continue
 		}
-		songs = append(songs, SubsonicSong{
-			ID:     song.ID,
-			Title:  song.Title,
-			Artist: song.Artist,
-			Album:  song.Album,
-			CoverArt: albumID, // The cover art ID is the album name (albumID)
-		})
+		songs = append(songs, SubsonicSong{ID: song.ID, Title: song.Title, Artist: song.Artist, Album: song.Album, CoverArt: albumID})
 	}
 
-	// The response for getAlbum is a 'directory' element
-	directory := SubsonicDirectory{
-		ID:        albumID,
-		Name:      albumID,
-		CoverArt:  albumID,
-		SongCount: len(songs),
-		Songs:     songs,
-	}
-
+	directory := SubsonicDirectory{ID: albumID, Name: albumID, CoverArt: albumID, SongCount: len(songs), Songs: songs}
 	subsonicRespond(c, newSubsonicResponse(&directory))
 }
 
@@ -304,9 +262,7 @@ func subsonicSearch(c *gin.Context) {
 		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
 		return
 	}
-	// This is a stub. A full implementation would search based on the 'query' param.
 	log.Printf("Subsonic search request received. Returning empty result as placeholder.")
-	// The response for search3 is a 'searchResult3' element. For now, returning an empty directory is a safe fallback.
 	subsonicRespond(c, newSubsonicResponse(&SubsonicDirectory{Songs: []SubsonicSong{}}))
 }
 
@@ -336,55 +292,27 @@ func subsonicGetRandomSongs(c *gin.Context) {
 			log.Printf("Error scanning song row for Subsonic getRandomSongs: %v", err)
 			continue
 		}
-		songs = append(songs, SubsonicSong{
-			ID:       song.ID,
-			Title:    song.Title,
-			Artist:   song.Artist,
-			Album:    song.Album,
-			CoverArt: song.Album, // The cover art ID is the album name
-		})
+		songs = append(songs, SubsonicSong{ID: song.ID, Title: song.Title, Artist: song.Artist, Album: song.Album, CoverArt: song.Album})
 	}
 
-	directory := SubsonicDirectory{
-		SongCount: len(songs),
-		Songs:     songs,
-	}
-
+	directory := SubsonicDirectory{SongCount: len(songs), Songs: songs}
 	subsonicRespond(c, newSubsonicResponse(&directory))
 }
 
 func subsonicGetCoverArt(c *gin.Context) {
-	// No auth check on cover art is common practice and improves client performance.
-	// To protect cover art, uncomment the authentication block below.
-	/*
-		if _, ok := subsonicAuthenticate(c); !ok {
-			c.Status(http.StatusUnauthorized)
-			return
-		}
-	*/
-
 	albumID := c.Query("id")
 	if albumID == "" || albumID == "undefined" {
 		c.Status(http.StatusBadRequest)
 		return
 	}
-
 	var songPath string
-	// Find any song from the album to extract its embedded art.
 	err := db.QueryRow("SELECT path FROM songs WHERE album = ? LIMIT 1", albumID).Scan(&songPath)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			c.Status(http.StatusNotFound)
-			return
-		}
-		log.Printf("DB error getting path for cover art for album '%s': %v", albumID, err)
-		c.Status(http.StatusInternalServerError)
+		c.Status(http.StatusNotFound)
 		return
 	}
-
 	file, err := os.Open(songPath)
 	if err != nil {
-		log.Printf("File open error for cover art for album '%s': %v", albumID, err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
@@ -392,18 +320,14 @@ func subsonicGetCoverArt(c *gin.Context) {
 
 	meta, err := tag.ReadFrom(file)
 	if err != nil {
-		// If we can't read tags, we can't get art.
 		c.Status(http.StatusNotFound)
 		return
 	}
-
 	pic := meta.Picture()
 	if pic == nil {
-		// No embedded picture in this file.
 		c.Status(http.StatusNotFound)
 		return
 	}
-
 	c.Data(http.StatusOK, pic.MIMEType, pic.Data)
 }
 
@@ -416,45 +340,32 @@ func subsonicStream(c *gin.Context) {
 	var path string
 	err := db.QueryRow("SELECT path FROM songs WHERE id = ?", songID).Scan(&path)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			subsonicRespond(c, newSubsonicErrorResponse(70, "The requested data was not found."))
-			return
-		}
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error"))
+		subsonicRespond(c, newSubsonicErrorResponse(70, "The requested data was not found."))
 		return
 	}
 
 	file, err := os.Open(path)
 	if err != nil {
-		log.Printf("Could not open file for streaming %s: %v", path, err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error: could not open file"))
 		return
 	}
 	defer file.Close()
-
-	fileInfo, err := file.Stat()
-	if err != nil {
-		log.Printf("Could not get file info for streaming %s: %v", path, err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error: could not stat file"))
-		return
-	}
-
-	// http.ServeContent is superior to c.File as it properly handles Range requests,
-	// which is critical for seeking and robust playback on many clients, especially mobile.
+	fileInfo, _ := file.Stat()
 	http.ServeContent(c.Writer, c.Request, fileInfo.Name(), fileInfo.ModTime(), file)
 }
 
 func subsonicTokenInfo(c *gin.Context) {
-	// This server does not support API Key authentication.
-	// We provide a stub endpoint to prevent 404 errors from clients
-	// that probe for this functionality.
-	// We return error 44, which means "Invalid or expired token", as it's the closest fit.
 	subsonicRespond(c, newSubsonicErrorResponse(44, "API Key authentication is not supported by this server."))
 }
 
 func subsonicStartScan(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
+	user, ok := subsonicAuthenticate(c)
+	if !ok {
 		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
+		return
+	}
+	if !user.IsAdmin {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "User is not authorized to start a scan."))
 		return
 	}
 
@@ -466,14 +377,35 @@ func subsonicStartScan(c *gin.Context) {
 	}
 
 	if !isScanning {
-		// Subsonic spec for startScan has no path parameter. A server would use a pre-configured path.
-		// We will log this and do nothing, as path selection is handled by the web UI.
-		log.Println("Subsonic client requested a scan. This server requires path selection via the web admin panel.")
+		var libraryPath string
+		// The Web UI will POST the path for the initial scan.
+		if c.Request.Method == "POST" {
+			var req struct {
+				Path string `json:"path"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil || req.Path == "" {
+				subsonicRespond(c, newSubsonicErrorResponse(10, "A valid path is required for the initial scan."))
+				return
+			}
+			libraryPath = req.Path
+			_, err := db.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "library_path", libraryPath)
+			if err != nil {
+				log.Printf("Warning: Could not save library path to settings: %v", err)
+			}
+		} else { // Subsonic clients will GET to trigger a re-scan.
+			err := db.QueryRow("SELECT value FROM settings WHERE key = 'library_path'").Scan(&libraryPath)
+			if err != nil || libraryPath == "" {
+				msg := "Music library path not configured. Please perform an initial scan from the admin web panel first."
+				subsonicRespond(c, newSubsonicErrorResponse(50, msg))
+				return
+			}
+		}
+		log.Printf("Library scan triggered for path: %s", libraryPath)
+		go scanLibrary(libraryPath)
 	} else {
-		log.Println("Scan start requested, but a scan is already in progress.")
+		log.Println("Scan requested, but a scan is already in progress.")
 	}
 
-	// Immediately return the current status
 	subsonicGetScanStatus(c)
 }
 
@@ -482,23 +414,150 @@ func subsonicGetScanStatus(c *gin.Context) {
 		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
 		return
 	}
-
 	var isScanning bool
 	var songsAdded int64
-
 	err := db.QueryRow("SELECT is_scanning, songs_added FROM scan_status WHERE id = 1").Scan(&isScanning, &songsAdded)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			// This should not happen if initDB is correct, but handle it gracefully.
-			subsonicRespond(c, newSubsonicResponse(&SubsonicScanStatus{Scanning: false, Count: 0}))
-			return
+		subsonicRespond(c, newSubsonicResponse(&SubsonicScanStatus{Scanning: false, Count: 0}))
+		return
+	}
+	subsonicRespond(c, newSubsonicResponse(&SubsonicScanStatus{Scanning: isScanning, Count: songsAdded}))
+}
+
+// --- Subsonic User Management Handlers ---
+
+func subsonicGetUsers(c *gin.Context) {
+	user, ok := subsonicAuthenticate(c)
+	if !ok || !user.IsAdmin {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		return
+	}
+	rows, err := db.Query("SELECT username, is_admin FROM users ORDER BY username")
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching users."))
+		return
+	}
+	defer rows.Close()
+
+	var users []SubsonicUser
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.Username, &u.IsAdmin); err != nil {
+			log.Printf("Error scanning user row: %v", err)
+			continue
 		}
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error getting scan status."))
+		users = append(users, SubsonicUser{Username: u.Username, AdminRole: u.IsAdmin, SettingsRole: u.IsAdmin})
+	}
+	subsonicRespond(c, newSubsonicResponse(&SubsonicUsers{Users: users}))
+}
+
+func subsonicCreateUser(c *gin.Context) {
+	user, ok := subsonicAuthenticate(c)
+	if !ok || !user.IsAdmin {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		return
+	}
+	username := c.Query("username")
+	password := c.Query("password")
+	isAdmin, _ := strconv.ParseBool(c.Query("adminRole"))
+
+	if password == "" || username == "" {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Username and password are required."))
+		return
+	}
+	hashedPassword, err := hashPassword(password)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to hash password."))
 		return
 	}
 
-	subsonicRespond(c, newSubsonicResponse(&SubsonicScanStatus{
-		Scanning: isScanning,
-		Count:    songsAdded,
-	}))
+	_, err = db.Exec("INSERT INTO users (username, password_hash, password_plain, is_admin) VALUES (?, ?, ?, ?)", username, hashedPassword, password, isAdmin)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Could not create user; username might already exist."))
+		return
+	}
+	subsonicRespond(c, newSubsonicResponse(nil))
 }
+
+func subsonicUpdateUser(c *gin.Context) {
+	user, ok := subsonicAuthenticate(c)
+	if !ok || !user.IsAdmin {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		return
+	}
+	username := c.Query("username")
+	password := c.Query("password")
+	if username == "" {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Username is required."))
+		return
+	}
+
+	// Only updating password for now, as it's the main use case for the UI
+	if password != "" {
+		hashedPassword, err := hashPassword(password)
+		if err != nil {
+			subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to hash password."))
+			return
+		}
+		_, err = db.Exec("UPDATE users SET password_hash = ?, password_plain = ? WHERE username = ?", hashedPassword, password, username)
+		if err != nil {
+			subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to update password."))
+			return
+		}
+	}
+	subsonicRespond(c, newSubsonicResponse(nil))
+}
+
+func subsonicDeleteUser(c *gin.Context) {
+	requestingUser, ok := subsonicAuthenticate(c)
+	if !ok || !requestingUser.IsAdmin {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		return
+	}
+	usernameToDelete := c.Query("username")
+	if usernameToDelete == "" {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Username is required."))
+		return
+	}
+	if requestingUser.Username == usernameToDelete {
+		subsonicRespond(c, newSubsonicErrorResponse(50, "You cannot delete your own account."))
+		return
+	}
+
+	res, err := db.Exec("DELETE FROM users WHERE username = ?", usernameToDelete)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to delete user."))
+		return
+	}
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		subsonicRespond(c, newSubsonicErrorResponse(70, "User not found."))
+		return
+	}
+	subsonicRespond(c, newSubsonicResponse(nil))
+}
+
+func subsonicChangePassword(c *gin.Context) {
+	user, ok := subsonicAuthenticate(c)
+	if !ok {
+		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
+		return
+	}
+	newPassword := c.Query("password")
+	if newPassword == "" {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "New password is required."))
+		return
+	}
+	hashedPassword, err := hashPassword(newPassword)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to hash password."))
+		return
+	}
+	_, err = db.Exec("UPDATE users SET password_hash = ?, password_plain = ? WHERE id = ?", hashedPassword, newPassword, user.ID)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to update password."))
+		return
+	}
+	subsonicRespond(c, newSubsonicResponse(nil))
+}
+

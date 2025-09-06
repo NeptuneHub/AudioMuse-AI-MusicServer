@@ -39,14 +39,14 @@ type FileItem struct {
 
 // SubsonicResponse is the top-level wrapper for all Subsonic API responses.
 type SubsonicResponse struct {
-	XMLName xml.Name `xml:"subsonic-response" json:"-"`
-	Status  string   `xml:"status,attr" json:"status"`
-	Version string   `xml:"version,attr" json:"version"`
-	Xmlns   string   `xml:"xmlns,attr" json:"xmlns,omitempty"`
+	XMLName       xml.Name `xml:"subsonic-response" json:"-"`
+	Status        string   `xml:"status,attr" json:"status"`
+	Version       string   `xml:"version,attr" json:"version"`
+	Xmlns         string   `xml:"xmlns,attr" json:"xmlns,omitempty"`
 	Type          string   `xml:"type,attr,omitempty" json:"type,omitempty"`
 	ServerVersion string   `xml:"serverVersion,attr,omitempty"json:"serverVersion,omitempty"`
 	OpenSubsonic  bool     `xml:"openSubsonic,attr,omitempty" json:"openSubsonic,omitempty"`
-	Body    interface{}
+	Body          interface{}
 }
 
 // SubsonicError represents an error message in a Subsonic response.
@@ -74,12 +74,12 @@ type SubsonicDirectory struct {
 
 // SubsonicSong represents a single song.
 type SubsonicSong struct {
-	XMLName xml.Name `xml:"song" json:"-"`
-	ID      int      `xml:"id,attr" json:"id"`
-	CoverArt string  `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
-	Title   string   `xml:"title,attr" json:"title"`
-	Artist  string   `xml:"artist,attr" json:"artist"`
-	Album   string   `xml:"album,attr" json:"album"`
+	XMLName  xml.Name `xml:"song" json:"-"`
+	ID       int      `xml:"id,attr" json:"id"`
+	CoverArt string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	Title    string   `xml:"title,attr" json:"title"`
+	Artist   string   `xml:"artist,attr" json:"artist"`
+	Album    string   `xml:"album,attr" json:"album"`
 }
 
 // SubsonicArtists represents a list of artists.
@@ -103,11 +103,11 @@ type SubsonicAlbumList2 struct {
 
 // SubsonicAlbum represents a single album in a list.
 type SubsonicAlbum struct {
-	XMLName xml.Name `xml:"album" json:"-"`
-	ID      string   `xml:"id,attr" json:"id"`
-	Name    string   `xml:"name,attr" json:"name"`
-	Artist  string   `xml:"artist,attr" json:"artist"`
-	CoverArt string  `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	XMLName  xml.Name `xml:"album" json:"-"`
+	ID       string   `xml:"id,attr" json:"id"`
+	Name     string   `xml:"name,attr" json:"name"`
+	Artist   string   `xml:"artist,attr" json:"artist"`
+	CoverArt string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
 }
 
 // SubsonicPlaylists represents a list of playlists.
@@ -139,3 +139,18 @@ type SubsonicScanStatus struct {
 	Scanning bool     `xml:"scanning,attr" json:"scanning"`
 	Count    int64    `xml:"count,attr" json:"count"`
 }
+
+// SubsonicUsers represents a list of users for user management.
+type SubsonicUsers struct {
+	XMLName xml.Name       `xml:"users" json:"-"`
+	Users   []SubsonicUser `xml:"user" json:"user"`
+}
+
+// SubsonicUser represents a single user.
+type SubsonicUser struct {
+	XMLName      xml.Name `xml:"user" json:"-"`
+	Username     string   `xml:"username,attr" json:"username"`
+	AdminRole    bool     `xml:"adminRole,attr" json:"adminRole"`
+	SettingsRole bool     `xml:"settingsRole,attr" json:"settingsRole"` // Same as admin for us
+}
+

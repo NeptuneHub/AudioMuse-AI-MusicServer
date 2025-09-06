@@ -14,7 +14,8 @@ function AudioPlayer({ song, onEnded }) {
         let objectUrl;
         const fetchAndSetAudio = async () => {
             try {
-                const response = await fetch(`/api/v1/music/stream/${song.id}`, {
+                // Use the standard Subsonic stream endpoint
+                const response = await fetch(`/rest/stream.view?id=${song.id}`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 if (!response.ok) throw new Error('Failed to fetch song');
@@ -55,3 +56,4 @@ function AudioPlayer({ song, onEnded }) {
 }
 
 export default AudioPlayer;
+

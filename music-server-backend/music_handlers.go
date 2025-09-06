@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 )
-
 
 // --- Music Library Handlers (JSON API) ---
 
@@ -117,5 +117,21 @@ func streamSong(c *gin.Context) {
 		return
 	}
 
-	c.File(path)
+	file, err := os.Open(path)
+	if err != nil {
+		log.Printf("Could not open file for streaming %s: %v", path, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error: could not open file"})
+		return
+	}
+	defer file.Close()
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		log.Printf("Could not get file info for streaming %s: %v", path, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error: could not stat file"})
+		return
+	}
+
+	// http.ServeContent properly handles Range requests, which is crucial for seeking in the audio player.
+	http.ServeContent(c.Writer, c.Request, fileInfo.Name(), fileInfo.ModTime(), file)
 }
