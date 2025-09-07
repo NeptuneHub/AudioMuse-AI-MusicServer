@@ -51,8 +51,9 @@ func scanLibrary(scanPath string) {
 					return nil
 				}
 
-				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path) VALUES (?, ?, ?, ?)",
-					meta.Title(), meta.Artist(), meta.Album(), path)
+				currentTime := time.Now().Format(time.RFC3339)
+				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path, date_added, date_updated) VALUES (?, ?, ?, ?, ?, ?)",
+					meta.Title(), meta.Artist(), meta.Album(), path, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error inserting song from %s into DB: %v", path, err)
 					return nil
@@ -130,4 +131,3 @@ func cancelAdminScan(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Scan cancellation signal sent and status updated."})
 }
-

@@ -9,9 +9,12 @@ function App() {
 	const [credentials, setCredentials] = useState(null);
 	const [isAdmin, setIsAdmin] = useState(false);
 
-	const handleLogin = (creds, adminStatus) => {
+	const handleLogin = (creds, adminStatus, token) => {
 		setCredentials(creds);
 		setIsAdmin(adminStatus);
+		if (token) {
+			localStorage.setItem('token', token); // Store the JWT for admin actions
+		}
 	};
 
 	const handleLogout = () => {

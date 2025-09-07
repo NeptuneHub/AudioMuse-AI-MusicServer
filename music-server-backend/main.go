@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/mattn/go-sqlite3"
@@ -14,6 +15,25 @@ import (
 
 var db *sql.DB
 var isScanCancelled atomic.Bool // Global flag to signal scan cancellation.
+
+func loggingMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		latency := time.Since(start)
+		log.Printf(
+			"[GIN] | %d | %13v | %15s | %-7s | %s",
+			c.Writer.Status(),
+			latency,
+			c.ClientIP(),
+			c.Request.Method,
+			c.Request.URL.Path,
+		)
+		if c.Request.URL.RawQuery != "" {
+			log.Printf("[GIN-QUERY] %s", c.Request.URL.RawQuery)
+		}
+	}
+}
 
 func main() {
 	var err error
@@ -32,7 +52,9 @@ func main() {
 		log.Fatalf("Failed to reset scan status on startup: %v", err)
 	}
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(loggingMiddleware()) // Use custom logging middleware
 
 	// Subsonic API routes
 	rest := r.Group("/rest")
@@ -84,6 +106,7 @@ func main() {
 		}
 	}
 
+	log.Println("[GIN-debug] Listening and serving HTTP on :8080")
 	r.Run(":8080") // listen and serve on 0.0.0.0:8080
 }
 
@@ -136,19 +159,29 @@ func initDB() {
 	// Ensure the single row exists for tracking status
 	db.Exec(`INSERT OR IGNORE INTO scan_status (id) VALUES (1);`)
 
-	// Create songs table
+	// Create songs table with new columns for tracking
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS songs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			title TEXT,
 			artist TEXT,
 			album TEXT,
-			path TEXT UNIQUE
+			path TEXT UNIQUE,
+			play_count INTEGER NOT NULL DEFAULT 0,
+			last_played TEXT,
+			date_added TEXT,
+			date_updated TEXT
 		);
 	`)
 	if err != nil {
 		log.Fatal("Failed to create songs table:", err)
 	}
+
+	// Add new columns to existing songs table if they don't exist, for graceful upgrades
+	alterAndLog("ALTER TABLE songs ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0")
+	alterAndLog("ALTER TABLE songs ADD COLUMN last_played TEXT")
+	alterAndLog("ALTER TABLE songs ADD COLUMN date_added TEXT")
+	alterAndLog("ALTER TABLE songs ADD COLUMN date_updated TEXT")
 
 	// Create playlists table
 	_, err = db.Exec(`
@@ -177,22 +210,6 @@ func initDB() {
 		log.Fatal("Failed to create playlist_songs table:", err)
 	}
 
-	// Create user_song_plays table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS user_song_plays (
-			user_id INTEGER,
-			song_id INTEGER,
-			play_count INTEGER NOT NULL DEFAULT 1,
-			last_played TEXT,
-			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-			FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE,
-			PRIMARY KEY (user_id, song_id)
-		);
-	`)
-	if err != nil {
-		log.Fatal("Failed to create user_song_plays table:", err)
-	}
-
 	// Create settings table to store application settings like library path
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS settings (
@@ -215,6 +232,15 @@ func initDB() {
 		} else {
 			log.Println("Default admin user created with password 'admin'")
 		}
+	}
+}
+
+// alterAndLog is a helper to run an ALTER TABLE command and log a warning if it fails.
+// This is used for gracefully adding new columns to an existing database.
+func alterAndLog(query string) {
+	_, err := db.Exec(query)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		log.Printf("Warning: Could not execute schema update '%s': %v", query, err)
 	}
 }
 

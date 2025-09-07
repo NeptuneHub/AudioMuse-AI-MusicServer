@@ -1,5 +1,5 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 const subsonicFetch = async (endpoint, creds, params = {}) => {
     const allParams = new URLSearchParams({
@@ -7,27 +7,23 @@ const subsonicFetch = async (endpoint, creds, params = {}) => {
     });
     const response = await fetch(`/rest/${endpoint}?${allParams.toString()}`);
     if (!response.ok) {
-        const data = await response.json();
-        const subsonicResponse = data['subsonic-response'];
-        throw new Error(subsonicResponse?.error?.message || `Server error: ${response.status}`);
+        let errorData;
+        try {
+            errorData = await response.json();
+            const subsonicResponse = errorData['subsonic-response'];
+            throw new Error(subsonicResponse?.error?.message || `Server error: ${response.status}`);
+        } catch (e) {
+            // If parsing JSON fails, throw a generic error
+            throw new Error(`Server error: ${response.status}`);
+        }
     }
     const data = await response.json();
     return data['subsonic-response'];
 };
 
-const Modal = ({ children, onClose }) => (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
-        <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md relative">
-            <button onClick={onClose} className="absolute top-2 right-2 text-gray-400 hover:text-white">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-            </button>
-            {children}
-        </div>
-    </div>
-);
-
-const AddToPlaylistModal = ({ song, credentials, onClose }) => {
+const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
     const [playlists, setPlaylists] = useState([]);
+    const [selectedPlaylist, setSelectedPlaylist] = useState('');
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
@@ -37,75 +33,94 @@ const AddToPlaylistModal = ({ song, credentials, onClose }) => {
                 const data = await subsonicFetch('getPlaylists.view', credentials);
                 const playlistData = data.playlists?.playlist || [];
                 setPlaylists(Array.isArray(playlistData) ? playlistData : [playlistData]);
+                if (playlistData.length > 0) {
+                    setSelectedPlaylist(playlistData[0].id);
+                }
             } catch (err) {
-                setError(err.message);
+                setError('Failed to fetch playlists.');
             }
         };
         fetchPlaylists();
     }, [credentials]);
 
-    const handleAdd = async (playlistId, playlistName) => {
-        if (success) return; // Prevent multiple clicks while success message is shown
+    const handleAdd = async () => {
+        if (!selectedPlaylist) {
+            setError('Please select a playlist.');
+            return;
+        }
         setError('');
         setSuccess('');
         try {
-            await subsonicFetch('updatePlaylist.view', credentials, { playlistId, songIdToAdd: song.id });
-            setSuccess(`Added to "${playlistName}"!`);
+            await subsonicFetch('updatePlaylist.view', credentials, {
+                playlistId: selectedPlaylist,
+                songIdToAdd: song.id
+            });
+            setSuccess(`Successfully added "${song.title}" to the playlist!`);
             setTimeout(() => {
+                onAdded();
                 onClose();
-            }, 1500); // Close modal after showing success message
+            }, 1500);
         } catch (err) {
-            setError(err.message);
+            setError(err.message || 'Failed to add song.');
         }
     };
 
     return (
-        <Modal onClose={onClose}>
-            <h3 className="text-xl font-bold mb-4 text-teal-400">Add "{song.title}" to...</h3>
-            {error && <p className="text-red-500 mb-2 p-2 bg-red-900/50 rounded">{error}</p>}
-            {success && <p className="text-green-400 mb-2 p-2 bg-green-900/50 rounded text-center">{success}</p>}
-            <ul className="h-64 overflow-y-auto border border-gray-700 rounded p-2 mb-4">
-                {playlists.length > 0 ? playlists.map(p => (
-                    <li key={p.id} onClick={() => handleAdd(p.id, p.name)} className="p-2 hover:bg-gray-700 rounded cursor-pointer flex justify-between items-center">
-                        <span>{p.name}</span>
-                        <span className="text-xs text-gray-500">{p.songCount} songs</span>
-                    </li>
-                )) : (
-                    <li className="p-2 text-gray-500">No playlists found. You can create one in the Playlists tab.</li>
-                )}
-            </ul>
-        </Modal>
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+            <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md relative">
+                <button onClick={onClose} className="absolute top-2 right-2 text-gray-400 hover:text-white">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+                <h3 className="text-xl font-bold mb-4 text-teal-400">Add to Playlist</h3>
+                <p className="mb-4">Add <span className="font-semibold">{song.title}</span> to which playlist?</p>
+                {error && <p className="text-red-500 mb-2">{error}</p>}
+                {success && <p className="text-green-400 mb-2">{success}</p>}
+                <select value={selectedPlaylist} onChange={e => setSelectedPlaylist(e.target.value)} className="w-full p-2 bg-gray-700 rounded mb-4">
+                    {playlists.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <div className="flex justify-end space-x-4">
+                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                    <button onClick={handleAdd} disabled={success} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded disabled:opacity-50">
+                        {success ? 'Added!' : 'Add'}
+                    </button>
+                </div>
+            </div>
+        </div>
     );
 };
 
 
 export function Songs({ credentials, filter, onPlay, currentSong }) {
     const [songs, setSongs] = useState([]);
-    const [songToAddToPlaylist, setSongToAddToPlaylist] = useState(null);
+    const [songToAdd, setSongToAdd] = useState(null); // Track which song is being added to a playlist
 
-    useEffect(() => {
-        const fetchSongs = async () => {
-            if (!filter || (!filter.album && !filter.playlistId)) return;
+    const fetchSongs = useCallback(async () => {
+        if (!filter || (!filter.albumId && !filter.playlistId)) return;
 
-            try {
-                const endpoint = filter.album ? 'getAlbum.view' : 'getPlaylist.view';
-                const idParam = filter.album ? filter.album : filter.playlistId;
+        try {
+            const endpoint = filter.albumId ? 'getAlbum.view' : 'getPlaylist.view';
+            const idParam = filter.albumId ? filter.albumId : filter.playlistId;
 
-                const data = await subsonicFetch(endpoint, credentials, { id: idParam });
-                const directory = data?.directory;
-                if (directory && directory.song) {
-                    const songList = Array.isArray(directory.song) ? directory.song : [directory.song];
-                    setSongs(songList);
-                } else {
-                    setSongs([]);
-                }
-            } catch (e) {
-                console.error("Failed to fetch songs:", e);
+            const data = await subsonicFetch(endpoint, credentials, { id: idParam });
+            
+            // The API returns songs differently for albums vs playlists
+            const songListSource = data?.album || data?.directory;
+
+            if (songListSource && songListSource.song) {
+                const songList = Array.isArray(songListSource.song) ? songListSource.song : [songListSource.song];
+                setSongs(songList);
+            } else {
                 setSongs([]);
             }
-        };
-        fetchSongs();
+        } catch (e) {
+            console.error("Failed to fetch songs:", e);
+            setSongs([]);
+        }
     }, [credentials, filter]);
+
+    useEffect(() => {
+        fetchSongs();
+    }, [fetchSongs]);
 
     const handlePlayAlbum = () => {
         if (songs.length > 0) {
@@ -115,6 +130,14 @@ export function Songs({ credentials, filter, onPlay, currentSong }) {
 
     return (
         <div>
+            {songToAdd && (
+                <AddToPlaylistModal 
+                    song={songToAdd} 
+                    credentials={credentials} 
+                    onClose={() => setSongToAdd(null)}
+                    onAdded={fetchSongs} // Refetch songs to update play counts, etc.
+                />
+            )}
             {songs.length > 0 && (
                 <button onClick={handlePlayAlbum} className="mb-4 bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Play All</button>
             )}
@@ -127,7 +150,7 @@ export function Songs({ credentials, filter, onPlay, currentSong }) {
                         <th className="px-6 py-3">Album</th>
                         <th className="px-6 py-3 text-center">Plays</th>
                         <th className="px-6 py-3">Last Played</th>
-                        <th className="px-6 py-3 w-16"></th>
+                        <th className="px-6 py-3 w-12"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -149,11 +172,11 @@ export function Songs({ credentials, filter, onPlay, currentSong }) {
                                 <td className={`px-6 py-4 font-medium ${isPlaying ? 'text-green-400' : 'text-white'}`}>{song.title}</td>
                                 <td className="px-6 py-4">{song.artist}</td>
                                 <td className="px-6 py-4">{song.album}</td>
-                                <td className="px-6 py-4 text-center">{song.playCount > 0 ? song.playCount : "-"}</td>
-                                <td className="px-6 py-4">{song.lastPlayed ? new Date(song.lastPlayed).toLocaleDateString() : 'Never'}</td>
-                                <td className="px-6 py-4 text-center">
-                                    <button onClick={() => setSongToAddToPlaylist(song)} title="Add to playlist" className="p-1 rounded-full hover:bg-gray-700">
-                                        <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                                <td className="px-6 py-4 text-center">{song.playCount || 0}</td>
+                                <td className="px-6 py-4">{song.lastPlayed ? new Date(song.lastPlayed).toLocaleString() : 'Never'}</td>
+                                <td className="px-6 py-4">
+                                    <button onClick={() => setSongToAdd(song)} title="Add to playlist">
+                                        <svg className="w-6 h-6 text-gray-400 hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                     </button>
                                 </td>
                             </tr>
@@ -161,13 +184,6 @@ export function Songs({ credentials, filter, onPlay, currentSong }) {
                     })}
                 </tbody>
             </table>
-            {songToAddToPlaylist && (
-                <AddToPlaylistModal
-                    song={songToAddToPlaylist}
-                    credentials={credentials}
-                    onClose={() => setSongToAddToPlaylist(null)}
-                />
-            )}
         </div>
     );
 }
@@ -177,7 +193,7 @@ export function Albums({ credentials, filter, onNavigate }) {
     useEffect(() => {
         const fetchAlbums = async () => {
             try {
-                const data = await subsonicFetch('getAlbumList2.view', credentials, { type: 'alphabeticalByName' });
+                const data = await subsonicFetch('getAlbumList2.view', credentials, { type: 'alphabeticalByName', size: 500 });
                 const albumList = data?.albumList2;
                 if (albumList && albumList.album) {
                     const allAlbums = Array.isArray(albumList.album) ? albumList.album : [albumList.album];
@@ -197,11 +213,11 @@ export function Albums({ credentials, filter, onNavigate }) {
     return (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
             {albums.map((album) => (
-                <button key={album.id} onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { album: album.name, artist: album.artist } })} className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
+                <button key={album.id} onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })} className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
                     <div className="w-full bg-gray-700 rounded aspect-square flex items-center justify-center mb-2 overflow-hidden">
                         {album.coverArt ? (
                             <img 
-                                src={`/rest/getCoverArt.view?id=${album.coverArt}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI`}
+                                src={`/rest/getCoverArt.view?id=${album.id}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI`}
                                 alt={album.name} 
                                 className="w-full h-full object-cover"
                             />

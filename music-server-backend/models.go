@@ -13,11 +13,15 @@ type User struct {
 }
 
 type Song struct {
-	ID     int    `json:"id"`
-	Title  string `json:"title"`
-	Artist string `json:"artist"`
-	Album  string `json:"album"`
-	Path   string `json:"-"` // Don't expose path in JSON
+	ID          int    `json:"id"`
+	Title       string `json:"title"`
+	Artist      string `json:"artist"`
+	Album       string `json:"album"`
+	Path        string `json:"-"` // Don't expose path in JSON
+	PlayCount   int    `json:"playCount"`
+	LastPlayed  string `json:"lastPlayed"`
+	DateAdded   string `json:"dateAdded"`
+	DateUpdated string `json:"dateUpdated"`
 }
 
 type Album struct {
@@ -44,7 +48,7 @@ type SubsonicResponse struct {
 	Version       string   `xml:"version,attr" json:"version"`
 	Xmlns         string   `xml:"xmlns,attr" json:"xmlns,omitempty"`
 	Type          string   `xml:"type,attr,omitempty" json:"type,omitempty"`
-	ServerVersion string   `xml:"serverVersion,attr,omitempty"json:"serverVersion,omitempty"`
+	ServerVersion string   `xml:"serverVersion,attr,omitempty" json:"serverVersion,omitempty"`
 	OpenSubsonic  bool     `xml:"openSubsonic,attr,omitempty" json:"openSubsonic,omitempty"`
 	Body          interface{}
 }
@@ -62,9 +66,19 @@ type SubsonicLicense struct {
 	Valid   bool     `xml:"valid,attr" json:"valid"`
 }
 
-// SubsonicDirectory represents a container for songs.
+// SubsonicDirectory represents a container for songs (e.g., a playlist).
 type SubsonicDirectory struct {
 	XMLName   xml.Name       `xml:"directory" json:"-"`
+	ID        string         `xml:"id,attr,omitempty" json:"id,omitempty"`
+	Name      string         `xml:"name,attr,omitempty" json:"name,omitempty"`
+	CoverArt  string         `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	SongCount int            `xml:"songCount,attr" json:"songCount"`
+	Songs     []SubsonicSong `xml:"song" json:"song"`
+}
+
+// SubsonicAlbumWithSongs represents an album and its songs for getAlbum responses.
+type SubsonicAlbumWithSongs struct {
+	XMLName   xml.Name       `xml:"album" json:"-"`
 	ID        string         `xml:"id,attr,omitempty" json:"id,omitempty"`
 	Name      string         `xml:"name,attr,omitempty" json:"name,omitempty"`
 	CoverArt  string         `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
@@ -75,11 +89,12 @@ type SubsonicDirectory struct {
 // SubsonicSong represents a single song.
 type SubsonicSong struct {
 	XMLName    xml.Name `xml:"song" json:"-"`
-	ID         int      `xml:"id,attr" json:"id"`
+	ID         string   `xml:"id,attr" json:"id"`
 	CoverArt   string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
 	Title      string   `xml:"title,attr" json:"title"`
 	Artist     string   `xml:"artist,attr" json:"artist"`
 	Album      string   `xml:"album,attr" json:"album"`
+	Path       string   `xml:"path,attr,omitempty" json:"path,omitempty"`
 	PlayCount  int      `xml:"playCount,attr,omitempty" json:"playCount,omitempty"`
 	LastPlayed string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
 }

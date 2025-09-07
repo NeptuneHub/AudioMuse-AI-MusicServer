@@ -39,8 +39,19 @@ func newSubsonicErrorResponse(code int, message string) SubsonicResponse {
 
 func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 	httpStatus := http.StatusOK
-	if errBody, ok := response.Body.(*SubsonicError); ok && (errBody.Code == 10 || errBody.Code == 40) {
-		httpStatus = http.StatusUnauthorized
+	if response.Status == "failed" {
+		// Default to a server error, then refine based on the code
+		httpStatus = http.StatusInternalServerError
+		if errBody, ok := response.Body.(*SubsonicError); ok {
+			switch errBody.Code {
+			case 10: // Missing parameter
+				httpStatus = http.StatusBadRequest
+			case 40: // Wrong username or password
+				httpStatus = http.StatusUnauthorized
+			case 70: // Data not found
+				httpStatus = http.StatusNotFound
+			}
+		}
 	}
 
 	if c.Query("f") == "json" || c.Query("f") == "jsonp" {
@@ -74,6 +85,8 @@ func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 			inner["playlist"] = body
 		case *SubsonicDirectory:
 			inner["directory"] = body
+		case *SubsonicAlbumWithSongs:
+			inner["album"] = body
 		case *SubsonicTokenInfo:
 			inner["tokenInfo"] = body
 		case *SubsonicScanStatus:
@@ -187,6 +200,7 @@ func subsonicGetArtists(c *gin.Context) {
 
 	rows, err := db.Query("SELECT DISTINCT artist FROM songs WHERE artist != '' ORDER BY artist")
 	if err != nil {
+		log.Printf("[ERROR] subsonicGetArtists: Database query failed: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error"))
 		return
 	}
@@ -210,18 +224,40 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		return
 	}
 
-	artistFilter := c.Query("id")
-	query := "SELECT DISTINCT album, artist FROM songs WHERE album != ''"
-	args := []interface{}{}
+	listType := c.DefaultQuery("type", "alphabeticalByName")
+	sizeStr := c.DefaultQuery("size", "500")
+	offsetStr := c.DefaultQuery("offset", "0")
 
-	if artistFilter != "" {
-		query += " AND artist = ?"
-		args = append(args, artistFilter)
+	size, _ := strconv.Atoi(sizeStr)
+	offset, _ := strconv.Atoi(offsetStr)
+
+	log.Printf("[DEBUG] subsonicGetAlbumList2: Running query with type '%s', size %d, offset %d", listType, size, offset)
+
+	var query string
+	switch listType {
+	case "newest":
+		// This query correctly gets the distinct albums ordered by the most recent date_added for any song in that album.
+		query = `
+			SELECT s.album, s.artist, MIN(s.id) as albumId, MAX(s.date_added) AS max_date
+			FROM songs s
+			WHERE s.album != ''
+			GROUP BY s.album, s.artist
+			ORDER BY max_date DESC
+			LIMIT ? OFFSET ?`
+	// Add other cases like 'random', 'frequent', 'recent' here if needed.
+	default: // alphabeticalByName
+		query = `
+			SELECT album, artist, MIN(id) as albumId
+			FROM songs
+			WHERE album != ''
+			GROUP BY album, artist
+			ORDER BY album
+			LIMIT ? OFFSET ?`
 	}
-	query += " ORDER BY album"
 
-	rows, err := db.Query(query, args...)
+	rows, err := db.Query(query, size, offset)
 	if err != nil {
+		log.Printf("[ERROR] subsonicGetAlbumList2: Database query failed: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error"))
 		return
 	}
@@ -230,12 +266,28 @@ func subsonicGetAlbumList2(c *gin.Context) {
 	var albums []SubsonicAlbum
 	for rows.Next() {
 		var albumName, artistName string
-		if err := rows.Scan(&albumName, &artistName); err != nil {
-			log.Printf("Error scanning album row for Subsonic: %v", err)
-			continue
+		var albumId int
+		var dummyDate sql.NullString // To scan the max_date or be ignored
+		if listType == "newest" {
+			if err := rows.Scan(&albumName, &artistName, &albumId, &dummyDate); err != nil {
+				log.Printf("Error scanning newest album row for Subsonic: %v", err)
+				continue
+			}
+		} else {
+			if err := rows.Scan(&albumName, &artistName, &albumId); err != nil {
+				log.Printf("Error scanning alphabetical album row for Subsonic: %v", err)
+				continue
+			}
 		}
-		albums = append(albums, SubsonicAlbum{ID: albumName, Name: albumName, Artist: artistName, CoverArt: albumName})
+		albumIDStr := strconv.Itoa(albumId)
+		albums = append(albums, SubsonicAlbum{
+			ID:       albumIDStr,
+			Name:     albumName,
+			Artist:   artistName,
+			CoverArt: albumIDStr,
+		})
 	}
+	log.Printf("[DEBUG] subsonicGetAlbumList2: Found %d albums.", len(albums))
 	subsonicRespond(c, newSubsonicResponse(&SubsonicAlbumList2{Albums: albums}))
 }
 
@@ -300,11 +352,10 @@ func subsonicGetPlaylist(c *gin.Context) {
 	}
 
 	rows, err := db.Query(`
-		SELECT s.id, s.title, s.artist, s.album, COALESCE(usp.play_count, 0), usp.last_played
+		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played
 		FROM songs s
 		JOIN playlist_songs ps ON s.id = ps.song_id
-		LEFT JOIN user_song_plays usp ON s.id = usp.song_id AND usp.user_id = ?
-		WHERE ps.playlist_id = ?`, user.ID, playlistID)
+		WHERE ps.playlist_id = ?`, playlistID)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error querying songs."))
 		return
@@ -313,16 +364,25 @@ func subsonicGetPlaylist(c *gin.Context) {
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var song SubsonicSong
+		var songFromDb Song
 		var lastPlayed sql.NullString
-		if err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &song.PlayCount, &lastPlayed); err != nil {
+		if err := rows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, &songFromDb.Path, &songFromDb.PlayCount, &lastPlayed); err != nil {
 			log.Printf("Error scanning song row for getPlaylist: %v", err)
 			continue
 		}
-		if lastPlayed.Valid {
-			song.LastPlayed = lastPlayed.String
+
+		subsonicSong := SubsonicSong{
+			ID:        strconv.Itoa(songFromDb.ID),
+			Title:     songFromDb.Title,
+			Artist:    songFromDb.Artist,
+			Album:     songFromDb.Album,
+			Path:      songFromDb.Path,
+			PlayCount: songFromDb.PlayCount,
 		}
-		songs = append(songs, song)
+		if lastPlayed.Valid {
+			subsonicSong.LastPlayed = lastPlayed.String
+		}
+		songs = append(songs, subsonicSong)
 	}
 
 	directory := SubsonicDirectory{ID: playlistID, Name: playlistName, SongCount: len(songs), Songs: songs}
@@ -513,24 +573,36 @@ func subsonicDeletePlaylist(c *gin.Context) {
 }
 
 func subsonicGetAlbum(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok {
+	if _, ok := subsonicAuthenticate(c); !ok {
 		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
 		return
 	}
 
-	albumID := c.Query("id")
-	if albumID == "" {
-		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter 'id' is missing."))
+	albumUIDStr := c.Query("id")
+	albumUID, err := strconv.Atoi(albumUIDStr)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter 'id' must be a number."))
 		return
 	}
 
-	rows, err := db.Query(`
-		SELECT s.id, s.title, s.artist, s.album, COALESCE(usp.play_count, 0), usp.last_played
-		FROM songs s
-		LEFT JOIN user_song_plays usp ON s.id = usp.song_id AND usp.user_id = ?
-		WHERE s.album = ? ORDER BY s.title`, user.ID, albumID)
+	log.Printf("[DEBUG] subsonicGetAlbum: Fetching songs for album UID: %d", albumUID)
+
+	// First, find the album name associated with this UID.
+	var albumName string
+	err = db.QueryRow("SELECT album FROM songs WHERE id = ?", albumUID).Scan(&albumName)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			subsonicRespond(c, newSubsonicErrorResponse(70, "Album not found."))
+		} else {
+			log.Printf("[ERROR] subsonicGetAlbum: Database error finding album name for UID %d: %v", albumUID, err)
+			subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error"))
+		}
+		return
+	}
+
+	rows, err := db.Query("SELECT id, title, artist, album, path, play_count, last_played FROM songs WHERE album = ? ORDER BY title", albumName)
+	if err != nil {
+		log.Printf("[ERROR] subsonicGetAlbum: Database query failed for songs in album '%s': %v", albumName, err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error"))
 		return
 	}
@@ -538,21 +610,37 @@ func subsonicGetAlbum(c *gin.Context) {
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var song SubsonicSong
+		var songFromDb Song
 		var lastPlayed sql.NullString
-		if err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &song.PlayCount, &lastPlayed); err != nil {
+		if err := rows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, &songFromDb.Path, &songFromDb.PlayCount, &lastPlayed); err != nil {
 			log.Printf("Error scanning song row for Subsonic getAlbum: %v", err)
 			continue
 		}
-		if lastPlayed.Valid {
-			song.LastPlayed = lastPlayed.String
-		}
-		song.CoverArt = albumID
-		songs = append(songs, song)
-	}
 
-	directory := SubsonicDirectory{ID: albumID, Name: albumID, CoverArt: albumID, SongCount: len(songs), Songs: songs}
-	subsonicRespond(c, newSubsonicResponse(&directory))
+		subsonicSong := SubsonicSong{
+			ID:        strconv.Itoa(songFromDb.ID),
+			Title:     songFromDb.Title,
+			Artist:    songFromDb.Artist,
+			Album:     songFromDb.Album,
+			Path:      songFromDb.Path,
+			PlayCount: songFromDb.PlayCount,
+			CoverArt:  albumUIDStr,
+		}
+		if lastPlayed.Valid {
+			subsonicSong.LastPlayed = lastPlayed.String
+		}
+		songs = append(songs, subsonicSong)
+	}
+	log.Printf("[DEBUG] subsonicGetAlbum: Found %d songs for album '%s'.", len(songs), albumName)
+
+	album := SubsonicAlbumWithSongs{
+		ID:        albumUIDStr,
+		Name:      albumName,
+		CoverArt:  albumUIDStr,
+		SongCount: len(songs),
+		Songs:     songs,
+	}
+	subsonicRespond(c, newSubsonicResponse(&album))
 }
 
 func subsonicSearch(c *gin.Context) {
@@ -576,8 +664,9 @@ func subsonicGetRandomSongs(c *gin.Context) {
 		size = 50
 	}
 
-	rows, err := db.Query("SELECT id, title, artist, album FROM songs ORDER BY RANDOM() LIMIT ?", size)
+	rows, err := db.Query("SELECT id, title, artist, album, path, play_count, last_played FROM songs ORDER BY RANDOM() LIMIT ?", size)
 	if err != nil {
+		log.Printf("[ERROR] subsonicGetRandomSongs: Database query failed: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error"))
 		return
 	}
@@ -585,12 +674,26 @@ func subsonicGetRandomSongs(c *gin.Context) {
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var song Song
-		if err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album); err != nil {
+		var songFromDb Song
+		var lastPlayed sql.NullString
+		if err := rows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, &songFromDb.Path, &songFromDb.PlayCount, &lastPlayed); err != nil {
 			log.Printf("Error scanning song row for Subsonic getRandomSongs: %v", err)
 			continue
 		}
-		songs = append(songs, SubsonicSong{ID: song.ID, Title: song.Title, Artist: song.Artist, Album: song.Album, CoverArt: song.Album})
+
+		subsonicSong := SubsonicSong{
+			ID:        strconv.Itoa(songFromDb.ID),
+			Title:     songFromDb.Title,
+			Artist:    songFromDb.Artist,
+			Album:     songFromDb.Album,
+			Path:      songFromDb.Path,
+			PlayCount: songFromDb.PlayCount,
+			CoverArt:  songFromDb.Album, // This should ideally be a stable album ID
+		}
+		if lastPlayed.Valid {
+			subsonicSong.LastPlayed = lastPlayed.String
+		}
+		songs = append(songs, subsonicSong)
 	}
 
 	directory := SubsonicDirectory{SongCount: len(songs), Songs: songs}
@@ -598,13 +701,15 @@ func subsonicGetRandomSongs(c *gin.Context) {
 }
 
 func subsonicGetCoverArt(c *gin.Context) {
-	albumID := c.Query("id")
-	if albumID == "" || albumID == "undefined" {
+	albumUID, err := strconv.Atoi(c.Query("id"))
+	if err != nil {
 		c.Status(http.StatusBadRequest)
 		return
 	}
+
 	var songPath string
-	err := db.QueryRow("SELECT path FROM songs WHERE album = ? LIMIT 1", albumID).Scan(&songPath)
+	// Use the album UID, which is the ID of a song in that album, to find a path for the cover art.
+	err = db.QueryRow("SELECT path FROM songs WHERE id = ?", albumUID).Scan(&songPath)
 	if err != nil {
 		c.Status(http.StatusNotFound)
 		return
@@ -636,36 +741,29 @@ func subsonicStream(c *gin.Context) {
 		return
 	}
 	songID := c.Query("id")
-
-	// Record the play event in a goroutine so it doesn't block the stream
-	go func(userID int, sID string) {
-		songIDint, err := strconv.Atoi(sID)
-		if err != nil {
-			log.Printf("Invalid song ID for play tracking: %s", sID)
-			return
-		}
-
-		_, err = db.Exec(`
-			INSERT INTO user_song_plays (user_id, song_id, play_count, last_played)
-			VALUES (?, ?, 1, ?)
-			ON CONFLICT(user_id, song_id) DO UPDATE SET
-			play_count = play_count + 1,
-			last_played = excluded.last_played;
-		`, userID, songIDint, time.Now().Format(time.RFC3339))
-		if err != nil {
-			log.Printf("Failed to record play for user %d, song %s: %v", userID, sID, err)
-		}
-	}(user.ID, songID)
+	log.Printf("[DEBUG] subsonicStream: User '%s' requesting stream for song ID: %s", user.Username, songID)
 
 	var path string
 	err := db.QueryRow("SELECT path FROM songs WHERE id = ?", songID).Scan(&path)
 	if err != nil {
+		log.Printf("[ERROR] subsonicStream: Failed to find path for song ID %s. Error: %v", songID, err)
 		subsonicRespond(c, newSubsonicErrorResponse(70, "The requested data was not found."))
 		return
 	}
 
+	log.Printf("[DEBUG] subsonicStream: Found path '%s' for song ID %s. Attempting to serve file.", path, songID)
+
+	// Update play count and last played time
+	go func() {
+		_, err := db.Exec("UPDATE songs SET play_count = play_count + 1, last_played = ? WHERE id = ?", time.Now().Format(time.RFC3339), songID)
+		if err != nil {
+			log.Printf("[ERROR] Failed to update play count for song ID %s: %v", songID, err)
+		}
+	}()
+
 	file, err := os.Open(path)
 	if err != nil {
+		log.Printf("[ERROR] subsonicStream: Could not open file for streaming %s: %v", path, err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error: could not open file"))
 		return
 	}
