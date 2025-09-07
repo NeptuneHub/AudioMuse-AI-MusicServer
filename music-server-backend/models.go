@@ -74,12 +74,14 @@ type SubsonicDirectory struct {
 
 // SubsonicSong represents a single song.
 type SubsonicSong struct {
-	XMLName  xml.Name `xml:"song" json:"-"`
-	ID       int      `xml:"id,attr" json:"id"`
-	CoverArt string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
-	Title    string   `xml:"title,attr" json:"title"`
-	Artist   string   `xml:"artist,attr" json:"artist"`
-	Album    string   `xml:"album,attr" json:"album"`
+	XMLName    xml.Name `xml:"song" json:"-"`
+	ID         int      `xml:"id,attr" json:"id"`
+	CoverArt   string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	Title      string   `xml:"title,attr" json:"title"`
+	Artist     string   `xml:"artist,attr" json:"artist"`
+	Album      string   `xml:"album,attr" json:"album"`
+	PlayCount  int      `xml:"playCount,attr,omitempty" json:"playCount,omitempty"`
+	LastPlayed string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
 }
 
 // SubsonicArtists represents a list of artists.

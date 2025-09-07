@@ -125,6 +125,8 @@ export function Songs({ credentials, filter, onPlay, currentSong }) {
                         <th className="px-6 py-3">Title</th>
                         <th className="px-6 py-3">Artist</th>
                         <th className="px-6 py-3">Album</th>
+                        <th className="px-6 py-3 text-center">Plays</th>
+                        <th className="px-6 py-3">Last Played</th>
                         <th className="px-6 py-3 w-16"></th>
                     </tr>
                 </thead>
@@ -147,6 +149,8 @@ export function Songs({ credentials, filter, onPlay, currentSong }) {
                                 <td className={`px-6 py-4 font-medium ${isPlaying ? 'text-green-400' : 'text-white'}`}>{song.title}</td>
                                 <td className="px-6 py-4">{song.artist}</td>
                                 <td className="px-6 py-4">{song.album}</td>
+                                <td className="px-6 py-4 text-center">{song.playCount > 0 ? song.playCount : "-"}</td>
+                                <td className="px-6 py-4">{song.lastPlayed ? new Date(song.lastPlayed).toLocaleDateString() : 'Never'}</td>
                                 <td className="px-6 py-4 text-center">
                                     <button onClick={() => setSongToAddToPlaylist(song)} title="Add to playlist" className="p-1 rounded-full hover:bg-gray-700">
                                         <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
@@ -246,3 +250,4 @@ export function Artists({ credentials, onNavigate }) {
         </ul>
     );
 }
+

@@ -177,6 +177,22 @@ func initDB() {
 		log.Fatal("Failed to create playlist_songs table:", err)
 	}
 
+	// Create user_song_plays table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS user_song_plays (
+			user_id INTEGER,
+			song_id INTEGER,
+			play_count INTEGER NOT NULL DEFAULT 1,
+			last_played TEXT,
+			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE,
+			PRIMARY KEY (user_id, song_id)
+		);
+	`)
+	if err != nil {
+		log.Fatal("Failed to create user_song_plays table:", err)
+	}
+
 	// Create settings table to store application settings like library path
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS settings (
