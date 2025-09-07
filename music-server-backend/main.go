@@ -66,7 +66,7 @@ func main() {
 		rest.GET("/getAlbumList2.view", subsonicGetAlbumList2)
 		rest.GET("/getPlaylists.view", subsonicGetPlaylists)
 		rest.GET("/getPlaylist.view", subsonicGetPlaylist)
-		rest.GET("/createPlaylist.view", subsonicCreatePlaylist)
+		rest.Any("/createPlaylist.view", subsonicCreatePlaylist) // Changed from GET to Any
 		rest.GET("/updatePlaylist.view", subsonicUpdatePlaylist)
 		rest.GET("/deletePlaylist.view", subsonicDeletePlaylist)
 		rest.GET("/getAlbum.view", subsonicGetAlbum)
