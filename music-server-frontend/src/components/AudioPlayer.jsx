@@ -1,9 +1,15 @@
-// Suggested path: music-server-frontend/src/components/AudioPlayer.jsx
 import React, { useState, useEffect } from 'react';
 
-function AudioPlayer({ song, onEnded }) {
+const subsonicFetch = async (endpoint, creds, params = {}) => {
+    const allParams = new URLSearchParams({
+        u: creds.username, p: creds.password, v: '1.16.1', c: 'AudioMuse-AI', ...params
+    });
+    const response = await fetch(`/rest/${endpoint}?${allParams.toString()}`);
+    return response;
+};
+
+function AudioPlayer({ song, onEnded, credentials }) {
     const [audioSrc, setAudioSrc] = useState(null);
-    const token = localStorage.getItem('token');
 
     useEffect(() => {
         if (!song) {
@@ -14,10 +20,7 @@ function AudioPlayer({ song, onEnded }) {
         let objectUrl;
         const fetchAndSetAudio = async () => {
             try {
-                // Use the standard Subsonic stream endpoint
-                const response = await fetch(`/rest/stream.view?id=${song.id}`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
+                const response = await subsonicFetch('stream.view', credentials, { id: song.id });
                 if (!response.ok) throw new Error('Failed to fetch song');
                 const blob = await response.blob();
                 objectUrl = URL.createObjectURL(blob);
@@ -32,28 +35,21 @@ function AudioPlayer({ song, onEnded }) {
         return () => { // Cleanup function
             if (objectUrl) URL.revokeObjectURL(objectUrl);
         };
-    }, [song, token]);
+    }, [song, credentials]);
 
     if (!song) {
-        return (
-            <div className="fixed bottom-0 left-0 right-0 bg-gray-800 p-4 text-center text-gray-500">
-                No song selected.
-            </div>
-        );
+        return null; // Don't render the player if no song is selected
     }
 
     return (
-        <div className="fixed bottom-0 left-0 right-0 bg-gray-800 p-4 shadow-lg border-t border-gray-700 flex items-center space-x-4">
+        <div className="fixed bottom-0 left-0 right-0 bg-gray-800 p-4 shadow-lg border-t border-gray-700 flex items-center space-x-4 z-50">
             <div className="flex-shrink-0 w-64">
                 <p className="font-bold text-white truncate">{song.title}</p>
                 <p className="text-sm text-gray-400 truncate">{song.artist}</p>
             </div>
-            <audio key={song.id} controls autoPlay src={audioSrc || ''} onEnded={onEnded} className="w-full">
-                Your browser does not support the audio element.
-            </audio>
+            <audio key={song.id} controls autoPlay src={audioSrc || ''} onEnded={onEnded} className="w-full" />
         </div>
     );
 }
 
 export default AudioPlayer;
-

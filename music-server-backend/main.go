@@ -43,6 +43,10 @@ func main() {
 		rest.GET("/getArtists.view", subsonicGetArtists)
 		rest.GET("/getAlbumList2.view", subsonicGetAlbumList2)
 		rest.GET("/getPlaylists.view", subsonicGetPlaylists)
+		rest.GET("/getPlaylist.view", subsonicGetPlaylist)
+		rest.GET("/createPlaylist.view", subsonicCreatePlaylist)
+		rest.GET("/updatePlaylist.view", subsonicUpdatePlaylist)
+		rest.GET("/deletePlaylist.view", subsonicDeletePlaylist)
 		rest.GET("/getAlbum.view", subsonicGetAlbum)
 		rest.GET("/search2.view", subsonicSearch)
 		rest.GET("/search3.view", subsonicSearch)
@@ -104,7 +108,7 @@ func initDB() {
 			username TEXT UNIQUE,
 			password_hash TEXT,
 			password_plain TEXT, -- WARNING: Storing plaintext passwords is a security risk. Required for Subsonic token auth.
-			is_admin BOOLEAN 
+			is_admin BOOLEAN
 		);
 	`)
 	if err != nil {

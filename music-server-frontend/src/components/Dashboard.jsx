@@ -1,11 +1,11 @@
 // Suggested path: music-server-frontend/src/components/Dashboard.jsx
 import React, { useState, useMemo, useCallback } from 'react';
 import { Songs, Albums, Artists } from './MusicViews';
-import Playlists from './Playlists'; // Assuming you create this file
+import Playlists from './Playlists';
 import AdminPanel from './AdminPanel';
 import AudioPlayer from './AudioPlayer';
 
-function Dashboard({ onLogout, isAdmin }) {
+function Dashboard({ onLogout, isAdmin, credentials }) {
     const [navigation, setNavigation] = useState([{ page: 'artists', title: 'Artists' }]);
     const [playQueue, setPlayQueue] = useState([]);
     const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -52,15 +52,16 @@ function Dashboard({ onLogout, isAdmin }) {
                     )}
                     <h2 className="text-3xl font-bold">{currentView.title}</h2>
                 </div>
-				{currentView.page === 'songs' && <Songs filter={currentView.filter} onPlay={handlePlaySong} />}
-				{currentView.page === 'albums' && <Albums filter={currentView.filter} onNavigate={handleNavigate} />}
-				{currentView.page === 'artists' && <Artists onNavigate={handleNavigate} />}
-				{currentView.page === 'playlists' && <Playlists />}
+				{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} currentSong={currentSong} />}
+				{currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
+				{currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
+				{currentView.page === 'playlists' && <Playlists credentials={credentials} onNavigate={handleNavigate} />}
                 {currentView.page === 'admin' && isAdmin && <AdminPanel />}
 			</main>
-            <AudioPlayer song={currentSong} onEnded={handlePlayNext} />
+            <AudioPlayer song={currentSong} onEnded={handlePlayNext} credentials={credentials}/>
 		</div>
 	);
 }
 
 export default Dashboard;
+
