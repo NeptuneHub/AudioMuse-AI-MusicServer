@@ -1,11 +1,11 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const subsonicFetch = async (endpoint, creds, params = {}) => {
+    // Ensure the password is included for every request
     const allParams = new URLSearchParams({
         u: creds.username, p: creds.password, v: '1.16.1', c: 'AudioMuse-AI', f: 'json', ...params
     });
-    // For POST requests, we'll handle params differently, but for now, GET is fine.
     const response = await fetch(`/rest/${endpoint}?${allParams.toString()}`);
     if (!response.ok) {
         const data = await response.json();
@@ -16,67 +16,112 @@ const subsonicFetch = async (endpoint, creds, params = {}) => {
     return data['subsonic-response'];
 };
 
+// Modal for adding a song to a playlist
+const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
+    const [playlists, setPlaylists] = useState([]);
+    const [selectedPlaylist, setSelectedPlaylist] = useState('');
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
 
-// A debounced function to delay API calls
-const debounce = (func, delay) => {
-    let timeout;
-    return (...args) => {
-        clearTimeout(timeout);
-        timeout = setTimeout(() => func(...args), delay);
+    useEffect(() => {
+        const fetchPlaylists = async () => {
+            try {
+                const data = await subsonicFetch('getPlaylists.view', credentials);
+                const playlistData = data.playlists?.playlist || [];
+                setPlaylists(Array.isArray(playlistData) ? playlistData : [playlistData]);
+                if (playlistData.length > 0) {
+                    setSelectedPlaylist(playlistData[0].id);
+                }
+            } catch (err) {
+                setError('Failed to fetch playlists.');
+            }
+        };
+        fetchPlaylists();
+    }, [credentials]);
+
+    const handleAddToPlaylist = async () => {
+        if (!selectedPlaylist) {
+            setError('Please select a playlist.');
+            return;
+        }
+        setError('');
+        setSuccess('');
+        try {
+            await subsonicFetch('updatePlaylist.view', credentials, {
+                playlistId: selectedPlaylist,
+                songIdToAdd: song.id,
+            });
+            setSuccess(`Successfully added "${song.title}" to the playlist!`);
+            onAdded();
+            setTimeout(onClose, 1500); // Close modal after a short delay
+        } catch (err) {
+            setError('Failed to add song to playlist.');
+        }
     };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+            <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md relative">
+                 <h3 className="text-xl font-bold mb-4 text-teal-400">Add "{song.title}" to...</h3>
+                {error && <p className="text-red-500 mb-2">{error}</p>}
+                {success && <p className="text-green-400 mb-2">{success}</p>}
+                <select
+                    value={selectedPlaylist}
+                    onChange={(e) => setSelectedPlaylist(e.target.value)}
+                    className="w-full p-2 bg-gray-700 rounded mb-4"
+                >
+                    {playlists.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                </select>
+                <div className="flex justify-end space-x-4">
+                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                    <button onClick={handleAddToPlaylist} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Add to Playlist</button>
+                </div>
+            </div>
+        </div>
+    );
 };
 
 
 export function Songs({ credentials, filter, onPlay, currentSong }) {
     const [songs, setSongs] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-
-
-    const searchSongs = useCallback(debounce(async (query) => {
-        if (query.length < 3) {
-            setSongs([]);
-            return;
-        }
-        setIsLoading(true);
-        try {
-            const data = await subsonicFetch('search2.view', credentials, { query, songCount: 100 });
-            const songResults = data?.searchResult2?.song || [];
-            setSongs(Array.isArray(songResults) ? songResults : [songResults]);
-        } catch (e) {
-            console.error("Failed to search songs:", e);
-            setSongs([]);
-        }
-        setIsLoading(false);
-    }, 500), [credentials]);
-
+    const [selectedSong, setSelectedSong] = useState(null);
 
     useEffect(() => {
         const fetchSongs = async () => {
-            // This part handles loading songs for a specific album or playlist
-            if (!filter) return;
-            const endpoint = filter.albumId ? 'getAlbum.view' : 'getPlaylist.view';
-            const idParam = filter.albumId || filter.playlistId;
-            
-            setIsLoading(true);
             try {
-                const data = await subsonicFetch(endpoint, credentials, { id: idParam });
-                const songList = data?.album?.song || data?.directory?.song || [];
-                setSongs(Array.isArray(songList) ? songList : [songList]);
+                let songList = [];
+                if (searchTerm.length >= 3) {
+                    const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, songCount: 100 });
+                    songList = data.searchResult2?.song || [];
+                } else if (filter && searchTerm.length === 0) { // Only apply filter if search is empty
+                    const endpoint = filter.albumId ? 'getAlbum.view' : 'getPlaylist.view';
+                    const idParam = filter.albumId || filter.playlistId;
+                    if (!idParam) { setSongs([]); return; }
+
+                    const data = await subsonicFetch(endpoint, credentials, { id: idParam });
+                    const songContainer = data.album || data.directory;
+                    if (songContainer && songContainer.song) {
+                        songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
+                    }
+                } else {
+                     setSongs([]);
+                }
+                setSongs(songList);
             } catch (e) {
                 console.error("Failed to fetch songs:", e);
                 setSongs([]);
             }
-            setIsLoading(false);
         };
 
-        if (filter) {
+        const debounceFetch = setTimeout(() => {
             fetchSongs();
-        } else {
-            // This part handles the global song search
-            searchSongs(searchTerm);
-        }
-    }, [credentials, filter, searchTerm, searchSongs]);
+        }, 300); // Debounce search to avoid excessive API calls
+
+        return () => clearTimeout(debounceFetch);
+    }, [credentials, filter, searchTerm]);
 
 
     const handlePlayAlbum = () => {
@@ -85,32 +130,32 @@ export function Songs({ credentials, filter, onPlay, currentSong }) {
         }
     };
     
-    // Client-side filtering for when viewing a specific album/playlist
-    const filteredSongs = useMemo(() => {
-        if (!filter || searchTerm.length < 1) {
-            return songs;
+    const formatDateTime = (isoString) => {
+        if (!isoString) return 'N/A';
+        try {
+            const date = new Date(isoString);
+            return date.toLocaleString();
+        } catch (e) {
+            return 'Invalid Date';
         }
-        return songs.filter(song =>
-            song.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            song.artist.toLowerCase().includes(searchTerm.toLowerCase())
-        );
-    }, [songs, searchTerm, filter]);
+    };
+
 
     return (
         <div>
-            <div className="mb-4 flex justify-between items-center">
-                 <input
+            <div className="mb-4">
+                <input
                     type="text"
-                    placeholder="Search for a song..."
+                    placeholder="Search for a song or artist..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-1/3 p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
+                    className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
                 />
-                {songs.length > 0 && (
-                    <button onClick={handlePlayAlbum} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Play All</button>
-                )}
             </div>
-            {isLoading && <p>Loading...</p>}
+
+            {songs.length > 0 && !searchTerm &&(
+                <button onClick={handlePlayAlbum} className="mb-4 bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Play All</button>
+            )}
             <table className="min-w-full text-sm text-left text-gray-400">
                 <thead className="text-xs text-gray-300 uppercase bg-gray-700">
                     <tr>
@@ -118,17 +163,18 @@ export function Songs({ credentials, filter, onPlay, currentSong }) {
                         <th className="px-6 py-3">Title</th>
                         <th className="px-6 py-3">Artist</th>
                         <th className="px-6 py-3">Album</th>
-                        <th className="px-6 py-3 text-right">Plays</th>
+                        <th className="px-6 py-3 text-center">Plays</th>
                         <th className="px-6 py-3">Last Played</th>
+                        <th className="px-6 py-3 w-12"></th>
                     </tr>
                 </thead>
                 <tbody>
-                    {filteredSongs.map(song => {
+                    {songs.map(song => {
                         const isPlaying = currentSong && currentSong.id === song.id;
                         return (
                             <tr key={song.id} className={`border-b border-gray-700 transition-colors ${isPlaying ? 'bg-teal-900/50' : 'bg-gray-800 hover:bg-gray-600'}`}>
                                 <td className="px-6 py-4">
-                                     {isPlaying ? (
+                                    {isPlaying ? (
                                         <span title="Currently playing">
                                             <svg className="w-6 h-6 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clipRule="evenodd"></path></svg>
                                         </span>
@@ -141,13 +187,26 @@ export function Songs({ credentials, filter, onPlay, currentSong }) {
                                 <td className={`px-6 py-4 font-medium ${isPlaying ? 'text-green-400' : 'text-white'}`}>{song.title}</td>
                                 <td className="px-6 py-4">{song.artist}</td>
                                 <td className="px-6 py-4">{song.album}</td>
-                                <td className="px-6 py-4 text-right">{song.playCount || 0}</td>
-                                <td className="px-6 py-4">{song.lastPlayed ? new Date(song.lastPlayed).toLocaleString() : 'Never'}</td>
+                                <td className="px-6 py-4 text-center">{song.playCount || 0}</td>
+                                <td className="px-6 py-4">{formatDateTime(song.lastPlayed)}</td>
+                                <td className="px-6 py-4">
+                                    <button onClick={() => setSelectedSong(song)} title="Add to playlist">
+                                        <svg className="w-6 h-6 text-gray-400 hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                                    </button>
+                                </td>
                             </tr>
                         );
                     })}
                 </tbody>
             </table>
+             {selectedSong && (
+                <AddToPlaylistModal
+                    song={selectedSong}
+                    credentials={credentials}
+                    onClose={() => setSelectedSong(null)}
+                    onAdded={() => console.log("Song added!")} // Placeholder for potential feedback
+                />
+            )}
         </div>
     );
 }
@@ -155,60 +214,58 @@ export function Songs({ credentials, filter, onPlay, currentSong }) {
 export function Albums({ credentials, filter, onNavigate }) {
     const [albums, setAlbums] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
 
-    const fetchAlbums = useCallback(async () => {
-        setIsLoading(true);
-        try {
-            const data = await subsonicFetch('getAlbumList2.view', credentials, { type: 'alphabeticalByName', size: 500, id: filter });
-            const albumList = data?.albumList2?.album || [];
-            setAlbums(Array.isArray(albumList) ? albumList : [albumList]);
-        } catch (e) {
-            console.error("Failed to fetch albums:", e);
-            setAlbums([]);
+    // Pre-fill search term when navigating from an artist
+    useEffect(() => {
+        if (filter) {
+            setSearchTerm(filter);
         }
-        setIsLoading(false);
-    }, [credentials, filter]);
-
-    const searchAlbums = useCallback(debounce(async (query) => {
-        if (query.length < 3) {
-            fetchAlbums(); // Re-fetch all if search is cleared
-            return;
-        }
-        setIsLoading(true);
-        try {
-            const data = await subsonicFetch('search2.view', credentials, { query, albumCount: 100 });
-            const albumResults = data?.searchResult2?.album || [];
-            setAlbums(Array.isArray(albumResults) ? albumResults : [albumResults]);
-        } catch (e) {
-            console.error("Failed to search albums:", e);
-        }
-        setIsLoading(false);
-    }, 500), [credentials, fetchAlbums]);
+    }, [filter]);
 
     useEffect(() => {
-        if (searchTerm.length >= 3) {
-            searchAlbums(searchTerm);
-        } else {
+        const fetchAlbums = async () => {
+            try {
+                let albumList = [];
+                // Prioritize search term. If it's empty, use the initial filter if it exists.
+                const query = searchTerm || filter;
+
+                if (query) {
+                    // Use search if a query exists (from search box or navigation filter)
+                    const data = await subsonicFetch('search2.view', credentials, { query: query, albumCount: 100, artistCount: 0, songCount: 0 });
+                    albumList = data.searchResult2?.album || [];
+                } else {
+                    // Default view: fetch all albums
+                    const data = await subsonicFetch('getAlbumList2.view', credentials, { type: 'alphabeticalByName' });
+                     albumList = data.albumList2?.album || [];
+                }
+                setAlbums(Array.isArray(albumList) ? albumList : [albumList].filter(Boolean));
+            } catch (e) {
+                console.error("Failed to fetch albums:", e);
+                setAlbums([]);
+            }
+        };
+
+        const debounceFetch = setTimeout(() => {
             fetchAlbums();
-        }
-    }, [credentials, searchTerm, searchAlbums, fetchAlbums]);
+        }, 300);
+
+        return () => clearTimeout(debounceFetch);
+    }, [credentials, filter, searchTerm]);
 
     return (
         <div>
-            <div className="mb-6">
+            <div className="mb-4">
                 <input
                     type="text"
-                    placeholder="Search for an album..."
+                    placeholder="Search for an album or artist..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-1/3 p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
+                    className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
                 />
             </div>
-            {isLoading && <p>Loading...</p>}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
                 {albums.map((album) => (
-                    <button key={album.id} onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id, artist: album.artist } })} className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
+                    <button key={album.id} onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })} className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
                         <div className="w-full bg-gray-700 rounded aspect-square flex items-center justify-center mb-2 overflow-hidden">
                             {album.coverArt ? (
                                 <img
@@ -232,59 +289,46 @@ export function Albums({ credentials, filter, onNavigate }) {
 export function Artists({ credentials, onNavigate }) {
     const [artists, setArtists] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-
-    const fetchArtists = useCallback(async () => {
-        setIsLoading(true);
-        try {
-            const data = await subsonicFetch('getArtists.view', credentials);
-            const artistsContainer = data?.artists;
-            const artistList = artistsContainer?.artist || [];
-            setArtists(Array.isArray(artistList) ? artistList : [artistList]);
-        } catch (e) {
-            console.error("Failed to fetch artists:", e);
-            setArtists([]);
-        }
-        setIsLoading(false);
-    }, [credentials]);
-
-    const searchArtists = useCallback(debounce(async (query) => {
-        if (query.length < 3) {
-            fetchArtists(); // Re-fetch all if search is cleared
-            return;
-        }
-        setIsLoading(true);
-        try {
-            const data = await subsonicFetch('search2.view', credentials, { query, artistCount: 100 });
-            const artistResults = data?.searchResult2?.artist || [];
-            setArtists(Array.isArray(artistResults) ? artistResults : [artistResults]);
-        } catch (e) {
-            console.error("Failed to search artists:", e);
-        }
-        setIsLoading(false);
-    }, 500), [credentials, fetchArtists]);
-
 
     useEffect(() => {
-        if (searchTerm.length >= 3) {
-            searchArtists(searchTerm);
-        } else {
+        const fetchArtists = async () => {
+            try {
+                let artistList = [];
+                if (searchTerm.length >= 3) {
+                    const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, artistCount: 50 });
+                    artistList = data.searchResult2?.artist || [];
+                } else {
+                    const data = await subsonicFetch('getArtists.view', credentials);
+                    const artistsContainer = data?.artists;
+                    if (artistsContainer && artistsContainer.artist) {
+                        artistList = Array.isArray(artistsContainer.artist) ? artistsContainer.artist : [artistsContainer.artist];
+                    }
+                }
+                setArtists(artistList);
+            } catch (e) {
+                console.error("Failed to fetch artists:", e);
+                setArtists([]);
+            }
+        };
+
+        const debounceFetch = setTimeout(() => {
             fetchArtists();
-        }
-    }, [searchTerm, fetchArtists, searchArtists]);
+        }, 300);
+
+        return () => clearTimeout(debounceFetch);
+    }, [credentials, searchTerm]);
 
     return (
         <div>
-            <div className="mb-6">
+            <div className="mb-4">
                 <input
                     type="text"
                     placeholder="Search for an artist..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-1/3 p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
+                    className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
                 />
             </div>
-            {isLoading && <p>Loading...</p>}
             <ul className="space-y-2">
                 {artists.map((artist) => (
                     <li key={artist.id}>
