@@ -82,7 +82,7 @@ const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
 };
 
 
-export function Songs({ credentials, filter, onPlay, onAddToQueue, currentSong }) {
+export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQueue, playQueue = [], currentSong }) {
     const [songs, setSongs] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedSongForPlaylist, setSelectedSongForPlaylist] = useState(null);
@@ -168,6 +168,7 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, currentSong }
                     <tbody>
                         {songs.map(song => {
                             const isPlaying = currentSong && currentSong.id === song.id;
+                            const isInQueue = playQueue.some(s => s.id === song.id);
                             return (
                                 <tr key={song.id} className={`border-b border-gray-700 transition-colors ${isPlaying ? 'bg-teal-900/50' : 'bg-gray-800 hover:bg-gray-600'}`}>
                                     <td className="px-4 py-4">
@@ -187,9 +188,15 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, currentSong }
                                     <td className="px-4 py-4 hidden md:table-cell">{song.album}</td>
                                     <td className="px-4 py-4">
                                         <div className="flex items-center space-x-2">
-                                            <button onClick={() => onAddToQueue(song)} title="Add to queue" className="text-gray-400 hover:text-white">
-                                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                            </button>
+                                            {isInQueue ? (
+                                                <button onClick={() => onRemoveFromQueue(song.id)} title="Remove from queue" className="text-gray-400 hover:text-white">
+                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 10h16M4 14h10M18 14h-4"></path></svg>
+                                                </button>
+                                            ) : (
+                                                <button onClick={() => onAddToQueue(song)} title="Add to queue" className="text-gray-400 hover:text-white">
+                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 10h16M4 14h10m6 0v-4m0 4h-4m4 0v4"></path></svg>
+                                                </button>
+                                            )}
                                             <button onClick={() => setSelectedSongForPlaylist(song)} title="Add to playlist" className="text-gray-400 hover:text-white">
                                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
                                             </button>
@@ -341,4 +348,3 @@ export function Artists({ credentials, onNavigate }) {
         </div>
     );
 }
-

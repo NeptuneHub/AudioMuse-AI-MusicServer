@@ -71,6 +71,14 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
         });
     }, [currentTrackIndex]);
     
+    const handleRemoveSongById = useCallback((songId) => {
+        const indexToRemove = playQueue.findIndex(s => s.id === songId);
+        if (indexToRemove > -1) {
+            handleRemoveFromQueue(indexToRemove);
+        }
+    }, [playQueue, handleRemoveFromQueue]);
+
+
     const handleSelectTrack = useCallback((index) => {
         setCurrentTrackIndex(index);
         setQueueViewOpen(false); // Close queue view when a new track is selected
@@ -137,7 +145,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						)}
 						<h2 className="text-3xl font-bold text-white">{currentView.title}</h2>
 					</div>
-					{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} currentSong={currentSong} />}
+					{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} />}
 					{currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
 					{currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
 					{currentView.page === 'playlists' && <Playlists credentials={credentials} onNavigate={handleNavigate} />}

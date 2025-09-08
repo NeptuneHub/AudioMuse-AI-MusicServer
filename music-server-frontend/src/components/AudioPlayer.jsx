@@ -107,8 +107,8 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
 
                 <div className="flex-grow flex items-center justify-center gap-2">
                     {hasQueue && (
-                        <button onClick={onPlayPrevious} className="text-white p-2 rounded-full hover:bg-gray-700" title="Previous">
-                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M8.445 14.832A1 1 0 0010 14.032V5.968a1 1 0 00-1.555-.832L4.12 9.168a1 1 0 000 1.664l4.325 4.001zM11.555 4.168a1 1 0 011.555.832v8.064a1 1 0 01-1.555.832l-4.325-4.001a1 1 0 010-1.664l4.325-4.001z"></path></svg>
+                        <button onClick={onPlayPrevious} className="bg-gray-600 p-2 rounded-full hover:bg-gray-500" title="Previous">
+                            <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20"><path d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"></path></svg>
                         </button>
                     )}
                     <audio
@@ -121,8 +121,8 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                         style={{ display: song ? 'block' : 'none' }}
                     />
                     {hasQueue && (
-                        <button onClick={onPlayNext} className="text-white p-2 rounded-full hover:bg-gray-700" title="Next">
-                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M11.555 5.168A1 1 0 0010 5.968v8.064a1 1 0 001.555.832l4.325-4.001a1 1 0 000-1.664l-4.325-4.001zM8.445 15.832a1 1 0 01-1.555-.832V5.001a1 1 0 011.555-.832l4.325 4.001a1 1 0 010 1.664l-4.325 4.001z"></path></svg>
+                        <button onClick={onPlayNext} className="bg-gray-600 p-2 rounded-full hover:bg-gray-500" title="Next">
+                            <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"></path></svg>
                         </button>
                     )}
                 </div>
