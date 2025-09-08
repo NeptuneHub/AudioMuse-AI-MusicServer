@@ -1,7 +1,5 @@
 // Suggested path: music-server-frontend/src/components/AudioPlayer.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import AudioPlayer from 'react-h5-audio-player';
-import 'react-h5-audio-player/lib/styles.css';
 
 const subsonicFetch = async (endpoint, creds, params = {}) => {
     const allParams = new URLSearchParams({
@@ -15,7 +13,7 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
     const [audioSrc, setAudioSrc] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(false);
-    const playerRef = useRef(null);
+    const audioRef = useRef(null);
 
     // Effect for fetching audio data
     useEffect(() => {
@@ -75,8 +73,8 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                 ]
             });
 
-            navigator.mediaSession.setActionHandler('play', () => playerRef.current?.audio.current.play());
-            navigator.mediaSession.setActionHandler('pause', () => playerRef.current?.audio.current.pause());
+            navigator.mediaSession.setActionHandler('play', () => audioRef.current?.play());
+            navigator.mediaSession.setActionHandler('pause', () => audioRef.current?.pause());
             navigator.mediaSession.setActionHandler('nexttrack', hasQueue ? onPlayNext : null);
             navigator.mediaSession.setActionHandler('previoustrack', hasQueue ? onPlayPrevious : null);
         }
@@ -86,105 +84,57 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
         setupMediaSession();
     }, [song, setupMediaSession]);
     
+    useEffect(() => {
+        if (audioSrc && audioRef.current) {
+            audioRef.current.play().catch(e => console.error("Autoplay was prevented:", e));
+        }
+    }, [audioSrc]);
+
     return (
-        <div className="fixed bottom-0 left-0 right-0 bg-gray-800 shadow-lg border-t border-gray-700 z-50 player-container h-20 sm:h-24 flex items-center">
-            <style>{`
-                .player-container .rhap_container {
-                    background-color: transparent;
-                    box-shadow: none;
-                    width: 100%;
-                    padding: 0 0.5rem;
-                }
-                .player-container .rhap_progress-indicator, .player-container .rhap_volume-indicator {
-                    background: #14b8a6;
-                }
-                .player-container .rhap_progress-filled, .player-container .rhap_volume-bar {
-                    background-color: #0d9488;
-                }
-                .player-container .rhap_time { color: #9ca3af; }
-                .player-container svg { color: #fff; }
+        <div className="fixed bottom-0 left-0 right-0 bg-gray-800 shadow-lg border-t border-gray-700 z-50 p-2 sm:p-3">
+            <div className="container mx-auto flex items-center justify-between gap-2 sm:gap-4">
+                <div className="flex-shrink-0 w-1/3 sm:w-1/4 overflow-hidden">
+                    {isLoading && !error && <p className="font-semibold truncate text-sm text-gray-400">Loading...</p>}
+                    {error && <p className="font-semibold truncate text-sm text-red-500">Error Loading Track</p>}
+                    {!isLoading && !error && song && (
+                        <>
+                            <p className="font-semibold truncate text-sm text-white">{song.title}</p>
+                            <p className="text-xs text-gray-400 truncate">{song.artist}</p>
+                        </>
+                    )}
+                    {!song && <div className="text-gray-500 text-sm">Select a song</div>}
+                </div>
 
-                /* --- Mobile Layout --- */
-                @media (max-width: 639px) {
-                    .player-container .rhap_main {
-                        display: grid;
-                        grid-template-columns: 1fr auto 1fr;
-                        align-items: center;
-                    }
-                    .player-container .rhap_main-controls { grid-column: 2 / 3; }
-                    .player-container .rhap_additional-controls { grid-column: 3 / 4; justify-self: end; }
-                    .player-container .rhap_header {
-                        grid-column: 1 / 4;
-                        grid-row: 1 / 2;
-                        text-align: center;
-                        padding-bottom: 0.25rem;
-                    }
-                    .player-container .rhap_progress-section { display: none; }
-                    .player-container .rhap_volume-controls { display: none; }
-                }
+                <div className="flex-grow flex items-center justify-center gap-2">
+                    {hasQueue && (
+                        <button onClick={onPlayPrevious} className="text-white p-2 rounded-full hover:bg-gray-700" title="Previous">
+                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M8.445 14.832A1 1 0 0010 14.032V5.968a1 1 0 00-1.555-.832L4.12 9.168a1 1 0 000 1.664l4.325 4.001zM11.555 4.168a1 1 0 011.555.832v8.064a1 1 0 01-1.555.832l-4.325-4.001a1 1 0 010-1.664l4.325-4.001z"></path></svg>
+                        </button>
+                    )}
+                    <audio
+                        ref={audioRef}
+                        src={audioSrc || ''}
+                        controls
+                        onPlay={setupMediaSession}
+                        onEnded={onEnded}
+                        className="w-full max-w-md"
+                        style={{ display: song ? 'block' : 'none' }}
+                    />
+                    {hasQueue && (
+                        <button onClick={onPlayNext} className="text-white p-2 rounded-full hover:bg-gray-700" title="Next">
+                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M11.555 5.168A1 1 0 0010 5.968v8.064a1 1 0 001.555.832l4.325-4.001a1 1 0 000-1.664l-4.325-4.001zM8.445 15.832a1 1 0 01-1.555-.832V5.001a1 1 0 011.555-.832l4.325 4.001a1 1 0 010 1.664l-4.325 4.001z"></path></svg>
+                        </button>
+                    )}
+                </div>
 
-                /* --- Desktop Layout --- */
-                @media (min-width: 640px) {
-                    .player-container .rhap_container { padding: 0 1.5rem; }
-                    .player-container .rhap_main {
-                       display: flex;
-                       align-items: center;
-                    }
-                    .player-container .rhap_header {
-                        min-width: 200px;
-                        max-width: 300px;
-                        margin-right: 1.5rem;
-                    }
-                    .player-container .rhap_controls-section {
-                        flex: 1 1 auto;
-                    }
-                }
-            `}</style>
-            
-            {!song && (
-                 <div className="w-full text-center text-gray-500 px-4">Select a song to play</div>
-            )}
-            
-            {song && (
-                 <AudioPlayer
-                    ref={playerRef}
-                    autoPlay
-                    src={audioSrc}
-                    onPlay={setupMediaSession}
-                    onEnded={onEnded}
-                    showSkipControls={hasQueue}
-                    onClickNext={onPlayNext}
-                    onClickPrevious={onPlayPrevious}
-                    header={
-                        <div className="text-white text-center sm:text-left overflow-hidden">
-                           {isLoading && !error && (
-                                <p className="font-semibold truncate text-sm text-gray-400">Loading...</p>
-                            )}
-                            {error && (
-                                <p className="font-semibold truncate text-sm text-red-500">Error Loading Track</p>
-                            )}
-                            {!isLoading && !error && (
-                                <>
-                                    <p className="font-semibold truncate text-sm">{song.title}</p>
-                                    <p className="text-xs text-gray-400 truncate">{song.artist}</p>
-                                </>
-                            )}
-                        </div>
-                    }
-                    layout="horizontal-reverse"
-                    showJumpControls={false}
-                     customAdditionalControls={
-                        [
-                            <button key="queue-button" onClick={onToggleQueueView} className="text-white p-2 rounded-full hover:bg-gray-700" title="Show queue">
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
-                            </button>
-                        ]
-                    }
-                 />
-            )}
+                <div className="flex-shrink-0">
+                    <button onClick={onToggleQueueView} className="text-white p-2 rounded-full hover:bg-gray-700" title="Show queue">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }
 
 export default CustomAudioPlayer;
-

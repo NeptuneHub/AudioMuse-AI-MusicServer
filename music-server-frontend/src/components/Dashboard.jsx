@@ -101,7 +101,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 	return (
 		<div className="bg-gray-900">
 			{/* The main content area now has padding-bottom to prevent overlap with the fixed player */}
-			<div className="pb-20 sm:pb-24">
+			<div className="pb-24">
 				<nav className="bg-gray-800 shadow-md sticky top-0 z-20">
 					 <div className="container mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
 						<h1 className="text-xl font-bold text-teal-400">AudioMuse-AI</h1>
@@ -168,4 +168,3 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 }
 
 export default Dashboard;
-
