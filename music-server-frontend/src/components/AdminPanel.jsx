@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
 const Modal = ({ children, onClose }) => (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
-        <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md relative">
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+        <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-full sm:w-11/12 md:max-w-md relative">
             <button onClick={onClose} className="absolute top-2 right-2 text-gray-400 hover:text-white">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
             </button>
@@ -85,14 +85,14 @@ function FileBrowser({ onSelect, onClose }) {
     return (
         <Modal onClose={onClose}>
              <h3 className="text-xl font-bold mb-4 text-teal-400">Browse For Folder</h3>
-             <div className="bg-gray-900 p-2 rounded mb-4 font-mono text-sm">Path: {currentPath}</div>
+             <div className="bg-gray-900 p-2 rounded mb-4 font-mono text-sm break-all">{currentPath}</div>
              {error && <p className="text-red-500 mb-4">Error: {error}</p>}
              <ul className="h-64 overflow-y-auto border border-gray-700 rounded p-2 mb-4">
                  {items.map((item, index) => (
                      <li key={index} onClick={() => handleItemClick(item)} className="p-2 hover:bg-gray-700 rounded cursor-pointer flex items-center"><svg className="w-5 h-5 mr-2 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>{item.name}</li>
                  ))}
              </ul>
-             <div className="flex justify-end space-x-4">
+             <div className="flex flex-col sm:flex-row justify-end space-y-2 sm:space-y-0 sm:space-x-4">
                  <button onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
                  <button onClick={() => onSelect(currentPath)} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Select Folder</button>
              </div>
@@ -192,14 +192,14 @@ function LibraryManagement() {
     };
 
     return (
-        <div className="bg-gray-800 p-6 rounded-lg">
+        <div className="bg-gray-800 p-4 sm:p-6 rounded-lg">
             <h3 className="text-xl font-bold mb-4">Library Management</h3>
             <div className="flex flex-col space-y-4">
-                <div className="flex space-x-2">
+                <div className="flex flex-col sm:flex-row sm:space-x-2 space-y-2 sm:space-y-0">
                     <input type="text" value={path} placeholder="Select a folder to scan..." className="flex-grow p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500" readOnly />
                     <button onClick={() => setShowBrowser(true)} disabled={scanStatus.scanning} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:bg-blue-400 disabled:cursor-not-allowed">Browse</button>
                 </div>
-                <div className="flex space-x-4">
+                <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
                     <button onClick={handleStartScan} disabled={scanStatus.scanning || !path} className="flex-grow bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-green-400 disabled:cursor-not-allowed disabled:opacity-50">
                         {scanStatus.scanning ? 'Scan in Progress...' : 'Scan Selected Folder'}
                     </button>
@@ -307,8 +307,8 @@ function UserManagement() {
 	};
 
 	return (
-		<div className="bg-gray-800 p-6 rounded-lg">
-			<div className="flex justify-between items-center mb-4">
+		<div className="bg-gray-800 p-4 sm:p-6 rounded-lg">
+			<div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 space-y-2 sm:space-y-0">
 				<h3 className="text-xl font-bold">User Management</h3>
 				<button onClick={() => setIsCreatingUser(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded">Create User</button>
 			</div>
@@ -328,7 +328,7 @@ function UserManagement() {
 							<tr key={user.username} className="bg-gray-800 border-b border-gray-700 hover:bg-gray-600">
 								<td className="px-6 py-4 font-medium text-white">{user.username}</td>
 								<td className="px-6 py-4">{user.is_admin ? 'Yes' : 'No'}</td>
-								<td className="px-6 py-4 text-right space-x-2">
+								<td className="px-6 py-4 text-right space-x-2 whitespace-nowrap">
 									<button onClick={() => setEditingUser(user)} className="font-medium text-blue-500 hover:underline">Edit Password</button>
 									<button onClick={() => handleDelete(user.username)} className="font-medium text-red-500 hover:underline">Delete</button>
 								</td>
@@ -381,7 +381,7 @@ const UserFormModal = ({ onClose, onSubmit, title }) => {
                     <input type="checkbox" checked={isAdmin} onChange={e => setIsAdmin(e.target.checked)} id="isAdminCheck" className="w-4 h-4 text-teal-600 bg-gray-700 border-gray-600 rounded focus:ring-teal-500" />
                     <label htmlFor="isAdminCheck" className="ml-2 text-sm font-medium text-gray-300">Is Admin?</label>
                 </div>
-                <div className="flex justify-end space-x-4">
+                <div className="flex flex-col sm:flex-row justify-end space-y-2 sm:space-y-0 sm:space-x-4">
                     <button type="button" onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
                     <button type="submit" className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Save</button>
                 </div>
@@ -410,7 +410,7 @@ const PasswordEditModal = ({ user, onClose, onSubmit }) => {
 						required
 					/>
 				</div>
-                <div className="flex justify-end space-x-4">
+                <div className="flex flex-col sm:flex-row justify-end space-y-2 sm:space-y-0 sm:space-x-4">
                     <button type="button" onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
                     <button type="submit" className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Update Password</button>
                 </div>
@@ -421,10 +421,9 @@ const PasswordEditModal = ({ user, onClose, onSubmit }) => {
 
 export default function AdminPanel() {
 	return (
-		<div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+		<div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <LibraryManagement />
             <UserManagement />
         </div>
 	);
 }
-
