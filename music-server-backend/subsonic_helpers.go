@@ -1,4 +1,4 @@
-// Suggested path: music-server-backend/subsonic_helpers.go
+// subsonic_helpers.go
 package main
 
 import (
@@ -88,6 +88,8 @@ func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 			inner["scanStatus"] = body
 		case *SubsonicUsers:
 			inner["users"] = body
+		case *SubsonicConfigurations: // <<< FIX: Added this case
+			inner["configurations"] = body
 		case nil:
 		default:
 			log.Printf("Warning: Unhandled Subsonic body type for JSON response: %T", body)

@@ -1,5 +1,5 @@
 // Suggested path: music-server-frontend/src/components/Dashboard.jsx
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Songs, Albums, Artists } from './MusicViews.jsx';
 import Playlists from './Playlists.jsx';
 import AdminPanel from './AdminPanel.jsx';
@@ -12,9 +12,36 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isQueueViewOpen, setQueueViewOpen] = useState(false);
+    const [audioMuseUrl, setAudioMuseUrl] = useState('');
     
     const currentView = useMemo(() => navigation[navigation.length - 1], [navigation]);
     const currentSong = useMemo(() => playQueue.length > 0 ? playQueue[currentTrackIndex] : null, [playQueue, currentTrackIndex]);
+
+    const fetchConfig = useCallback(async () => {
+        if (!isAdmin) return;
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`/rest/getConfiguration.view?f=json`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json();
+            const subsonicResponse = data["subsonic-response"];
+            if (subsonicResponse.status === 'ok') {
+                const configList = subsonicResponse?.configurations?.configuration || [];
+                 const urlConfig = Array.isArray(configList) 
+                    ? configList.find(c => c.name === 'audiomuse_ai_core_url')
+                    : (configList.name === 'audiomuse_ai_core_url' ? configList : null);
+
+                setAudioMuseUrl(urlConfig?.value || '');
+            }
+        } catch (e) {
+            console.error("Failed to fetch AudioMuse URL config", e);
+        }
+    }, [isAdmin]);
+
+    useEffect(() => {
+        fetchConfig();
+    }, [fetchConfig]);
 
     const handleNavigate = (newView) => {
         setNavigation(prev => [...prev, newView]);
@@ -117,6 +144,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						<div className="hidden md:flex items-center space-x-2">
 							<NavLink page="artists" title="Artists">Artists</NavLink>
 							<NavLink page="albums" title="All Albums">Albums</NavLink>
+                            <NavLink page="songs" title="Songs">Songs</NavLink>
 							<NavLink page="playlists" title="Playlists">Playlists</NavLink>
 							{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
 							<button onClick={onLogout} className="px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold transition duration-300">Logout</button>
@@ -132,6 +160,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						<div className="md:hidden px-2 pt-2 pb-3 space-y-1 sm:px-3">
 							<NavLink page="artists" title="Artists">Artists</NavLink>
 							<NavLink page="albums" title="All Albums">Albums</NavLink>
+                            <NavLink page="songs" title="Songs">Songs</NavLink>
 							<NavLink page="playlists" title="Playlists">Playlists</NavLink>
 							{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
 							<button onClick={onLogout} className="w-full text-left px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold transition duration-300">Logout</button>
@@ -145,11 +174,11 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						)}
 						<h2 className="text-3xl font-bold text-white">{currentView.title}</h2>
 					</div>
-					{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} />}
+					{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} />}
 					{currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
 					{currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
 					{currentView.page === 'playlists' && <Playlists credentials={credentials} onNavigate={handleNavigate} />}
-					{currentView.page === 'admin' && isAdmin && <AdminPanel />}
+					{currentView.page === 'admin' && isAdmin && <AdminPanel onConfigChange={fetchConfig} />}
 				</main>
 			</div>
 
@@ -176,3 +205,4 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 }
 
 export default Dashboard;
+

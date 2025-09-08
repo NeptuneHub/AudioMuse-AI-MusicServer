@@ -1,4 +1,4 @@
-// Suggested path: music-server-backend/admin_handlers.go
+// admin_handlers.go
 package main
 
 import (
@@ -131,3 +131,4 @@ func cancelAdminScan(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Scan cancellation signal sent and status updated."})
 }
+

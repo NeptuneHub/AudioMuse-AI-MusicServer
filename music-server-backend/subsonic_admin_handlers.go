@@ -1,4 +1,4 @@
-// Suggested path: music-server-backend/subsonic_admin_handlers.go
+// subsonic_admin_handlers.go
 package main
 
 import (
@@ -218,5 +218,69 @@ func subsonicChangePassword(c *gin.Context) {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to update password."))
 		return
 	}
+	subsonicRespond(c, newSubsonicResponse(nil))
+}
+
+// --- Configuration Handlers ---
+
+func subsonicGetConfiguration(c *gin.Context) {
+	user, ok := subsonicAuthenticate(c)
+	if !ok || !user.IsAdmin {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		return
+	}
+
+	keyFilter := c.Query("key")
+	query := "SELECT key, value FROM configuration"
+	args := []interface{}{}
+
+	if keyFilter != "" {
+		query += " WHERE key = ?"
+		args = append(args, keyFilter)
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		log.Printf("Error querying configuration: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching configuration."))
+		return
+	}
+	defer rows.Close()
+
+	var configs []SubsonicConfiguration
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			log.Printf("Error scanning configuration row: %v", err)
+			continue
+		}
+		configs = append(configs, SubsonicConfiguration{Name: key, Value: value})
+	}
+
+	subsonicRespond(c, newSubsonicResponse(&SubsonicConfigurations{Configurations: configs}))
+}
+
+func subsonicSetConfiguration(c *gin.Context) {
+	user, ok := subsonicAuthenticate(c)
+	if !ok || !user.IsAdmin {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		return
+	}
+
+	key := c.Query("key")
+	value := c.Query("value")
+
+	if key == "" {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Parameter 'key' is required."))
+		return
+	}
+
+	_, err := db.Exec("INSERT OR REPLACE INTO configuration (key, value) VALUES (?, ?)", key, value)
+	if err != nil {
+		log.Printf("Error updating configuration '%s': %v", key, err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to update configuration."))
+		return
+	}
+
 	subsonicRespond(c, newSubsonicResponse(nil))
 }

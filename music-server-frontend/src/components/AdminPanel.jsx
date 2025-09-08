@@ -113,12 +113,16 @@ function LibraryManagement() {
             headers: { 'Authorization': `Bearer ${token}` }
         };
 
-        if (body) {
+        let url = `/rest/${endpoint}?f=json`;
+
+        if (body && method === 'GET') {
+             url += `&${new URLSearchParams(body).toString()}`;
+        } else if (body) {
             options.headers['Content-Type'] = 'application/json';
             options.body = JSON.stringify(body);
         }
         
-        const response = await fetch(`/rest/${endpoint}?f=json`, options);
+        const response = await fetch(url, options);
         const data = await response.json();
 
         if (!response.ok || data?.["subsonic-response"]?.status === 'failed') {
@@ -253,7 +257,7 @@ function UserManagement() {
 		try {
 			const data = await subsonicApiRequest('getUsers.view');
 			const userList = data?.users?.user || [];
-			setUsers(userList.map(u => ({ username: u.username, is_admin: u.adminRole })));
+            setUsers(Array.isArray(userList) ? userList.map(u => ({ username: u.username, is_admin: u.adminRole })) : [{ username: userList.username, is_admin: userList.adminRole }]);
 		} catch (err) {
 			setError(err.message || 'Failed to fetch users');
 		}
@@ -419,11 +423,117 @@ const PasswordEditModal = ({ user, onClose, onSubmit }) => {
 	);
 };
 
-export default function AdminPanel() {
+
+function ConfigurationManagement({ onConfigChange }) {
+    const [audioMuseUrl, setAudioMuseUrl] = useState('');
+    const [message, setMessage] = useState('');
+    const [error, setError] = useState('');
+
+    const subsonicApiRequest = useCallback(async (endpoint, params = {}) => {
+        const token = localStorage.getItem('token');
+        const query = new URLSearchParams(params);
+        query.append('f', 'json');
+
+        const response = await fetch(`/rest/${endpoint}?${query.toString()}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        const subsonicResponse = data["subsonic-response"];
+
+        if (!response.ok || subsonicResponse.status === 'failed') {
+            const error = subsonicResponse?.error;
+            throw new Error(error?.message || `Server error: ${response.status}`);
+        }
+        return subsonicResponse;
+    }, []);
+
+    const fetchConfig = useCallback(async () => {
+        try {
+            const data = await subsonicApiRequest('getConfiguration.view');
+            const configList = data?.configurations?.configuration || [];
+            const urlConfig = Array.isArray(configList) 
+                ? configList.find(c => c.name === 'audiomuse_ai_core_url')
+                : (configList.name === 'audiomuse_ai_core_url' ? configList : null);
+            
+            if (urlConfig) {
+                 setAudioMuseUrl(urlConfig.value || '');
+            } else {
+                 setAudioMuseUrl('');
+            }
+        } catch (err) {
+            setError(err.message || 'Failed to fetch configuration.');
+        }
+    }, [subsonicApiRequest]);
+
+    useEffect(() => {
+        fetchConfig();
+    }, [fetchConfig]);
+
+    const handleSave = async () => {
+        setError('');
+        setMessage('');
+        try {
+            await subsonicApiRequest('setConfiguration.view', { key: 'audiomuse_ai_core_url', value: audioMuseUrl });
+            setMessage('URL saved successfully.');
+            onConfigChange(); // Notify parent to refetch config
+        } catch (err) {
+            setError(err.message || 'Failed to save URL.');
+        }
+    };
+
+    const handleRemove = async () => {
+        setError('');
+        setMessage('');
+        try {
+            await subsonicApiRequest('setConfiguration.view', { key: 'audiomuse_ai_core_url', value: '' });
+            setMessage('URL removed successfully.');
+            setAudioMuseUrl('');
+            onConfigChange(); // Notify parent to refetch config
+        } catch (err) {
+            setError(err.message || 'Failed to remove URL.');
+        }
+    }
+
+    return (
+        <div className="bg-gray-800 p-4 sm:p-6 rounded-lg">
+            <h3 className="text-xl font-bold mb-4">AudioMuse-AI Core</h3>
+            <p className="text-sm text-gray-400 mb-4">
+                Enter the base URL for the AudioMuse-AI Core service to enable "Instant Mix" and other AI features.
+            </p>
+            {error && <p className="text-red-500 mb-4 p-3 bg-red-900/50 rounded">{error}</p>}
+            {message && <p className="text-green-400 mb-4 p-3 bg-green-900/50 rounded">{message}</p>}
+            <div className="flex flex-col space-y-4">
+                <div className="flex flex-col sm:flex-row sm:space-x-2 space-y-2 sm:space-y-0">
+                    <input 
+                        type="text" 
+                        value={audioMuseUrl}
+                        onChange={(e) => setAudioMuseUrl(e.target.value)}
+                        placeholder="http://localhost:5000" 
+                        className="flex-grow p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500" 
+                    />
+                </div>
+                <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
+                    <button onClick={handleSave} className="flex-grow bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
+                        Save URL
+                    </button>
+                     <button onClick={handleRemove} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
+                        Remove
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+export default function AdminPanel({ onConfigChange }) {
 	return (
 		<div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <LibraryManagement />
+            <div className="flex flex-col gap-8">
+                <LibraryManagement />
+                <ConfigurationManagement onConfigChange={onConfigChange} />
+            </div>
             <UserManagement />
         </div>
 	);
 }
+

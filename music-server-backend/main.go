@@ -1,4 +1,4 @@
-// Suggested path: music-server-backend/main.go
+// main.go
 package main
 
 import (
@@ -84,6 +84,14 @@ func main() {
 		rest.GET("/updateUser.view", subsonicUpdateUser)
 		rest.GET("/deleteUser.view", subsonicDeleteUser)
 		rest.GET("/changePassword.view", subsonicChangePassword)
+
+		// Configuration Management
+		rest.GET("/getConfiguration.view", subsonicGetConfiguration)
+		rest.GET("/setConfiguration.view", subsonicSetConfiguration)
+
+		// AudioMuse-AI Core Endpoints
+		rest.GET("/getSimilarSongs.view", subsonicGetSimilarSongs)
+		rest.GET("/getSongPath.view", subsonicGetSongPath)
 	}
 
 	// JSON API routes for the web UI
@@ -219,6 +227,17 @@ func initDB() {
 	`)
 	if err != nil {
 		log.Fatal("Failed to create settings table:", err)
+	}
+
+	// Create configuration table to store general application configuration.
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS configuration (
+			key TEXT PRIMARY KEY,
+			value TEXT
+		);
+	`)
+	if err != nil {
+		log.Fatal("Failed to create configuration table:", err)
 	}
 
 	// Create initial admin user if not exists

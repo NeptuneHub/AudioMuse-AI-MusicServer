@@ -1,4 +1,4 @@
-// Suggested path: music-server-backend/models.go
+// models.go
 package main
 
 import "encoding/xml"
@@ -68,12 +68,13 @@ type SubsonicLicense struct {
 
 // SubsonicDirectory represents a container for songs (e.g., a playlist).
 type SubsonicDirectory struct {
-	XMLName   xml.Name       `xml:"directory" json:"-"`
-	ID        string         `xml:"id,attr,omitempty" json:"id,omitempty"`
-	Name      string         `xml:"name,attr,omitempty" json:"name,omitempty"`
-	CoverArt  string         `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
-	SongCount int            `xml:"songCount,attr" json:"songCount"`
-	Songs     []SubsonicSong `xml:"song" json:"song"`
+	XMLName       xml.Name       `xml:"directory" json:"-"`
+	ID            string         `xml:"id,attr,omitempty" json:"id,omitempty"`
+	Name          string         `xml:"name,attr,omitempty" json:"name,omitempty"`
+	CoverArt      string         `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	SongCount     int            `xml:"songCount,attr" json:"songCount"`
+	TotalDistance float64        `xml:"totalDistance,attr,omitempty" json:"totalDistance,omitempty"`
+	Songs         []SubsonicSong `xml:"song" json:"song"`
 }
 
 // SubsonicAlbumWithSongs represents an album and its songs for getAlbum responses.
@@ -97,6 +98,7 @@ type SubsonicSong struct {
 	Path       string   `xml:"path,attr,omitempty" json:"path,omitempty"`
 	PlayCount  int      `xml:"playCount,attr,omitempty" json:"playCount,omitempty"`
 	LastPlayed string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
+	Distance   float64  `xml:"distance,attr,omitempty" json:"distance,omitempty"`
 }
 
 // SubsonicArtists represents a list of artists.
@@ -171,3 +173,15 @@ type SubsonicUser struct {
 	SettingsRole bool     `xml:"settingsRole,attr" json:"settingsRole"` // Same as admin for us
 }
 
+// SubsonicConfigurations represents a list of configuration key-value pairs.
+type SubsonicConfigurations struct {
+	XMLName        xml.Name                `xml:"configurations" json:"-"`
+	Configurations []SubsonicConfiguration `xml:"configuration" json:"configuration"`
+}
+
+// SubsonicConfiguration represents a single configuration key-value pair.
+type SubsonicConfiguration struct {
+	XMLName xml.Name `xml:"configuration" json:"-"`
+	Name    string   `xml:"name,attr" json:"name"`
+	Value   string   `xml:"value,attr" json:"value"`
+}

@@ -82,40 +82,64 @@ const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
 };
 
 
-export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQueue, playQueue = [], currentSong }) {
+export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQueue, playQueue = [], currentSong, onNavigate, audioMuseUrl }) {
     const [songs, setSongs] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedSongForPlaylist, setSelectedSongForPlaylist] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [mixMessage, setMixMessage] = useState('');
+
+    useEffect(() => {
+        // When filter changes, it implies navigation, so clear previous mix messages.
+        setMixMessage('');
+    }, [filter]);
 
     useEffect(() => {
         const fetchSongs = async () => {
+            setIsLoading(true);
             try {
                 let songList = [];
-                if (searchTerm.length >= 3) {
+                // Handle Instant Mix (similar songs) request from previous navigation
+                if (filter?.similarToSongId) {
+                     const data = await subsonicFetch('getSimilarSongs.view', credentials, { id: filter.similarToSongId, count: 20 });
+                     songList = data.directory?.song || [];
+                }
+                // Handle search request
+                else if (searchTerm.length >= 3) {
                     const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, songCount: 100 });
                     songList = data.searchResult2?.song || [];
-                } else if (filter && searchTerm.length === 0) {
+                } 
+                // Handle album or playlist view
+                else if (filter && !filter.similarToSongId && searchTerm.length === 0) {
                     const endpoint = filter.albumId ? 'getAlbum.view' : 'getPlaylist.view';
                     const idParam = filter.albumId || filter.playlistId;
-                    if (!idParam) { setSongs([]); return; }
+                    if (!idParam) { setSongs([]); setIsLoading(false); return; }
 
                     const data = await subsonicFetch(endpoint, credentials, { id: idParam });
                     const songContainer = data.album || data.directory;
                     if (songContainer && songContainer.song) {
                         songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
                     }
-                } else {
+                } 
+                // Default state for main songs page: empty until search
+                else {
                      setSongs([]);
                 }
-                setSongs(songList);
+                setSongs(Array.isArray(songList) ? songList : [songList].filter(Boolean));
             } catch (e) {
                 console.error("Failed to fetch songs:", e);
                 setSongs([]);
+            } finally {
+                setIsLoading(false);
             }
         };
 
         const debounceFetch = setTimeout(() => {
-            fetchSongs();
+             if (filter?.similarToSongId || searchTerm.length >= 3 || (filter && !filter.similarToSongId && searchTerm.length === 0)) {
+                fetchSongs();
+            } else {
+                setSongs([]); 
+            }
         }, 300);
 
         return () => clearTimeout(debounceFetch);
@@ -128,6 +152,30 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
         }
     };
     
+    const handleInstantMix = async (song) => {
+        if (!audioMuseUrl || !onPlay) return;
+
+        setMixMessage(`Generating Instant Mix for "${song.title}"...`);
+        try {
+            const data = await subsonicFetch('getSimilarSongs.view', credentials, { id: song.id, count: 20 });
+            let similarSongs = data.directory?.song || [];
+            similarSongs = Array.isArray(similarSongs) ? similarSongs : [similarSongs].filter(Boolean);
+
+            if (similarSongs.length > 0) {
+                const newQueue = [song, ...similarSongs];
+                onPlay(song, newQueue); 
+                setMixMessage('');
+            } else {
+                setMixMessage('No similar songs found.');
+                setTimeout(() => setMixMessage(''), 3000);
+            }
+        } catch (error) {
+            console.error("Failed to create Instant Mix:", error);
+            setMixMessage('Error creating Instant Mix.');
+            setTimeout(() => setMixMessage(''), 3000);
+        }
+    };
+
     return (
         <div>
             <div className="mb-4">
@@ -139,64 +187,84 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                     className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
                 />
             </div>
+            
+            {mixMessage && <p className="text-center text-teal-400 mb-4">{mixMessage}</p>}
 
-            {songs.length > 0 && !searchTerm &&(
+            {(songs.length > 0 && !searchTerm && (filter?.albumId || filter?.playlistId)) && (
                 <button onClick={handlePlayAlbum} className="mb-4 bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Play All</button>
             )}
-            <div className="overflow-x-auto">
-                <table className="min-w-full text-sm text-left text-gray-400">
-                    <thead className="text-xs text-gray-300 uppercase bg-gray-700">
-                        <tr>
-                            <th className="px-4 py-3 w-12"></th>
-                            <th className="px-4 py-3">Title</th>
-                            <th className="px-4 py-3 hidden sm:table-cell">Artist</th>
-                            <th className="px-4 py-3 hidden md:table-cell">Album</th>
-                            <th className="px-4 py-3 w-24">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {songs.map(song => {
-                            const isPlaying = currentSong && currentSong.id === song.id;
-                            const isInQueue = playQueue.some(s => s.id === song.id);
-                            return (
-                                <tr key={song.id} className={`border-b border-gray-700 transition-colors ${isPlaying ? 'bg-teal-900/50' : 'bg-gray-800 hover:bg-gray-600'}`}>
-                                    <td className="px-4 py-4">
-                                        <button onClick={() => onPlay(song, songs)} title="Play song">
-                                            {isPlaying ? (
-                                                <svg className="w-6 h-6 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg>
-                                            ) : (
-                                                <svg className="w-6 h-6 text-teal-400 hover:text-teal-200" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path></svg>
-                                            )}
-                                        </button>
-                                    </td>
-                                    <td className={`px-4 py-4 font-medium ${isPlaying ? 'text-green-400' : 'text-white'}`}>
-                                        <div>{song.title}</div>
-                                        <div className="sm:hidden text-xs text-gray-400">{song.artist}</div>
-                                    </td>
-                                    <td className="px-4 py-4 hidden sm:table-cell">{song.artist}</td>
-                                    <td className="px-4 py-4 hidden md:table-cell">{song.album}</td>
-                                    <td className="px-4 py-4">
-                                        <div className="flex items-center space-x-2">
-                                            {isInQueue ? (
-                                                <button onClick={() => onRemoveFromQueue(song.id)} title="Remove from queue" className="text-gray-400 hover:text-red-500">
-                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                                </button>
-                                            ) : (
-                                                <button onClick={() => onAddToQueue(song)} title="Add to queue" className="text-gray-400 hover:text-white">
-                                                    <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" className="stroke-green-500" /></svg>
-                                                </button>
-                                            )}
-                                            <button onClick={() => setSelectedSongForPlaylist(song)} title="Add to playlist" className="text-gray-400 hover:text-white">
-                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+            {isLoading && <p className="text-center text-gray-400">Loading...</p>}
+            
+            {!isLoading && songs.length === 0 && (searchTerm || filter) && <p className="text-center text-gray-500">No songs found.</p>}
+
+            {!isLoading && songs.length === 0 && !searchTerm && !filter && (
+                 <p className="text-center text-gray-500">Start typing in the search bar to find songs.</p>
+            )}
+
+            {songs.length > 0 && (
+                <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm text-left text-gray-400">
+                        <thead className="text-xs text-gray-300 uppercase bg-gray-700">
+                            <tr>
+                                <th className="px-4 py-3 w-12"></th>
+                                <th className="px-4 py-3">Title</th>
+                                <th className="px-4 py-3 hidden sm:table-cell">Artist</th>
+                                <th className="px-4 py-3 hidden md:table-cell">Album</th>
+                                <th className="px-4 py-3 w-32 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {songs.map(song => {
+                                const isPlaying = currentSong && currentSong.id === song.id;
+                                const isInQueue = playQueue.some(s => s.id === song.id);
+                                return (
+                                    <tr key={song.id} className={`border-b border-gray-700 transition-colors ${isPlaying ? 'bg-teal-900/50' : 'bg-gray-800 hover:bg-gray-600'}`}>
+                                        <td className="px-4 py-4">
+                                            <button onClick={() => onPlay(song, songs)} title="Play song">
+                                                {isPlaying ? (
+                                                    <svg className="w-6 h-6 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg>
+                                                ) : (
+                                                    <svg className="w-6 h-6 text-teal-400 hover:text-teal-200" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path></svg>
+                                                )}
                                             </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
-            </div>
+                                        </td>
+                                        <td className={`px-4 py-4 font-medium ${isPlaying ? 'text-green-400' : 'text-white'}`}>
+                                            <div>{song.title}</div>
+                                            <div className="sm:hidden text-xs text-gray-400">{song.artist}</div>
+                                        </td>
+                                        <td className="px-4 py-4 hidden sm:table-cell">{song.artist}</td>
+                                        <td className="px-4 py-4 hidden md:table-cell">{song.album}</td>
+                                        <td className="px-4 py-4">
+                                            <div className="flex items-center justify-end space-x-2">
+                                                <button 
+                                                    onClick={() => handleInstantMix(song)} 
+                                                    title="Instant Mix" 
+                                                    disabled={!audioMuseUrl}
+                                                    className={`p-1 rounded-full transition-colors ${audioMuseUrl ? 'text-teal-400 hover:bg-gray-700' : 'text-gray-600 cursor-not-allowed'}`}
+                                                >
+                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                                </button>
+                                                {isInQueue ? (
+                                                    <button onClick={() => onRemoveFromQueue(song.id)} title="Remove from queue" className="text-gray-400 hover:text-red-500">
+                                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                                    </button>
+                                                ) : (
+                                                    <button onClick={() => onAddToQueue(song)} title="Add to queue" className="text-gray-400 hover:text-white">
+                                                        <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" className="stroke-green-500" /></svg>
+                                                    </button>
+                                                )}
+                                                <button onClick={() => setSelectedSongForPlaylist(song)} title="Add to playlist" className="text-gray-400 hover:text-white">
+                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            )}
              {selectedSongForPlaylist && (
                 <AddToPlaylistModal
                     song={selectedSongForPlaylist}
@@ -337,3 +405,4 @@ export function Artists({ credentials, onNavigate }) {
         </div>
     );
 }
+
