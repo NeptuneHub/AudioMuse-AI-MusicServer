@@ -1,10 +1,10 @@
 // Suggested path: music-server-frontend/src/components/Dashboard.jsx
 import React, { useState, useMemo, useCallback } from 'react';
-import { Songs, Albums, Artists } from './MusicViews';
-import Playlists from './Playlists';
-import AdminPanel from './AdminPanel';
-import CustomAudioPlayer from './AudioPlayer';
-import PlayQueueView from './PlayQueueView';
+import { Songs, Albums, Artists } from './MusicViews.jsx';
+import Playlists from './Playlists.jsx';
+import AdminPanel from './AdminPanel.jsx';
+import CustomAudioPlayer from './AudioPlayer.jsx';
+import PlayQueueView from './PlayQueueView.jsx';
 
 function Dashboard({ onLogout, isAdmin, credentials }) {
     const [navigation, setNavigation] = useState([{ page: 'artists', title: 'Artists' }]);
@@ -99,51 +99,52 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     );
 
 	return (
-		<div className="flex flex-col h-screen bg-gray-900">
-			<nav className="bg-gray-800 shadow-md z-20">
-                 <div className="container mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
-                    <h1 className="text-xl font-bold text-teal-400">AudioMuse-AI</h1>
-                    
-                    <div className="hidden md:flex items-center space-x-2">
-                        <NavLink page="artists" title="Artists">Artists</NavLink>
-                        <NavLink page="albums" title="All Albums">Albums</NavLink>
-                        <NavLink page="playlists" title="Playlists">Playlists</NavLink>
-                        {isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
-                        <button onClick={onLogout} className="px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold transition duration-300">Logout</button>
-                    </div>
+		<div className="bg-gray-900">
+			{/* The main content area now has padding-bottom to prevent overlap with the fixed player */}
+			<div className="pb-20 sm:pb-24">
+				<nav className="bg-gray-800 shadow-md sticky top-0 z-20">
+					 <div className="container mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
+						<h1 className="text-xl font-bold text-teal-400">AudioMuse-AI</h1>
+						
+						<div className="hidden md:flex items-center space-x-2">
+							<NavLink page="artists" title="Artists">Artists</NavLink>
+							<NavLink page="albums" title="All Albums">Albums</NavLink>
+							<NavLink page="playlists" title="Playlists">Playlists</NavLink>
+							{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
+							<button onClick={onLogout} className="px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold transition duration-300">Logout</button>
+						</div>
 
-                    <div className="md:hidden">
-                        <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="text-gray-300 hover:text-white focus:outline-none p-2 rounded-md">
-                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
-                        </button>
-                    </div>
-                </div>
-                {isMenuOpen && (
-                    <div className="md:hidden px-2 pt-2 pb-3 space-y-1 sm:px-3">
-                        <NavLink page="artists" title="Artists">Artists</NavLink>
-                        <NavLink page="albums" title="All Albums">Albums</NavLink>
-                        <NavLink page="playlists" title="Playlists">Playlists</NavLink>
-                        {isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
-                        <button onClick={onLogout} className="w-full text-left px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold transition duration-300">Logout</button>
-                    </div>
-                )}
-			</nav>
-            {/* Main content with increased bottom padding to avoid player overlap */}
-			<main className="flex-1 p-4 sm:p-8 overflow-y-auto pb-32">
-                <div className="mb-4">
-                    {navigation.length > 1 && (
-                        <button onClick={handleBack} className="text-teal-400 hover:text-teal-200 font-semibold mb-4">&larr; Back</button>
-                    )}
-                    <h2 className="text-3xl font-bold text-white">{currentView.title}</h2>
-                </div>
-				{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} currentSong={currentSong} />}
-				{currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
-				{currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
-				{currentView.page === 'playlists' && <Playlists credentials={credentials} onNavigate={handleNavigate} />}
-                {currentView.page === 'admin' && isAdmin && <AdminPanel />}
-			</main>
+						<div className="md:hidden">
+							<button onClick={() => setIsMenuOpen(!isMenuOpen)} className="text-gray-300 hover:text-white focus:outline-none p-2 rounded-md">
+								 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
+							</button>
+						</div>
+					</div>
+					{isMenuOpen && (
+						<div className="md:hidden px-2 pt-2 pb-3 space-y-1 sm:px-3">
+							<NavLink page="artists" title="Artists">Artists</NavLink>
+							<NavLink page="albums" title="All Albums">Albums</NavLink>
+							<NavLink page="playlists" title="Playlists">Playlists</NavLink>
+							{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
+							<button onClick={onLogout} className="w-full text-left px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold transition duration-300">Logout</button>
+						</div>
+					)}
+				</nav>
+				<main className="p-4 sm:p-8">
+					<div className="mb-4">
+						{navigation.length > 1 && (
+							<button onClick={handleBack} className="text-teal-400 hover:text-teal-200 font-semibold mb-4">&larr; Back</button>
+						)}
+						<h2 className="text-3xl font-bold text-white">{currentView.title}</h2>
+					</div>
+					{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} currentSong={currentSong} />}
+					{currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
+					{currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
+					{currentView.page === 'playlists' && <Playlists credentials={credentials} onNavigate={handleNavigate} />}
+					{currentView.page === 'admin' && isAdmin && <AdminPanel />}
+				</main>
+			</div>
 
-            {/* The Audio Player is always rendered to reserve space, preventing content overlap */}
             <CustomAudioPlayer
                 song={currentSong}
                 onPlayNext={handlePlayNext}
