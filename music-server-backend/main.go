@@ -66,12 +66,12 @@ func main() {
 		rest.GET("/getAlbumList2.view", subsonicGetAlbumList2)
 		rest.GET("/getPlaylists.view", subsonicGetPlaylists)
 		rest.GET("/getPlaylist.view", subsonicGetPlaylist)
-		rest.Any("/createPlaylist.view", subsonicCreatePlaylist) // Changed from GET to Any
+		rest.Any("/createPlaylist.view", subsonicCreatePlaylist)
 		rest.GET("/updatePlaylist.view", subsonicUpdatePlaylist)
 		rest.GET("/deletePlaylist.view", subsonicDeletePlaylist)
 		rest.GET("/getAlbum.view", subsonicGetAlbum)
-		rest.GET("/search2.view", subsonicSearch)
-		rest.GET("/search3.view", subsonicSearch)
+		rest.GET("/search2.view", subsonicSearch2)
+		rest.GET("/search3.view", subsonicSearch2) // search3 is an alias for search2
 		rest.GET("/getRandomSongs.view", subsonicGetRandomSongs)
 		rest.GET("/getCoverArt.view", subsonicGetCoverArt)
 		rest.GET("/tokenInfo.view", subsonicTokenInfo)
