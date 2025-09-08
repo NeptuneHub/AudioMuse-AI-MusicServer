@@ -1,10 +1,10 @@
 // Suggested path: music-server-frontend/src/components/Dashboard.jsx
 import React, { useState, useMemo, useCallback } from 'react';
-import { Songs, Albums, Artists } from './MusicViews.jsx';
-import Playlists from './Playlists.jsx';
-import AdminPanel from './AdminPanel.jsx';
-import CustomAudioPlayer from './AudioPlayer.jsx';
-import PlayQueueView from './PlayQueueView.jsx';
+import { Songs, Albums, Artists } from './MusicViews';
+import Playlists from './Playlists';
+import AdminPanel from './AdminPanel';
+import CustomAudioPlayer from './AudioPlayer';
+import PlayQueueView from './PlayQueueView';
 
 function Dashboard({ onLogout, isAdmin, credentials }) {
     const [navigation, setNavigation] = useState([{ page: 'artists', title: 'Artists' }]);
@@ -14,7 +14,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     const [isQueueViewOpen, setQueueViewOpen] = useState(false);
     
     const currentView = useMemo(() => navigation[navigation.length - 1], [navigation]);
-    const currentSong = useMemo(() => playQueue[currentTrackIndex], [playQueue, currentTrackIndex]);
+    const currentSong = useMemo(() => playQueue.length > 0 ? playQueue[currentTrackIndex] : null, [playQueue, currentTrackIndex]);
 
     const handleNavigate = (newView) => {
         setNavigation(prev => [...prev, newView]);
@@ -51,15 +51,21 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     const handleRemoveFromQueue = useCallback((indexToRemove) => {
         setPlayQueue(prevQueue => {
             const newQueue = prevQueue.filter((_, index) => index !== indexToRemove);
+            
+            if (newQueue.length === 0) {
+                 // If the queue is now empty, reset the index.
+                setCurrentTrackIndex(0);
+                return [];
+            }
+
             if (indexToRemove < currentTrackIndex) {
                 // If removing a song before the current one, decrement the index
                 setCurrentTrackIndex(prev => prev - 1);
             } else if (indexToRemove === currentTrackIndex) {
-                // If removing the current song, and it's the last song, wrap around or stop
+                // If removing the current song, and it's the last song, wrap around to the start
                 if (currentTrackIndex >= newQueue.length) {
-                    setCurrentTrackIndex(0); // Go to the start of the new, shorter queue
+                    setCurrentTrackIndex(0); 
                 }
-                // Otherwise, the next song will automatically take the current index, so no change needed
             }
             return newQueue;
         });
@@ -93,8 +99,8 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     );
 
 	return (
-		<div className="flex flex-col h-screen">
-			<nav className="bg-gray-800 shadow-md">
+		<div className="flex flex-col h-screen bg-gray-900">
+			<nav className="bg-gray-800 shadow-md z-20">
                  <div className="container mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
                     <h1 className="text-xl font-bold text-teal-400">AudioMuse-AI</h1>
                     
@@ -107,7 +113,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                     </div>
 
                     <div className="md:hidden">
-                        <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="text-gray-300 hover:text-white focus:outline-none">
+                        <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="text-gray-300 hover:text-white focus:outline-none p-2 rounded-md">
                              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
                         </button>
                     </div>
@@ -123,12 +129,12 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                 )}
 			</nav>
             {/* Main content with increased bottom padding to avoid player overlap */}
-			<main className="flex-1 p-4 sm:p-8 bg-gray-900 overflow-y-auto pb-40 sm:pb-32">
+			<main className="flex-1 p-4 sm:p-8 overflow-y-auto pb-32">
                 <div className="mb-4">
                     {navigation.length > 1 && (
                         <button onClick={handleBack} className="text-teal-400 hover:text-teal-200 font-semibold mb-4">&larr; Back</button>
                     )}
-                    <h2 className="text-3xl font-bold">{currentView.title}</h2>
+                    <h2 className="text-3xl font-bold text-white">{currentView.title}</h2>
                 </div>
 				{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} currentSong={currentSong} />}
 				{currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
@@ -136,6 +142,8 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 				{currentView.page === 'playlists' && <Playlists credentials={credentials} onNavigate={handleNavigate} />}
                 {currentView.page === 'admin' && isAdmin && <AdminPanel />}
 			</main>
+
+            {/* The Audio Player is always rendered to reserve space, preventing content overlap */}
             <CustomAudioPlayer
                 song={currentSong}
                 onPlayNext={handlePlayNext}
@@ -145,6 +153,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                 hasQueue={playQueue.length > 1}
                 onToggleQueueView={() => setQueueViewOpen(true)}
             />
+
             <PlayQueueView
                 isOpen={isQueueViewOpen}
                 onClose={() => setQueueViewOpen(false)}

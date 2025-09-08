@@ -1,9 +1,9 @@
 // Suggested path: music-server-frontend/src/components/AudioPlayer.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-// This is the correct import. The error indicates a build environment issue.
-// Please run `npm install` in your terminal to fix the "Could not resolve" error.
-import AudioPlayer from 'react-h5-audio-player';
-import 'react-h5-audio-player/lib/styles.css';
+// To bypass the persistent "Could not resolve" error in your environment,
+// this component is being loaded from a reliable CDN. This is a workaround
+// for local dependency issues.
+import AudioPlayer from 'https://esm.sh/react-h5-audio-player@3.9.1?deps=react@18.2.0';
 
 const subsonicFetch = async (endpoint, creds, params = {}) => {
     const allParams = new URLSearchParams({
@@ -15,18 +15,32 @@ const subsonicFetch = async (endpoint, creds, params = {}) => {
 
 function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevious, hasQueue, onToggleQueueView }) {
     const [audioSrc, setAudioSrc] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(false);
     const playerRef = useRef(null);
+
+    // Effect to dynamically load the CSS for the audio player
+    useEffect(() => {
+        const linkId = 'react-h5-audio-player-styles';
+        if (!document.getElementById(linkId)) {
+            const link = document.createElement('link');
+            link.id = linkId;
+            link.rel = 'stylesheet';
+            link.href = 'https://cdn.jsdelivr.net/npm/react-h5-audio-player@3.9.1/lib/styles.css';
+            document.head.appendChild(link);
+        }
+    }, []);
 
     // Effect for fetching audio data
     useEffect(() => {
         if (!song) {
             setAudioSrc(null);
             setError(false);
+            setIsLoading(false);
             return;
         }
 
-        setAudioSrc(null);
+        setIsLoading(true);
         setError(false);
         let objectUrl;
 
@@ -39,10 +53,13 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                 const blob = await response.blob();
                 objectUrl = URL.createObjectURL(blob);
                 setAudioSrc(objectUrl);
+                setError(false);
             } catch (err) {
                 console.error("Error streaming song:", err);
                 setError(true);
                 setAudioSrc(null);
+            } finally {
+                setIsLoading(false);
             }
         };
 
@@ -55,7 +72,6 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
         };
     }, [song, credentials]);
 
-    // Function to setup Media Session API, wrapped in useCallback to fix dependency warning.
     const setupMediaSession = useCallback(() => {
         if (song && 'mediaSession' in navigator) {
             navigator.mediaSession.metadata = new window.MediaMetadata({
@@ -71,85 +87,103 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                 ]
             });
 
-            // Set action handlers
-            navigator.mediaSession.setActionHandler('play', () => {
-                if (playerRef.current?.audio.current) playerRef.current.audio.current.play();
-            });
-            navigator.mediaSession.setActionHandler('pause', () => {
-                 if (playerRef.current?.audio.current) playerRef.current.audio.current.pause();
-            });
+            navigator.mediaSession.setActionHandler('play', () => playerRef.current?.audio.current.play());
+            navigator.mediaSession.setActionHandler('pause', () => playerRef.current?.audio.current.pause());
             navigator.mediaSession.setActionHandler('nexttrack', hasQueue ? onPlayNext : null);
             navigator.mediaSession.setActionHandler('previoustrack', hasQueue ? onPlayPrevious : null);
         }
     }, [song, credentials, hasQueue, onPlayNext, onPlayPrevious]);
 
-    // Effect to update metadata when song changes
     useEffect(() => {
-        // We update the metadata here, but the action handlers are set on play
         setupMediaSession();
     }, [song, setupMediaSession]);
-
-    if (!song) {
-        return null;
-    }
     
     return (
-        <div className="fixed bottom-0 left-0 right-0 bg-gray-800 p-2 sm:p-4 shadow-lg border-t border-gray-700 z-50 player-container">
+        <div className="fixed bottom-0 left-0 right-0 bg-gray-800 shadow-lg border-t border-gray-700 z-50 player-container h-28 flex items-center">
             <style>{`
-                /* Custom styles to make the player theme match the app */
                 .player-container .rhap_container {
                     background-color: transparent;
                     box-shadow: none;
-                    padding: 0;
+                    width: 100%;
+                    padding: 0 1rem;
                 }
-                .player-container .rhap_main-controls {
-                    flex: 1 1 auto;
+                .player-container .rhap_main {
+                    flex-direction: column;
                     justify-content: center;
                 }
-                .player-container .rhap_additional-controls {
-                     flex: 0 0 auto;
+                @media (min-width: 640px) {
+                    .player-container .rhap_main {
+                       flex-direction: row;
+                       align-items: center;
+                    }
+                    .player-container .rhap_controls-section {
+                        flex: 1 1 auto;
+                    }
                 }
                 .player-container .rhap_progress-indicator, .player-container .rhap_volume-indicator {
                     background: #14b8a6; /* teal-500 */
                 }
-                 .player-container .rhap_progress-filled {
+                .player-container .rhap_progress-filled, .player-container .rhap_volume-bar {
                     background-color: #0d9488; /* teal-600 */
                 }
                 .player-container .rhap_time, .rhap_current-time, .rhap_total-time {
                     color: #9ca3af; /* gray-400 */
                 }
-                 .player-container svg {
-                    color: #fff;
+                .player-container svg { color: #fff; }
+
+                /* Mobile specific tweaks for a more compact player */
+                @media (max-width: 639px) {
+                    .player-container .rhap_volume-controls, .player-container .rhap_loop-controls, .rhap_shuffle-controls {
+                        display: none;
+                    }
+                    .player-container .rhap_main-controls {
+                         padding: 0;
+                    }
+                     .player-container .rhap_additional-controls {
+                        flex-grow: 0;
+                    }
                 }
             `}</style>
-             <AudioPlayer
-                // key={song.id} // REMOVED: This was causing the player to remount on every song change.
-                ref={playerRef}
-                autoPlay
-                src={audioSrc}
-                onPlay={setupMediaSession} // Set handlers on play to satisfy mobile browser rules
-                onEnded={onEnded}
-                showSkipControls={hasQueue}
-                onClickNext={onPlayNext}
-                onClickPrevious={onPlayPrevious}
-                header={
-                    <div className="text-white text-center pb-2 px-12">
-                        <p className="font-bold truncate">{song.title}</p>
-                        <p className="text-sm text-gray-400 truncate">{song.artist}</p>
-                    </div>
-                }
-                showJumpControls={true} // FIX: Re-enabled jump controls
-                layout="stacked" // FIX: Changed layout for better consistency
-                customAdditionalControls={ // FIX: Moved queue button here to avoid replacing main controls
-                    [
-                        <button key="queue-button" onClick={onToggleQueueView} className="text-white p-2 rounded-full hover:bg-gray-700" title="Show queue">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
-                        </button>
-                    ]
-                }
-             />
-             {error && <div className="absolute inset-0 bg-gray-800 flex items-center justify-center text-red-500">Error Loading Track</div>}
-             {!audioSrc && !error && <div className="absolute inset-0 bg-gray-800 flex items-center justify-center text-gray-400">Loading...</div>}
+            
+            {!song && (
+                 <div className="w-full text-center text-gray-500 px-4">Select a song to play</div>
+            )}
+            
+            {song && (
+                 <AudioPlayer
+                    ref={playerRef}
+                    autoPlay
+                    src={audioSrc}
+                    onPlay={setupMediaSession}
+                    onEnded={onEnded}
+                    showSkipControls={hasQueue}
+                    onClickNext={onPlayNext}
+                    onClickPrevious={onPlayPrevious}
+                    header={
+                        <div className="text-white text-center w-full sm:w-auto sm:min-w-[150px] md:min-w-[250px] sm:mr-4">
+                           {isLoading ? (
+                                <p className="font-bold truncate text-sm text-gray-400">Loading...</p>
+                            ) : error ? (
+                                <p className="font-bold truncate text-sm text-red-500">Error Loading Track</p>
+                            ) : (
+                                <>
+                                    <p className="font-bold truncate text-sm">{song.title}</p>
+                                    <p className="text-sm text-gray-400 truncate">{song.artist}</p>
+                                </>
+                            )}
+                        </div>
+                    }
+                    showJumpControls={true}
+                    layout="horizontal-reverse"
+                     customAdditionalControls={
+                        [
+                            <button key="queue-button" onClick={onToggleQueueView} className="text-white p-2 rounded-full hover:bg-gray-700" title="Show queue">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                            </button>
+                        ]
+                    }
+                 />
+            )}
         </div>
     );
 }
