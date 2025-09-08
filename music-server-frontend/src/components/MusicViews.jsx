@@ -128,17 +128,6 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
         }
     };
     
-    const formatDateTime = (isoString) => {
-        if (!isoString) return 'N/A';
-        try {
-            const date = new Date(isoString);
-            return date.toLocaleString();
-        } catch (e) {
-            return 'Invalid Date';
-        }
-    };
-
-
     return (
         <div>
             <div className="mb-4">
@@ -189,12 +178,12 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                     <td className="px-4 py-4">
                                         <div className="flex items-center space-x-2">
                                             {isInQueue ? (
-                                                <button onClick={() => onRemoveFromQueue(song.id)} title="Remove from queue" className="text-gray-400 hover:text-white">
-                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 10h16M4 14h10M18 14h-4"></path></svg>
+                                                <button onClick={() => onRemoveFromQueue(song.id)} title="Remove from queue" className="text-gray-400 hover:text-red-500">
+                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                                                 </button>
                                             ) : (
                                                 <button onClick={() => onAddToQueue(song)} title="Add to queue" className="text-gray-400 hover:text-white">
-                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 10h16M4 14h10m6 0v-4m0 4h-4m4 0v4"></path></svg>
+                                                    <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" className="stroke-green-500" /></svg>
                                                 </button>
                                             )}
                                             <button onClick={() => setSelectedSongForPlaylist(song)} title="Add to playlist" className="text-gray-400 hover:text-white">
