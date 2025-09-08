@@ -1,10 +1,26 @@
 // Suggested path: music-server-frontend/src/components/Dashboard.jsx
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { Songs, Albums, Artists } from './MusicViews.jsx';
+import { Songs, Albums, Artists, AddToPlaylistModal } from './MusicViews.jsx';
 import Playlists from './Playlists.jsx';
 import AdminPanel from './AdminPanel.jsx';
 import CustomAudioPlayer from './AudioPlayer.jsx';
 import PlayQueueView from './PlayQueueView.jsx';
+
+// This needs to be defined once, preferably in a separate api.js file, but here for simplicity.
+const subsonicFetch = async (endpoint, creds, params = {}) => {
+    const allParams = new URLSearchParams({
+        u: creds.username, p: creds.password, v: '1.16.1', c: 'AudioMuse-AI', f: 'json', ...params
+    });
+    const response = await fetch(`/rest/${endpoint}?${allParams.toString()}`);
+    if (!response.ok) {
+        const data = await response.json();
+        const subsonicResponse = data['subsonic-response'];
+        throw new Error(subsonicResponse?.error?.message || `Server error: ${response.status}`);
+    }
+    const data = await response.json();
+    return data['subsonic-response'];
+};
+
 
 function Dashboard({ onLogout, isAdmin, credentials }) {
     const [navigation, setNavigation] = useState([{ page: 'artists', title: 'Artists' }]);
@@ -13,6 +29,8 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isQueueViewOpen, setQueueViewOpen] = useState(false);
     const [audioMuseUrl, setAudioMuseUrl] = useState('');
+    const [selectedSongForPlaylist, setSelectedSongForPlaylist] = useState(null);
+    const [mixMessage, setMixMessage] = useState('');
     
     const currentView = useMemo(() => navigation[navigation.length - 1], [navigation]);
     const currentSong = useMemo(() => playQueue.length > 0 ? playQueue[currentTrackIndex] : null, [playQueue, currentTrackIndex]);
@@ -63,14 +81,8 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 
     const handleAddToQueue = useCallback((song) => {
         setPlayQueue(prevQueue => {
-            // Avoid adding duplicates
-            if (prevQueue.find(s => s.id === song.id)) {
-                return prevQueue;
-            }
-            // If the queue is empty, start playing the new song
-            if (prevQueue.length === 0) {
-                setCurrentTrackIndex(0);
-            }
+            if (prevQueue.find(s => s.id === song.id)) return prevQueue;
+            if (prevQueue.length === 0) setCurrentTrackIndex(0);
             return [...prevQueue, song];
         });
     }, []);
@@ -78,21 +90,14 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     const handleRemoveFromQueue = useCallback((indexToRemove) => {
         setPlayQueue(prevQueue => {
             const newQueue = prevQueue.filter((_, index) => index !== indexToRemove);
-            
             if (newQueue.length === 0) {
-                 // If the queue is now empty, reset the index.
                 setCurrentTrackIndex(0);
                 return [];
             }
-
             if (indexToRemove < currentTrackIndex) {
-                // If removing a song before the current one, decrement the index
                 setCurrentTrackIndex(prev => prev - 1);
-            } else if (indexToRemove === currentTrackIndex) {
-                // If removing the current song, and it's the last song, wrap around to the start
-                if (currentTrackIndex >= newQueue.length) {
-                    setCurrentTrackIndex(0); 
-                }
+            } else if (indexToRemove === currentTrackIndex && currentTrackIndex >= newQueue.length) {
+                setCurrentTrackIndex(0); 
             }
             return newQueue;
         });
@@ -100,29 +105,50 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     
     const handleRemoveSongById = useCallback((songId) => {
         const indexToRemove = playQueue.findIndex(s => s.id === songId);
-        if (indexToRemove > -1) {
-            handleRemoveFromQueue(indexToRemove);
-        }
+        if (indexToRemove > -1) handleRemoveFromQueue(indexToRemove);
     }, [playQueue, handleRemoveFromQueue]);
-
 
     const handleSelectTrack = useCallback((index) => {
         setCurrentTrackIndex(index);
-        setQueueViewOpen(false); // Close queue view when a new track is selected
+        setQueueViewOpen(false);
     }, []);
 
-
     const handlePlayNext = useCallback(() => {
-        if (playQueue.length > 0) {
-            setCurrentTrackIndex(prev => (prev + 1) % playQueue.length);
-        }
+        if (playQueue.length > 0) setCurrentTrackIndex(prev => (prev + 1) % playQueue.length);
     }, [playQueue.length]);
 
     const handlePlayPrevious = useCallback(() => {
-        if (playQueue.length > 0) {
-            setCurrentTrackIndex(prev => (prev - 1 + playQueue.length) % playQueue.length);
-        }
+        if (playQueue.length > 0) setCurrentTrackIndex(prev => (prev - 1 + playQueue.length) % playQueue.length);
     }, [playQueue.length]);
+
+    const handleInstantMix = async (song) => {
+        if (!audioMuseUrl) return;
+
+        setMixMessage(`Generating Instant Mix for "${song.title}"...`);
+        setQueueViewOpen(false); // Close queue if it's open
+        try {
+            const data = await subsonicFetch('getSimilarSongs.view', credentials, { id: song.id, count: 20 });
+            let similarSongs = data.directory?.song || [];
+            similarSongs = Array.isArray(similarSongs) ? similarSongs : [similarSongs].filter(Boolean);
+
+            const newQueue = [song, ...similarSongs];
+            handlePlaySong(song, newQueue); 
+            
+            // Navigate to the new view
+            handleNavigate({
+                page: 'songs',
+                title: `Instant Mix: ${song.title}`,
+                filter: { similarToSongId: song.id, preloadedSongs: newQueue } 
+            });
+
+            setMixMessage('');
+
+        } catch (error) {
+            console.error("Failed to create Instant Mix:", error);
+            setMixMessage('Error creating Instant Mix.');
+            setTimeout(() => setMixMessage(''), 3000);
+        }
+    };
     
     // --- Navigation ---
     const NavLink = ({ page, title, children }) => (
@@ -135,7 +161,6 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 
 	return (
 		<div className="bg-gray-900">
-			{/* The main content area now has padding-bottom to prevent overlap with the fixed player */}
 			<div className="pb-24">
 				<nav className="bg-gray-800 shadow-md sticky top-0 z-20">
 					 <div className="container mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
@@ -174,7 +199,8 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						)}
 						<h2 className="text-3xl font-bold text-white">{currentView.title}</h2>
 					</div>
-					{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} />}
+                    {mixMessage && <p className="text-center text-teal-400 mb-4">{mixMessage}</p>}
+					{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onInstantMix={handleInstantMix} onAddToPlaylist={setSelectedSongForPlaylist} />}
 					{currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
 					{currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
 					{currentView.page === 'playlists' && <Playlists credentials={credentials} onNavigate={handleNavigate} />}
@@ -199,7 +225,19 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                 currentIndex={currentTrackIndex}
                 onRemove={handleRemoveFromQueue}
                 onSelect={handleSelectTrack}
+                onAddToPlaylist={setSelectedSongForPlaylist}
+                onInstantMix={handleInstantMix}
+                audioMuseUrl={audioMuseUrl}
+                credentials={credentials}
             />
+            {selectedSongForPlaylist && (
+                <AddToPlaylistModal
+                    song={selectedSongForPlaylist}
+                    credentials={credentials}
+                    onClose={() => setSelectedSongForPlaylist(null)}
+                    onAdded={() => {}}
+                />
+            )}
 		</div>
 	);
 }

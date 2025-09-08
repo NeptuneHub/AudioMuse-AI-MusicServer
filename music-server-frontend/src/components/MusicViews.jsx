@@ -15,7 +15,7 @@ const subsonicFetch = async (endpoint, creds, params = {}) => {
     return data['subsonic-response'];
 };
 
-const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
+export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
     const [playlists, setPlaylists] = useState([]);
     const [selectedPlaylist, setSelectedPlaylist] = useState('');
     const [error, setError] = useState('');
@@ -82,34 +82,30 @@ const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
 };
 
 
-export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQueue, playQueue = [], currentSong, onNavigate, audioMuseUrl }) {
+export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQueue, playQueue = [], currentSong, onNavigate, audioMuseUrl, onInstantMix, onAddToPlaylist }) {
     const [songs, setSongs] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [selectedSongForPlaylist, setSelectedSongForPlaylist] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [mixMessage, setMixMessage] = useState('');
-
+    
     useEffect(() => {
-        // When filter changes, it implies navigation, so clear previous mix messages.
-        setMixMessage('');
-    }, [filter]);
+        // If the songs are preloaded from an instant mix, just display them.
+        if (filter?.preloadedSongs) {
+            setSongs(filter.preloadedSongs);
+            return;
+        }
 
-    useEffect(() => {
         const fetchSongs = async () => {
             setIsLoading(true);
             try {
                 let songList = [];
-                // Handle Instant Mix (similar songs) request from previous navigation
                 if (filter?.similarToSongId) {
                      const data = await subsonicFetch('getSimilarSongs.view', credentials, { id: filter.similarToSongId, count: 20 });
                      songList = data.directory?.song || [];
                 }
-                // Handle search request
                 else if (searchTerm.length >= 3) {
                     const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, songCount: 100 });
                     songList = data.searchResult2?.song || [];
                 } 
-                // Handle album or playlist view
                 else if (filter && !filter.similarToSongId && searchTerm.length === 0) {
                     const endpoint = filter.albumId ? 'getAlbum.view' : 'getPlaylist.view';
                     const idParam = filter.albumId || filter.playlistId;
@@ -121,7 +117,6 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                         songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
                     }
                 } 
-                // Default state for main songs page: empty until search
                 else {
                      setSongs([]);
                 }
@@ -151,30 +146,6 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
             onPlay(songs[0], songs);
         }
     };
-    
-    const handleInstantMix = async (song) => {
-        if (!audioMuseUrl || !onPlay) return;
-
-        setMixMessage(`Generating Instant Mix for "${song.title}"...`);
-        try {
-            const data = await subsonicFetch('getSimilarSongs.view', credentials, { id: song.id, count: 20 });
-            let similarSongs = data.directory?.song || [];
-            similarSongs = Array.isArray(similarSongs) ? similarSongs : [similarSongs].filter(Boolean);
-
-            if (similarSongs.length > 0) {
-                const newQueue = [song, ...similarSongs];
-                onPlay(song, newQueue); 
-                setMixMessage('');
-            } else {
-                setMixMessage('No similar songs found.');
-                setTimeout(() => setMixMessage(''), 3000);
-            }
-        } catch (error) {
-            console.error("Failed to create Instant Mix:", error);
-            setMixMessage('Error creating Instant Mix.');
-            setTimeout(() => setMixMessage(''), 3000);
-        }
-    };
 
     return (
         <div>
@@ -187,8 +158,6 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                     className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
                 />
             </div>
-            
-            {mixMessage && <p className="text-center text-teal-400 mb-4">{mixMessage}</p>}
 
             {(songs.length > 0 && !searchTerm && (filter?.albumId || filter?.playlistId)) && (
                 <button onClick={handlePlayAlbum} className="mb-4 bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Play All</button>
@@ -237,7 +206,7 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                         <td className="px-4 py-4">
                                             <div className="flex items-center justify-end space-x-2">
                                                 <button 
-                                                    onClick={() => handleInstantMix(song)} 
+                                                    onClick={() => onInstantMix(song)} 
                                                     title="Instant Mix" 
                                                     disabled={!audioMuseUrl}
                                                     className={`p-1 rounded-full transition-colors ${audioMuseUrl ? 'text-teal-400 hover:bg-gray-700' : 'text-gray-600 cursor-not-allowed'}`}
@@ -253,7 +222,7 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                                         <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" className="stroke-green-500" /></svg>
                                                     </button>
                                                 )}
-                                                <button onClick={() => setSelectedSongForPlaylist(song)} title="Add to playlist" className="text-gray-400 hover:text-white">
+                                                <button onClick={() => onAddToPlaylist(song)} title="Add to playlist" className="text-gray-400 hover:text-white">
                                                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
                                                 </button>
                                             </div>
@@ -264,14 +233,6 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                         </tbody>
                     </table>
                 </div>
-            )}
-             {selectedSongForPlaylist && (
-                <AddToPlaylistModal
-                    song={selectedSongForPlaylist}
-                    credentials={credentials}
-                    onClose={() => setSelectedSongForPlaylist(null)}
-                    onAdded={() => {}}
-                />
             )}
         </div>
     );
