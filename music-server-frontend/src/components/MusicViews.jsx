@@ -15,6 +15,55 @@ const subsonicFetch = async (endpoint, creds, params = {}) => {
     return data['subsonic-response'];
 };
 
+const getInitials = (name = '') => {
+    if (!name) return '';
+    const words = name.split(' ').filter(Boolean);
+    if (words.length > 1) {
+        return (words[0][0] + words[1][0]).toUpperCase();
+    }
+    if (words.length === 1 && words[0].length > 1) {
+        return words[0].substring(0, 2).toUpperCase();
+    }
+    return name.toUpperCase();
+};
+
+const Placeholder = ({ item, type }) => {
+    const initials = getInitials(item.name);
+    const baseClasses = "w-full h-full flex items-center justify-center bg-gray-700 text-white font-bold";
+    const typeClasses = type === 'artist' ? 'rounded-full text-2xl' : 'rounded text-3xl';
+    
+    return (
+        <div className={`${baseClasses} ${typeClasses}`}>
+            <span>{initials}</span>
+        </div>
+    );
+};
+
+const CoverArtImage = ({ item, credentials, type }) => {
+    const [hasError, setHasError] = useState(!item.coverArt);
+
+    useEffect(() => {
+        setHasError(!item.coverArt);
+    }, [item.coverArt, item.id]);
+
+    if (hasError) {
+        return <Placeholder item={item} type={type} />;
+    }
+
+    const src = `/rest/getCoverArt.view?id=${encodeURIComponent(item.coverArt)}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI`;
+
+    return (
+        <img
+            src={src}
+            alt={item.name}
+            className="w-full h-full object-cover"
+            onError={() => setHasError(true)}
+            loading="lazy"
+        />
+    );
+};
+
+
 export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
     const [playlists, setPlaylists] = useState([]);
     const [selectedPlaylist, setSelectedPlaylist] = useState('');
@@ -288,21 +337,15 @@ export function Albums({ credentials, filter, onNavigate }) {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
                 {albums.map((album) => (
-                    <button key={album.id} onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })} className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
-                        <div className="w-full bg-gray-700 rounded aspect-square flex items-center justify-center mb-2 overflow-hidden">
-                            {album.coverArt ? (
-                                <img
-                                    src={`/rest/getCoverArt.view?id=${album.coverArt}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI`}
-                                    alt={album.name}
-                                    className="w-full h-full object-cover"
-                                />
-                            ) : (
-                                <svg className="w-12 h-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 6l12-3"></path></svg>
-                            )}
-                        </div>
+                    <div key={album.id} className="text-center">
+                        <button onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })} className="w-full bg-gray-800 rounded-lg p-4 hover:bg-gray-700 transition-colors">
+                            <div className="w-full aspect-square mb-2 overflow-hidden">
+                                <CoverArtImage item={album} credentials={credentials} type="album" />
+                            </div>
+                        </button>
                         <p className="font-bold text-white truncate">{album.name}</p>
                         <p className="text-sm text-gray-400 truncate">{album.artist}</p>
-                    </button>
+                    </div>
                 ))}
             </div>
         </div>
@@ -354,15 +397,18 @@ export function Artists({ credentials, onNavigate }) {
                     className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
                 />
             </div>
-            <ul className="space-y-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
                 {artists.map((artist) => (
-                    <li key={artist.id}>
-                        <button onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: artist.name })} className="w-full text-left bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-colors">
-                            {artist.name}
+                     <div key={artist.id} className="text-center">
+                        <button onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: artist.name })} className="w-full bg-gray-800 rounded-lg p-4 hover:bg-gray-700 transition-colors">
+                            <div className="w-full aspect-square mb-2 overflow-hidden">
+                               <CoverArtImage item={artist} credentials={credentials} type="artist" />
+                            </div>
                         </button>
-                    </li>
+                        <p className="font-bold text-white truncate">{artist.name}</p>
+                    </div>
                 ))}
-            </ul>
+            </div>
         </div>
     );
 }

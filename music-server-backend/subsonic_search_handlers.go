@@ -60,7 +60,11 @@ func subsonicSearch2(c *gin.Context) {
 			for artistRows.Next() {
 				var artistName string
 				if err := artistRows.Scan(&artistName); err == nil {
-					result.Artists = append(result.Artists, SubsonicArtist{ID: artistName, Name: artistName})
+					result.Artists = append(result.Artists, SubsonicArtist{
+						ID:       artistName,
+						Name:     artistName,
+						CoverArt: artistName, // Use artist name for getCoverArt ID
+					})
 				}
 			}
 		}
@@ -114,11 +118,12 @@ func subsonicSearch2(c *gin.Context) {
 				var lastPlayed sql.NullString
 				if err := songRows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, &songFromDb.Path, &songFromDb.PlayCount, &lastPlayed); err == nil {
 					song := SubsonicSong{
-						ID:        strconv.Itoa(songFromDb.ID),
-						Title:     songFromDb.Title,
-						Artist:    songFromDb.Artist,
-						Album:     songFromDb.Album,
-						PlayCount: songFromDb.PlayCount,
+						ID:         strconv.Itoa(songFromDb.ID),
+						CoverArt:   strconv.Itoa(songFromDb.ID),
+						Title:      songFromDb.Title,
+						Artist:     songFromDb.Artist,
+						Album:      songFromDb.Album,
+						PlayCount:  songFromDb.PlayCount,
 					}
 					if lastPlayed.Valid {
 						song.LastPlayed = lastPlayed.String

@@ -3,11 +3,14 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +19,43 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// subsonicGetArtists handles the getArtists.view API endpoint.
+// --- Subsonic Music Handlers ---
+
+func subsonicStream(c *gin.Context) {
+	if _, ok := subsonicAuthenticate(c); !ok {
+		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
+		return
+	}
+
+	songID := c.Query("id")
+	var path string
+	err := db.QueryRow("SELECT path FROM songs WHERE id = ?", songID).Scan(&path)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))
+			return
+		}
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+		return
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		log.Printf("Could not open file for streaming %s: %v", path, err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Could not open file."))
+		return
+	}
+	defer file.Close()
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		log.Printf("Could not get file info for streaming %s: %v", path, err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Could not read file info."))
+		return
+	}
+	http.ServeContent(c.Writer, c.Request, fileInfo.Name(), fileInfo.ModTime(), file)
+}
+
 func subsonicGetArtists(c *gin.Context) {
 	if _, ok := subsonicAuthenticate(c); !ok {
 		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
@@ -25,8 +64,7 @@ func subsonicGetArtists(c *gin.Context) {
 
 	rows, err := db.Query("SELECT DISTINCT artist FROM songs WHERE artist != '' ORDER BY artist")
 	if err != nil {
-		log.Printf("[ERROR] subsonicGetArtists: Database query failed: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error"))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying artists."))
 		return
 	}
 	defer rows.Close()
@@ -35,272 +73,355 @@ func subsonicGetArtists(c *gin.Context) {
 	for rows.Next() {
 		var artistName string
 		if err := rows.Scan(&artistName); err != nil {
-			log.Printf("Error scanning artist row for Subsonic: %v", err)
+			log.Printf("Error scanning artist for subsonicGetArtists: %v", err)
 			continue
 		}
-		artists = append(artists, SubsonicArtist{ID: artistName, Name: artistName})
+		artists = append(artists, SubsonicArtist{
+			ID:       artistName,
+			Name:     artistName,
+			CoverArt: artistName, // Use artist name as the ID for getCoverArt
+		})
 	}
-	subsonicRespond(c, newSubsonicResponse(&SubsonicArtists{Artists: artists}))
+
+	responseBody := &SubsonicArtists{Artists: artists}
+	response := newSubsonicResponse(responseBody)
+	subsonicRespond(c, response)
 }
 
-// subsonicGetAlbumList2 handles the getAlbumList2.view API endpoint.
 func subsonicGetAlbumList2(c *gin.Context) {
 	if _, ok := subsonicAuthenticate(c); !ok {
 		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
 		return
 	}
 
-	listType := c.DefaultQuery("type", "alphabeticalByName")
-	sizeStr := c.DefaultQuery("size", "500")
-	offsetStr := c.DefaultQuery("offset", "0")
-	artistFilter := c.Query("id") // Used for filtering by artist name
-
-	size, _ := strconv.Atoi(sizeStr)
-	offset, _ := strconv.Atoi(offsetStr)
-
-	log.Printf("[DEBUG] subsonicGetAlbumList2: Running query with type '%s', size %d, offset %d, artist '%s'", listType, size, offset, artistFilter)
-
-	var query string
-	args := []interface{}{}
-
-	baseQuery := `
-        SELECT
-            s.album,
-            s.artist,
-            MIN(s.id) as representativeSongId
-        FROM songs s
-    `
-	var conditions []string
-	if artistFilter != "" {
-		conditions = append(conditions, "s.artist = ?")
-		args = append(args, artistFilter)
-	}
-	conditions = append(conditions, "s.album != ''")
-
-	if len(conditions) > 0 {
-		baseQuery += " WHERE " + strings.Join(conditions, " AND ")
-	}
-
-	baseQuery += " GROUP BY s.album, s.artist"
-
-	switch listType {
-	case "newest":
-		query = baseQuery + " ORDER BY MAX(s.date_added) DESC LIMIT ? OFFSET ?"
-	default: // alphabeticalByName
-		query = baseQuery + " ORDER BY s.album LIMIT ? OFFSET ?"
-	}
-	args = append(args, size, offset)
-
-	rows, err := db.Query(query, args...)
+	rows, err := db.Query("SELECT album, artist, MIN(id) FROM songs WHERE album != '' GROUP BY album, artist ORDER BY artist, album")
 	if err != nil {
-		log.Printf("[ERROR] subsonicGetAlbumList2: Database query failed: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error"))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying albums."))
 		return
 	}
 	defer rows.Close()
 
 	var albums []SubsonicAlbum
 	for rows.Next() {
-		var albumName, artistName string
-		var representativeSongID int
-		if err := rows.Scan(&albumName, &artistName, &representativeSongID); err != nil {
-			log.Printf("Error scanning album row for Subsonic: %v", err)
+		var album SubsonicAlbum
+		var albumId int
+		if err := rows.Scan(&album.Name, &album.Artist, &albumId); err != nil {
+			log.Printf("Error scanning album row for subsonicGetAlbumList2: %v", err)
 			continue
 		}
-		albumIDStr := strconv.Itoa(representativeSongID)
-		albums = append(albums, SubsonicAlbum{ID: albumIDStr, Name: albumName, Artist: artistName, CoverArt: albumIDStr})
+		album.ID = strconv.Itoa(albumId)
+		album.CoverArt = album.ID
+		albums = append(albums, album)
 	}
-	log.Printf("[DEBUG] subsonicGetAlbumList2: Found %d albums.", len(albums))
-	subsonicRespond(c, newSubsonicResponse(&SubsonicAlbumList2{Albums: albums}))
+
+	responseBody := &SubsonicAlbumList2{Albums: albums}
+	response := newSubsonicResponse(responseBody)
+	subsonicRespond(c, response)
 }
 
-// subsonicGetAlbum handles the getAlbum.view API endpoint.
 func subsonicGetAlbum(c *gin.Context) {
 	if _, ok := subsonicAuthenticate(c); !ok {
 		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
 		return
 	}
 
-	albumID := c.Query("id")
-	if albumID == "" {
-		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter 'id' is missing."))
+	albumSongId := c.Query("id")
+	if albumSongId == "" {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'id'"))
 		return
 	}
 
-	// First, find the album name using the representative song ID
-	var albumName string
-	err := db.QueryRow("SELECT album FROM songs WHERE id = ?", albumID).Scan(&albumName)
+	var albumName, artistName string
+	err := db.QueryRow("SELECT album, artist FROM songs WHERE id = ?", albumSongId).Scan(&albumName, &artistName)
 	if err != nil {
-		log.Printf("[ERROR] subsonicGetAlbum: Could not find album for ID %s: %v", albumID, err)
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Album not found."))
 		return
 	}
 
-	log.Printf("[DEBUG] subsonicGetAlbum: Fetching songs for album '%s' (ID: %s)", albumName, albumID)
-
-	rows, err := db.Query("SELECT id, title, artist, album, path, play_count, last_played FROM songs WHERE album = ? ORDER BY title", albumName)
+	rows, err := db.Query("SELECT id, title, artist, album FROM songs WHERE album = ? AND artist = ? ORDER BY title", albumName, artistName)
 	if err != nil {
-		log.Printf("[ERROR] subsonicGetAlbum: Database query failed: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error"))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Error querying for songs in album."))
 		return
 	}
 	defer rows.Close()
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var songFromDb Song
-		var lastPlayed sql.NullString
-		if err := rows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, &songFromDb.Path, &songFromDb.PlayCount, &lastPlayed); err != nil {
-			log.Printf("Error scanning song row for Subsonic getAlbum: %v", err)
+		var s Song
+		if err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album); err != nil {
+			log.Printf("Error scanning song in getAlbum: %v", err)
 			continue
 		}
-		song := SubsonicSong{
-			ID:        strconv.Itoa(songFromDb.ID),
-			Title:     songFromDb.Title,
-			Artist:    songFromDb.Artist,
-			Album:     songFromDb.Album,
-			PlayCount: songFromDb.PlayCount,
-			Path:      songFromDb.Path, // Include path for client use
-		}
-		if lastPlayed.Valid {
-			song.LastPlayed = lastPlayed.String
-		}
-		song.CoverArt = albumID // Use the representative ID for cover art requests
-		songs = append(songs, song)
+		songIDStr := strconv.Itoa(s.ID)
+		songs = append(songs, SubsonicSong{
+			ID:       songIDStr,
+			Title:    s.Title,
+			Artist:   s.Artist,
+			Album:    s.Album,
+			CoverArt: albumSongId,
+		})
 	}
-	log.Printf("[DEBUG] subsonicGetAlbum: Found %d songs for album '%s'.", len(songs), albumName)
 
-	album := SubsonicAlbumWithSongs{ID: albumID, Name: albumName, CoverArt: albumID, SongCount: len(songs), Songs: songs}
-	subsonicRespond(c, newSubsonicResponse(&album))
+	responseBody := &SubsonicAlbumWithSongs{
+		ID:        albumSongId,
+		Name:      albumName,
+		CoverArt:  albumSongId,
+		SongCount: len(songs),
+		Songs:     songs,
+	}
+
+	subsonicRespond(c, newSubsonicResponse(responseBody))
 }
 
-// subsonicGetRandomSongs handles the getRandomSongs.view API endpoint.
 func subsonicGetRandomSongs(c *gin.Context) {
 	if _, ok := subsonicAuthenticate(c); !ok {
 		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
 		return
 	}
 
-	sizeStr := c.DefaultQuery("size", "50")
-	size, err := strconv.Atoi(sizeStr)
-	if err != nil || size <= 0 {
-		size = 50
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "10"))
+	if size > 500 {
+		size = 500
 	}
 
-	rows, err := db.Query("SELECT id, title, artist, album, path, play_count, last_played FROM songs ORDER BY RANDOM() LIMIT ?", size)
+	rows, err := db.Query("SELECT id, title, artist, album FROM songs ORDER BY RANDOM() LIMIT ?", size)
 	if err != nil {
-		log.Printf("[ERROR] subsonicGetRandomSongs: Database query failed: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error"))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching random songs."))
 		return
 	}
 	defer rows.Close()
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var songFromDb Song
-		var lastPlayed sql.NullString
-		if err := rows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, &songFromDb.Path, &songFromDb.PlayCount, &lastPlayed); err != nil {
-			log.Printf("Error scanning song row for Subsonic getRandomSongs: %v", err)
+		var s Song
+		if err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album); err != nil {
+			log.Printf("Error scanning random song: %v", err)
 			continue
 		}
-		song := SubsonicSong{
-			ID:        strconv.Itoa(songFromDb.ID),
-			Title:     songFromDb.Title,
-			Artist:    songFromDb.Artist,
-			Album:     songFromDb.Album,
-			PlayCount: songFromDb.PlayCount,
-		}
-		if lastPlayed.Valid {
-			song.LastPlayed = lastPlayed.String
-		}
-		// Find a representative song ID for the album to use for cover art
-		var albumSongId int
-		db.QueryRow("SELECT id FROM songs WHERE album = ? LIMIT 1", song.Album).Scan(&albumSongId)
-		song.CoverArt = strconv.Itoa(albumSongId)
-		songs = append(songs, song)
+		songIDStr := strconv.Itoa(s.ID)
+		songs = append(songs, SubsonicSong{
+			ID:       songIDStr,
+			Title:    s.Title,
+			Artist:   s.Artist,
+			Album:    s.Album,
+			CoverArt: songIDStr,
+		})
 	}
 
-	directory := SubsonicDirectory{SongCount: len(songs), Songs: songs}
-	subsonicRespond(c, newSubsonicResponse(&directory))
+	responseBody := &SubsonicDirectory{
+		Name:      "Random Songs",
+		SongCount: len(songs),
+		Songs:     songs,
+	}
+	subsonicRespond(c, newSubsonicResponse(responseBody))
 }
 
-// subsonicGetCoverArt handles the getCoverArt.view API endpoint.
 func subsonicGetCoverArt(c *gin.Context) {
-	albumSongID := c.Query("id")
-	if albumSongID == "" || albumSongID == "undefined" {
+	// Authentication is optional for cover art in many clients.
+	id := c.Query("id")
+	if id == "" {
 		c.Status(http.StatusBadRequest)
 		return
 	}
 
-	var songPath, albumName string
-	err := db.QueryRow("SELECT path, album FROM songs WHERE id = ? LIMIT 1", albumSongID).Scan(&songPath, &albumName)
+	if _, err := strconv.Atoi(id); err == nil {
+		handleAlbumArt(c, id)
+	} else {
+		handleArtistArt(c, id)
+	}
+}
+
+func handleAlbumArt(c *gin.Context, songID string) {
+	var path string
+	err := db.QueryRow("SELECT path FROM songs WHERE id = ?", songID).Scan(&path)
 	if err != nil {
 		c.Status(http.StatusNotFound)
 		return
 	}
-	file, err := os.Open(songPath)
+
+	file, err := os.Open(path)
 	if err != nil {
-		// If file doesn't exist, redirect to placeholder
-		redirectToPlaceholder(c, albumName)
+		c.Status(http.StatusInternalServerError)
 		return
 	}
 	defer file.Close()
 
 	meta, err := tag.ReadFrom(file)
-	if err != nil || meta.Picture() == nil {
-		// If no tags or no picture, redirect to placeholder
-		redirectToPlaceholder(c, albumName)
+	if err == nil && meta.Picture() != nil {
+		pic := meta.Picture()
+		c.Data(http.StatusOK, pic.MIMEType, pic.Data)
 		return
 	}
 
-	pic := meta.Picture()
-	c.Data(http.StatusOK, pic.MIMEType, pic.Data)
+	// Fallback: search for cover art in the song's directory
+	albumDir := filepath.Dir(path)
+	if imagePath, ok := findLocalImage(albumDir); ok {
+		c.File(imagePath)
+		return
+	}
+
+	c.Status(http.StatusNotFound)
 }
 
-// redirectToPlaceholder generates a placeholder image URL and redirects the client.
-func redirectToPlaceholder(c *gin.Context, text string) {
-	// Use an external service to generate placeholder images
-	encodedText := url.QueryEscape(text)
-	placeholderURL := fmt.Sprintf("https://placehold.co/300x300/2d3748/ffffff/png?text=%s", encodedText)
-	c.Redirect(http.StatusFound, placeholderURL)
-}
+func handleArtistArt(c *gin.Context, artistName string) {
+	log.Printf("[ARTIST ART] Handling request for artist: '%s'", artistName)
 
-// subsonicStream handles the stream.view API endpoint.
-func subsonicStream(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
+	// 1. Try MusicBrainz
+	log.Printf("[ARTIST ART] Attempting to fetch image from MusicBrainz for '%s'", artistName)
+	if imageUrl, err := fetchArtistImageFromMusicBrainz(artistName); err == nil && imageUrl != "" {
+		log.Printf("[ARTIST ART] Found image on MusicBrainz for '%s'. Proxying URL: %s", artistName, imageUrl)
+		proxyImage(c, imageUrl)
 		return
-	}
-	songID := c.Query("id")
-	log.Printf("[DEBUG] subsonicStream: User '%s' requesting stream for song ID: %s", user.Username, songID)
-
-	var path string
-	err := db.QueryRow("SELECT path FROM songs WHERE id = ?", songID).Scan(&path)
-	if err != nil {
-		log.Printf("[ERROR] subsonicStream: Failed to find path for song ID %s. Error: %v", songID, err)
-		subsonicRespond(c, newSubsonicErrorResponse(70, "The requested data was not found."))
-		return
+	} else if err != nil {
+		log.Printf("[ARTIST ART] MusicBrainz lookup for '%s' failed: %v", artistName, err)
+	} else {
+		log.Printf("[ARTIST ART] No image found on MusicBrainz for '%s'", artistName)
 	}
 
-	log.Printf("[DEBUG] subsonicStream: Found path '%s' for song ID %s. Attempting to serve file.", path, songID)
-
-	// Update play count and last played time
-	go func() {
-		_, err := db.Exec("UPDATE songs SET play_count = play_count + 1, last_played = ? WHERE id = ?", time.Now().Format(time.RFC3339), songID)
-		if err != nil {
-			log.Printf("[ERROR] Failed to update play count for song ID %s: %v", songID, err)
+	// 2. Try local file
+	log.Printf("[ARTIST ART] MusicBrainz failed. Falling back to local file search for '%s'", artistName)
+	var songPath string
+	err := db.QueryRow("SELECT path FROM songs WHERE artist = ? LIMIT 1", artistName).Scan(&songPath)
+	if err == nil {
+		artistDir := filepath.Dir(songPath)
+		log.Printf("[ARTIST ART] Found song path, artist directory for '%s' is '%s'", artistName, artistDir)
+		if imagePath, ok := findLocalImage(artistDir); ok {
+			log.Printf("[ARTIST ART] Found local image for '%s' at: %s", artistName, imagePath)
+			c.File(imagePath)
+			return
 		}
-	}()
+		log.Printf("[ARTIST ART] No local image file found in '%s'", artistDir)
+	} else {
+		log.Printf("[ARTIST ART] Could not find any song path for artist '%s' to locate local art. DB error: %v", artistName, err)
+	}
 
-	file, err := os.Open(path)
+	// 3. Fallback: Since the frontend now handles placeholders, we just return Not Found.
+	log.Printf("[ARTIST ART] All methods failed for '%s'. Returning 404.", artistName)
+	c.Status(http.StatusNotFound)
+}
+
+func findLocalImage(dir string) (string, bool) {
+	imageNames := []string{"cover.jpg", "cover.png", "folder.jpg", "front.jpg", "artist.jpg", "artist.png"}
+	for _, name := range imageNames {
+		path := filepath.Join(dir, name)
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+func fetchArtistImageFromMusicBrainz(artistName string) (string, error) {
+	searchURL := fmt.Sprintf("https://musicbrainz.org/ws/2/artist/?query=artist:%s&fmt=json", url.QueryEscape(artistName))
+	log.Printf("[MBrainz] Constructed search URL: %s", searchURL)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", searchURL, nil)
 	if err != nil {
-		log.Printf("[ERROR] subsonicStream: Could not open file for streaming %s: %v", path, err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error: could not open file"))
+		return "", fmt.Errorf("failed to create MusicBrainz request: %w", err)
+	}
+	req.Header.Set("User-Agent", "AudioMuse-AI/0.1.0 ( https://audiomuse.ai/ )")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute MusicBrainz request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	log.Printf("[MBrainz] Received status code %d from artist search API", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("musicbrainz artist search returned non-200 status: %d - %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var searchResult struct {
+		Artists []struct {
+			ID    string `json:"id"`
+			Score int    `json:"score"`
+		} `json:"artists"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {
+		return "", fmt.Errorf("failed to decode MusicBrainz artist search response: %w", err)
+	}
+
+	if len(searchResult.Artists) == 0 || searchResult.Artists[0].Score < 90 {
+		log.Printf("[MBrainz] No artist found or score too low for '%s'", artistName)
+		return "", nil // No definitive artist found
+	}
+
+	artistID := searchResult.Artists[0].ID
+	log.Printf("[MBrainz] Found artist ID '%s' for '%s'", artistID, artistName)
+
+	// Now fetch the artist details to find the image relation
+	lookupURL := fmt.Sprintf("https://musicbrainz.org/ws/2/artist/%s?inc=url-rels&fmt=json", artistID)
+	log.Printf("[MBrainz] Constructed lookup URL: %s", lookupURL)
+
+	req, err = http.NewRequest("GET", lookupURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create MusicBrainz lookup request: %w", err)
+	}
+	req.Header.Set("User-Agent", "AudioMuse-AI/0.1.0 ( https://audiomuse.ai/ )")
+	resp, err = client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute MusicBrainz lookup request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	log.Printf("[MBrainz] Received status code %d from artist lookup API", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("musicbrainz artist lookup returned non-200 status: %d", resp.StatusCode)
+	}
+
+	var lookupResult struct {
+		Relations []struct {
+			Type string `json:"type"`
+			URL  struct {
+				Resource string `json:"resource"`
+			} `json:"url"`
+		} `json:"relations"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&lookupResult); err != nil {
+		return "", fmt.Errorf("failed to decode MusicBrainz lookup response: %w", err)
+	}
+
+	for _, rel := range lookupResult.Relations {
+		if rel.Type == "image" {
+			imageUrl := rel.URL.Resource
+			if strings.Contains(imageUrl, "commons.wikimedia.org/wiki/File:") {
+				fileName := filepath.Base(imageUrl)
+				finalUrl := fmt.Sprintf("https://commons.wikimedia.org/w/index.php?title=Special:Redirect/file/%s&width=300", url.QueryEscape(fileName))
+				log.Printf("[MBrainz] Found wikimedia image, transforming to direct link: %s", finalUrl)
+				return finalUrl, nil
+			}
+		}
+	}
+
+	log.Printf("[MBrainz] No 'image' type relation found for artist ID %s", artistID)
+	return "", nil // No image relation found
+}
+
+func proxyImage(c *gin.Context, url string) {
+	log.Printf("[PROXY] Proxying image from URL: %s", url)
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Printf("[PROXY] Error fetching image for proxy: %v", err)
+		c.Status(http.StatusNotFound)
 		return
 	}
-	defer file.Close()
-	fileInfo, _ := file.Stat()
-	http.ServeContent(c.Writer, c.Request, fileInfo.Name(), fileInfo.ModTime(), file)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[PROXY] Remote server returned non-200 status: %d for URL: %s", resp.StatusCode, url)
+		c.Status(resp.StatusCode)
+		return
+	}
+
+	c.Header("Content-Type", resp.Header.Get("Content-Type"))
+	c.Header("Cache-Control", "public, max-age=86400") // Cache for 1 day
+
+	_, err = io.Copy(c.Writer, resp.Body)
+	if err != nil {
+		log.Printf("[PROXY] Error copying image stream to response: %v", err)
+	}
 }
 
