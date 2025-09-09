@@ -91,6 +91,12 @@ func main() {
 		rest.GET("/setConfiguration.view", subsonicSetConfiguration)
 		rest.GET("/getSimilarSongs.view", subsonicGetSimilarSongs)
 		rest.GET("/getSongPath.view", subsonicGetSongPath)
+
+		// AudioMuse-AI Subsonic routes
+		rest.Any("/startSonicAnalysis.view", subsonicStartSonicAnalysis)
+		rest.GET("/getSonicAnalysisStatus.view", subsonicGetSonicAnalysisStatus)
+		rest.Any("/cancelSonicAnalysis.view", subsonicCancelSonicAnalysis)
+		rest.Any("/startSonicClustering.view", subsonicStartClusteringAnalysis)
 	}
 
 	v1 := r.Group("/api/v1")
@@ -104,15 +110,6 @@ func main() {
 		{
 			adminRoutes.GET("/browse", browseFiles)
 			adminRoutes.POST("/scan/cancel", cancelAdminScan)
-
-			// ROUTES for AudioMuse-AI Analysis and Clustering
-			analysisRoutes := adminRoutes.Group("/analysis")
-			{
-				analysisRoutes.POST("/start", startSonicAnalysis)
-				analysisRoutes.POST("/cancel/:taskID", cancelSonicAnalysis)
-				analysisRoutes.GET("/status", getSonicAnalysisStatus)
-				analysisRoutes.POST("/clustering", startClusteringAnalysis) // Correctly added route
-			}
 		}
 	}
 
@@ -269,3 +266,4 @@ func startScheduler() {
 		log.Println("Scheduled library scan is disabled.")
 	}
 }
+

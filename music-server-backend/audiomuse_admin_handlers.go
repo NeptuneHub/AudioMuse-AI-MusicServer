@@ -66,28 +66,44 @@ func proxyToAudioMuse(c *gin.Context, method, path string) {
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
 }
 
-// startSonicAnalysis proxies the request to start the analysis.
-func startSonicAnalysis(c *gin.Context) {
+// subsonicStartSonicAnalysis handles the Subsonic API request to start an analysis.
+func subsonicStartSonicAnalysis(c *gin.Context) {
+	if _, ok := subsonicAuthenticate(c); !ok {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Authentication failed."))
+		return
+	}
 	proxyToAudioMuse(c, "POST", "/api/analysis/start")
 }
 
-// cancelSonicAnalysis proxies the request to cancel a running analysis.
-func cancelSonicAnalysis(c *gin.Context) {
-	taskID := c.Param("taskID")
+// subsonicCancelSonicAnalysis handles the Subsonic API request to cancel an analysis.
+func subsonicCancelSonicAnalysis(c *gin.Context) {
+	if _, ok := subsonicAuthenticate(c); !ok {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Authentication failed."))
+		return
+	}
+	taskID := c.Query("taskId") // Task ID from query parameter
 	if taskID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Task ID is required"})
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Parameter 'taskId' is required."))
 		return
 	}
 	proxyToAudioMuse(c, "POST", fmt.Sprintf("/api/cancel/%s", taskID))
 }
 
-// getSonicAnalysisStatus proxies the request to get the status of the last task.
-func getSonicAnalysisStatus(c *gin.Context) {
+// subsonicGetSonicAnalysisStatus handles the Subsonic API request to get analysis status.
+func subsonicGetSonicAnalysisStatus(c *gin.Context) {
+	if _, ok := subsonicAuthenticate(c); !ok {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Authentication failed."))
+		return
+	}
 	proxyToAudioMuse(c, "GET", "/api/last_task")
 }
 
-// startClusteringAnalysis proxies the request to start the clustering.
-func startClusteringAnalysis(c *gin.Context) {
+// subsonicStartClusteringAnalysis handles the Subsonic API request to start clustering.
+func subsonicStartClusteringAnalysis(c *gin.Context) {
+	if _, ok := subsonicAuthenticate(c); !ok {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Authentication failed."))
+		return
+	}
 	proxyToAudioMuse(c, "POST", "/api/clustering/start")
 }
 

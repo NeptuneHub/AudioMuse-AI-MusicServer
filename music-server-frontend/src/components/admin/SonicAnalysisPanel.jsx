@@ -9,7 +9,8 @@ function SonicAnalysisPanel() {
     const fetchStatus = useCallback(async () => {
         const token = localStorage.getItem('token');
         try {
-            const response = await fetch('/api/v1/admin/analysis/status', {
+            // Use the new Subsonic endpoint
+            const response = await fetch('/rest/getSonicAnalysisStatus.view?f=json', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!response.ok) {
@@ -38,7 +39,8 @@ function SonicAnalysisPanel() {
         setIsStarting(true);
         const token = localStorage.getItem('token');
         try {
-            const response = await fetch(endpoint, {
+            // Use the new Subsonic endpoint and add f=json
+            const response = await fetch(`${endpoint}?f=json`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -59,19 +61,21 @@ function SonicAnalysisPanel() {
             setIsStarting(false);
         }
     };
-
-    const handleStartClustering = () => startTask('/api/v1/admin/analysis/clustering', 'Clustering');
-    const handleStart = () => startTask('/api/v1/admin/analysis/start', 'Analysis');
+    
+    // Point to the new Subsonic endpoints
+    const handleStartClustering = () => startTask('/rest/startSonicClustering.view', 'Clustering');
+    const handleStart = () => startTask('/rest/startSonicAnalysis.view', 'Analysis');
 
     const handleCancel = async () => {
         if (!status || !status.task_id) {
             setError("No active task to cancel.");
             return;
         }
-        setError(''); // No need to set loading, polling will update UI
+        setError('');
         const token = localStorage.getItem('token');
         try {
-            const response = await fetch(`/api/v1/admin/analysis/cancel/${status.task_id}`, {
+            // Use the new Subsonic endpoint with taskId as a query parameter
+            const response = await fetch(`/rest/cancelSonicAnalysis.view?f=json&taskId=${status.task_id}`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
