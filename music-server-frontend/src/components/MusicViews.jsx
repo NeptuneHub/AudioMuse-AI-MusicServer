@@ -15,55 +15,6 @@ const subsonicFetch = async (endpoint, creds, params = {}) => {
     return data['subsonic-response'];
 };
 
-const getInitials = (name = '') => {
-    if (!name) return '';
-    const words = name.split(' ').filter(Boolean);
-    if (words.length > 1) {
-        return (words[0][0] + words[1][0]).toUpperCase();
-    }
-    if (words.length === 1 && words[0].length > 1) {
-        return words[0].substring(0, 2).toUpperCase();
-    }
-    return name.toUpperCase();
-};
-
-const Placeholder = ({ item, type }) => {
-    const initials = getInitials(item.name);
-    const baseClasses = "w-full h-full flex items-center justify-center bg-gray-700 text-white font-bold";
-    const typeClasses = type === 'artist' ? 'rounded-full text-2xl' : 'rounded text-3xl';
-    
-    return (
-        <div className={`${baseClasses} ${typeClasses}`}>
-            <span>{initials}</span>
-        </div>
-    );
-};
-
-const CoverArtImage = ({ item, credentials, type }) => {
-    const [hasError, setHasError] = useState(!item.coverArt);
-
-    useEffect(() => {
-        setHasError(!item.coverArt);
-    }, [item.coverArt, item.id]);
-
-    if (hasError) {
-        return <Placeholder item={item} type={type} />;
-    }
-
-    const src = `/rest/getCoverArt.view?id=${encodeURIComponent(item.coverArt)}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI`;
-
-    return (
-        <img
-            src={src}
-            alt={item.name}
-            className="w-full h-full object-cover"
-            onError={() => setHasError(true)}
-            loading="lazy"
-        />
-    );
-};
-
-
 export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
     const [playlists, setPlaylists] = useState([]);
     const [selectedPlaylist, setSelectedPlaylist] = useState('');
@@ -287,6 +238,29 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
     );
 }
 
+const AlbumPlaceholder = ({ name }) => {
+	const initials = (name || '??').split(' ').slice(0, 2).map(word => word[0]).join('').toUpperCase();
+	return (
+		<div className="w-full h-full bg-gray-700 flex items-center justify-center">
+			<span className="text-gray-400 text-3xl font-bold">{initials}</span>
+		</div>
+	);
+};
+
+const ArtistPlaceholder = () => (
+	<div className="w-full h-full bg-gray-700 flex items-center justify-center rounded-full">
+		<svg className="w-1/2 h-1/2 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"></path></svg>
+	</div>
+);
+
+const ImageWithFallback = ({ src, placeholder, alt }) => {
+    const [hasError, setHasError] = useState(false);
+    useEffect(() => { setHasError(false); }, [src]);
+    return (
+        hasError || !src ? placeholder : <img src={src} alt={alt} onError={() => setHasError(true)} className="w-full h-full object-cover" />
+    );
+};
+
 export function Albums({ credentials, filter, onNavigate }) {
     const [albums, setAlbums] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
@@ -337,15 +311,17 @@ export function Albums({ credentials, filter, onNavigate }) {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
                 {albums.map((album) => (
-                    <div key={album.id} className="text-center">
-                        <button onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })} className="w-full bg-gray-800 rounded-lg p-4 hover:bg-gray-700 transition-colors">
-                            <div className="w-full aspect-square mb-2 overflow-hidden">
-                                <CoverArtImage item={album} credentials={credentials} type="album" />
-                            </div>
-                        </button>
+                    <button key={album.id} onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })} className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
+                        <div className="w-full bg-gray-700 rounded aspect-square flex items-center justify-center mb-2 overflow-hidden">
+                             <ImageWithFallback
+                                src={album.coverArt ? `/rest/getCoverArt.view?id=${encodeURIComponent(album.coverArt)}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI` : ''}
+                                placeholder={<AlbumPlaceholder name={album.name} />}
+                                alt={album.name}
+                            />
+                        </div>
                         <p className="font-bold text-white truncate">{album.name}</p>
                         <p className="text-sm text-gray-400 truncate">{album.artist}</p>
-                    </div>
+                    </button>
                 ))}
             </div>
         </div>
@@ -360,19 +336,18 @@ export function Artists({ credentials, onNavigate }) {
         const fetchArtists = async () => {
             try {
                 let artistList = [];
-                if (searchTerm.length >= 3) {
+                if (searchTerm.length >= 2) {
                     const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, artistCount: 50 });
                     artistList = data.searchResult2?.artist || [];
                 } else if (searchTerm.length === 0) {
                     const data = await subsonicFetch('getArtists.view', credentials);
-                    const artistsContainer = data?.artists;
-                    if (artistsContainer && artistsContainer.artist) {
-                        artistList = Array.isArray(artistsContainer.artist) ? artistsContainer.artist : [artistsContainer.artist];
-                    }
+                    const indexData = data.artists?.index || [];
+					const indices = Array.isArray(indexData) ? indexData : [indexData].filter(Boolean);
+                    artistList = indices.flatMap(i => i.artist || []);
                 } else {
                     setArtists([]);
                 }
-                setArtists(artistList);
+                 setArtists(Array.isArray(artistList) ? artistList : [artistList].filter(Boolean));
             } catch (e) {
                 console.error("Failed to fetch artists:", e);
                 setArtists([]);
@@ -397,16 +372,18 @@ export function Artists({ credentials, onNavigate }) {
                     className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
                 />
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
+             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
                 {artists.map((artist) => (
-                     <div key={artist.id} className="text-center">
-                        <button onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: artist.name })} className="w-full bg-gray-800 rounded-lg p-4 hover:bg-gray-700 transition-colors">
-                            <div className="w-full aspect-square mb-2 overflow-hidden">
-                               <CoverArtImage item={artist} credentials={credentials} type="artist" />
-                            </div>
-                        </button>
-                        <p className="font-bold text-white truncate">{artist.name}</p>
-                    </div>
+                    <button key={artist.id} onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: artist.name })} className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors flex flex-col items-center">
+                        <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-gray-700 flex items-center justify-center mb-2 overflow-hidden flex-shrink-0">
+                             <ImageWithFallback
+                                src={artist.coverArt ? `/rest/getCoverArt.view?id=${encodeURIComponent(artist.coverArt)}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI` : ''}
+                                placeholder={<ArtistPlaceholder />}
+                                alt={artist.name}
+                            />
+                        </div>
+                        <p className="font-bold text-white truncate w-full">{artist.name}</p>
+                    </button>
                 ))}
             </div>
         </div>

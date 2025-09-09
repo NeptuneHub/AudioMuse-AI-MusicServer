@@ -100,16 +100,23 @@ type SubsonicSong struct {
 	LastPlayed string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
 }
 
-type SubsonicArtists struct {
-	XMLName xml.Name         `xml:"artists" json:"-"`
+type SubsonicArtistIndex struct {
+	XMLName xml.Name         `xml:"index" json:"-"`
+	Name    string           `xml:"name,attr" json:"name"`
 	Artists []SubsonicArtist `xml:"artist" json:"artist"`
 }
 
+type SubsonicArtists struct {
+	XMLName xml.Name              `xml:"artists" json:"-"`
+	Index   []SubsonicArtistIndex `xml:"index" json:"index"`
+}
+
 type SubsonicArtist struct {
-	XMLName  xml.Name `xml:"artist" json:"-"`
-	ID       string   `xml:"id,attr" json:"id"`
-	Name     string   `xml:"name,attr" json:"name"`
-	CoverArt string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	XMLName    xml.Name `xml:"artist" json:"-"`
+	ID         string   `xml:"id,attr" json:"id"`
+	Name       string   `xml:"name,attr" json:"name"`
+	CoverArt   string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	AlbumCount int      `xml:"albumCount,attr" json:"albumCount"`
 }
 
 type SubsonicAlbumList2 struct {

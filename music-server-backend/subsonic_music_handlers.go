@@ -11,9 +11,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/dhowden/tag"
 	"github.com/gin-gonic/gin"
@@ -62,28 +64,62 @@ func subsonicGetArtists(c *gin.Context) {
 		return
 	}
 
-	rows, err := db.Query("SELECT DISTINCT artist FROM songs WHERE artist != '' ORDER BY artist")
+	query := `
+		SELECT
+			s.artist,
+			COUNT(DISTINCT s.album)
+		FROM songs s
+		WHERE s.artist != ''
+		GROUP BY s.artist
+		ORDER BY s.artist COLLATE NOCASE
+	`
+	rows, err := db.Query(query)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying artists."))
 		return
 	}
 	defer rows.Close()
 
-	var artists []SubsonicArtist
+	artistIndex := make(map[string][]SubsonicArtist)
 	for rows.Next() {
-		var artistName string
-		if err := rows.Scan(&artistName); err != nil {
+		var artist SubsonicArtist
+		if err := rows.Scan(&artist.Name, &artist.AlbumCount); err != nil {
 			log.Printf("Error scanning artist for subsonicGetArtists: %v", err)
 			continue
 		}
-		artists = append(artists, SubsonicArtist{
-			ID:       artistName,
-			Name:     artistName,
-			CoverArt: artistName, // Use artist name as the ID for getCoverArt
+		artist.ID = artist.Name
+		artist.CoverArt = artist.Name
+
+		// Get the first letter for indexing
+		var indexChar string
+		for _, r := range artist.Name {
+			if unicode.IsLetter(r) || unicode.IsNumber(r) {
+				indexChar = strings.ToUpper(string(r))
+				break
+			}
+		}
+		if indexChar == "" {
+			indexChar = "#"
+		}
+
+		artistIndex[indexChar] = append(artistIndex[indexChar], artist)
+	}
+
+	// Convert map to slice for sorting and final structure
+	var indices []SubsonicArtistIndex
+	for name, artists := range artistIndex {
+		indices = append(indices, SubsonicArtistIndex{
+			Name:    name,
+			Artists: artists,
 		})
 	}
 
-	responseBody := &SubsonicArtists{Artists: artists}
+	// Sort indices alphabetically by name
+	sort.Slice(indices, func(i, j int) bool {
+		return indices[i].Name < indices[j].Name
+	})
+
+	responseBody := &SubsonicArtists{Index: indices}
 	response := newSubsonicResponse(responseBody)
 	subsonicRespond(c, response)
 }
