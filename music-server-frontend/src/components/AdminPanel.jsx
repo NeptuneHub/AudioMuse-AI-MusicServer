@@ -1,5 +1,5 @@
 // Suggested path: music-server-frontend/src/components/AdminPanel.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 const Modal = ({ children, onClose }) => (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
@@ -21,7 +21,6 @@ function FileBrowser({ onSelect, onClose }) {
         setError('');
         const token = localStorage.getItem('token');
         try {
-            // This is a UI helper and remains a non-subsonic endpoint.
             const response = await fetch(`/api/v1/admin/browse?path=${encodeURIComponent(path)}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -141,6 +140,11 @@ function LibraryManagement({ onConfigChange }) {
     const [editingPath, setEditingPath] = useState(null);
     const [isAddingPath, setIsAddingPath] = useState(false);
     const [error, setError] = useState('');
+    const wasScanningRef = useRef(false);
+
+    useEffect(() => {
+        wasScanningRef.current = scanStatus.scanning;
+    });
 
     const subsonicApiRequest = useCallback(async (method, endpoint, body = null) => {
         const token = localStorage.getItem('token');
@@ -169,13 +173,24 @@ function LibraryManagement({ onConfigChange }) {
         return data["subsonic-response"];
     }, []);
 
+    const fetchLibraryPaths = useCallback(async () => {
+        try {
+            const data = await subsonicApiRequest('GET', 'getLibraryPaths.view');
+            const paths = data?.libraryPaths?.path || [];
+            setLibraryPaths(Array.isArray(paths) ? paths : [paths].filter(Boolean));
+        } catch (err) {
+            setError(err.message || 'Failed to fetch library paths');
+        }
+    }, [subsonicApiRequest]);
+
     const fetchStatus = useCallback(async (isInitialFetch = false) => {
         try {
             const data = await subsonicApiRequest('GET', 'getScanStatus.view');
             if (data && data.scanStatus) {
-                setScanStatus({ scanning: data.scanStatus.scanning, count: data.scanStatus.count });
-                 if (!data.scanStatus.scanning && !isInitialFetch) {
-                    fetchLibraryPaths(); // Refresh paths to update song counts
+                const isScanningNow = data.scanStatus.scanning;
+                setScanStatus({ scanning: isScanningNow, count: data.scanStatus.count });
+                if (wasScanningRef.current && !isScanningNow) {
+                    fetchLibraryPaths();
                 }
             } else {
                  throw new Error('Invalid response from server.');
@@ -187,30 +202,19 @@ function LibraryManagement({ onConfigChange }) {
                 console.error("Initial scan status fetch failed. This may be normal.", e);
             }
         }
-    }, [subsonicApiRequest]);
-
-    const fetchLibraryPaths = useCallback(async () => {
-        try {
-            const data = await subsonicApiRequest('GET', 'getLibraryPaths.view');
-            const paths = data?.libraryPaths?.path || [];
-            setLibraryPaths(Array.isArray(paths) ? paths : [paths].filter(Boolean));
-        } catch (err) {
-            setError(err.message || 'Failed to fetch library paths');
-        }
-    }, [subsonicApiRequest]);
-
+    }, [subsonicApiRequest, fetchLibraryPaths]);
 
     useEffect(() => {
-        fetchStatus(true);
-        fetchLibraryPaths();
-        let intervalId = null;
-        if (scanStatus.scanning) {
-            intervalId = setInterval(() => fetchStatus(false), 3000);
-        }
-        return () => {
-            if (intervalId) clearInterval(intervalId);
-        };
-    }, [scanStatus.scanning, fetchStatus, fetchLibraryPaths]);
+      fetchLibraryPaths();
+      fetchStatus(true);
+    }, [fetchLibraryPaths, fetchStatus]);
+
+    useEffect(() => {
+        if (!scanStatus.scanning) return;
+
+        const intervalId = setInterval(() => fetchStatus(false), 3000);
+        return () => clearInterval(intervalId);
+    }, [scanStatus.scanning, fetchStatus]);
 
     const handleStartScan = async (pathId = null) => {
         setMessage('');
@@ -265,9 +269,17 @@ function LibraryManagement({ onConfigChange }) {
                 throw new Error(data.error || 'Failed to cancel scan');
             }
             setMessage('Cancellation signal sent. Scan will stop shortly.');
-            // Status will be updated by the polling fetchStatus
         } catch (e) {
             setMessage(e.message);
+        }
+    };
+
+    const formatDate = (isoString) => {
+        if (!isoString) return 'Never';
+        try {
+            return new Date(isoString).toLocaleString();
+        } catch (e) {
+            return 'Invalid Date';
         }
     };
 
@@ -303,6 +315,7 @@ function LibraryManagement({ onConfigChange }) {
                         <tr>
                             <th scope="col" className="px-6 py-3">Path</th>
                             <th scope="col" className="px-6 py-3">Songs</th>
+                            <th scope="col" className="px-6 py-3">Last Scanned</th>
                             <th scope="col" className="px-6 py-3 text-right">Actions</th>
                         </tr>
                     </thead>
@@ -311,6 +324,7 @@ function LibraryManagement({ onConfigChange }) {
                             <tr key={path.id} className="bg-gray-800 border-b border-gray-700 hover:bg-gray-600">
                                 <td className="px-6 py-4 font-mono text-white break-all">{path.path}</td>
                                 <td className="px-6 py-4">{path.songCount}</td>
+                                <td className="px-6 py-4">{formatDate(path.lastScanEnded)}</td>
                                 <td className="px-6 py-4 text-right space-x-2 whitespace-nowrap">
                                     <button onClick={() => handleStartScan(path.id)} disabled={scanStatus.scanning} className="font-medium text-green-500 hover:underline disabled:text-gray-500 disabled:cursor-not-allowed">Scan</button>
                                     <button onClick={() => setEditingPath(path)} disabled={scanStatus.scanning} className="font-medium text-blue-500 hover:underline disabled:text-gray-500 disabled:cursor-not-allowed">Edit</button>
@@ -333,10 +347,9 @@ function LibraryManagement({ onConfigChange }) {
     );
 }
 
-
-function AIConfigManagement({ onConfigChange }) {
-    const [configs, setConfigs] = useState([]);
-    const [audiomuseUrl, setAudiomuseUrl] = useState('');
+function AutoScanManagement({ onConfigChange }) {
+    const [schedule, setSchedule] = useState('');
+    const [isEnabled, setIsEnabled] = useState(false);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
 
@@ -363,7 +376,102 @@ function AIConfigManagement({ onConfigChange }) {
             const data = await subsonicApiRequest('getConfiguration.view');
             const configList = data?.configurations?.configuration || [];
             const allConfigs = Array.isArray(configList) ? configList : [configList].filter(Boolean);
-            setConfigs(allConfigs);
+            
+            const scheduleConfig = allConfigs.find(c => c.name === 'scan_schedule');
+            setSchedule(scheduleConfig?.value || '0 2 * * *');
+
+            const enabledConfig = allConfigs.find(c => c.name === 'scan_enabled');
+            setIsEnabled(enabledConfig?.value === 'true');
+
+        } catch (err) {
+            setError(err.message || 'Failed to fetch scan configuration');
+        }
+    }, [subsonicApiRequest]);
+
+    useEffect(() => {
+        fetchConfig();
+    }, [fetchConfig]);
+
+    const handleSave = async () => {
+        setError('');
+        setMessage('');
+        try {
+            // Save schedule and enabled status as two separate API calls
+            await subsonicApiRequest('setConfiguration.view', { key: 'scan_schedule', value: schedule });
+            await subsonicApiRequest('setConfiguration.view', { key: 'scan_enabled', value: isEnabled });
+            
+            setMessage('Auto-scan settings saved successfully! Restart the server for changes to take effect.');
+            onConfigChange();
+            setTimeout(() => setMessage(''), 5000);
+        } catch (err) {
+            setError(err.message || 'Failed to save settings.');
+        }
+    };
+
+    return (
+        <div className="bg-gray-800 p-4 sm:p-6 rounded-lg">
+            <h3 className="text-xl font-bold mb-4">Automatic Library Scanning</h3>
+            <div className="space-y-4">
+                <div className="flex items-center">
+                    <input
+                        type="checkbox"
+                        id="scan-enabled"
+                        checked={isEnabled}
+                        onChange={(e) => setIsEnabled(e.target.checked)}
+                        className="w-5 h-5 text-teal-600 bg-gray-700 border-gray-600 rounded focus:ring-teal-500"
+                    />
+                    <label htmlFor="scan-enabled" className="ml-3 text-sm font-medium text-gray-300">Enable automatic scanning</label>
+                </div>
+                <div>
+                    <label htmlFor="scan-schedule" className="block text-sm font-medium text-gray-300">Cron Schedule</label>
+                     <input
+                        type="text"
+                        id="scan-schedule"
+                        value={schedule}
+                        onChange={(e) => setSchedule(e.target.value)}
+                        placeholder="0 2 * * *"
+                        className="w-full p-2 mt-1 bg-gray-700 rounded border border-gray-600 font-mono"
+                        disabled={!isEnabled}
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Standard cron format. Default is '0 2 * * *' (2 AM daily).</p>
+                </div>
+            </div>
+             <div className="mt-4 flex justify-end">
+                <button onClick={handleSave} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Save Settings</button>
+            </div>
+            {message && <p className="text-green-400 mt-2">{message}</p>}
+            {error && <p className="text-red-500 mt-2">{error}</p>}
+        </div>
+    );
+}
+
+
+function AIConfigManagement({ onConfigChange }) {
+    const [audiomuseUrl, setAudiomuseUrl] = useState('');
+    const [message, setMessage] = useState('');
+    const [error, setError] = useState('');
+
+    const subsonicApiRequest = useCallback(async (endpoint, params = {}) => {
+        const token = localStorage.getItem('token');
+        const query = new URLSearchParams(params);
+        query.append('f', 'json');
+        const response = await fetch(`/rest/${endpoint}?${query.toString()}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        const subsonicResponse = data["subsonic-response"];
+        if (!response.ok || subsonicResponse.status === 'failed') {
+            const error = subsonicResponse?.error;
+            throw new Error(error?.message || `Server error: ${response.status}`);
+        }
+        return subsonicResponse;
+    }, []);
+
+    const fetchConfig = useCallback(async () => {
+        try {
+            const data = await subsonicApiRequest('getConfiguration.view');
+            const configList = data?.configurations?.configuration || [];
+            const allConfigs = Array.isArray(configList) ? configList : [configList].filter(Boolean);
             const urlConfig = allConfigs.find(c => c.name === 'audiomuse_ai_core_url');
             setAudiomuseUrl(urlConfig?.value || '');
         } catch (err) {
@@ -381,7 +489,7 @@ function AIConfigManagement({ onConfigChange }) {
         try {
             await subsonicApiRequest('setConfiguration.view', { key: 'audiomuse_ai_core_url', value: audiomuseUrl });
             setMessage('URL saved successfully!');
-            onConfigChange(); // Notify dashboard of the change
+            onConfigChange();
             setTimeout(() => setMessage(''), 3000);
         } catch (err) {
             setError(err.message || 'Failed to save URL.');
@@ -611,6 +719,7 @@ export default function AdminPanel({ onConfigChange }) {
 		<div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
             <div className="space-y-8">
                  <LibraryManagement onConfigChange={onConfigChange} />
+                 <AutoScanManagement onConfigChange={onConfigChange} />
                  <AIConfigManagement onConfigChange={onConfigChange} />
             </div>
             <UserManagement />

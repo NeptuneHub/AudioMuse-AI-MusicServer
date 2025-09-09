@@ -14,29 +14,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// scanSingleLibrary is a robust wrapper to scan one library and manage global status.
 func scanSingleLibrary(pathId int) {
-	// This function now handles the entire lifecycle of a single scan.
 	defer func() {
-		// This deferred block ensures the scanning status is always reset.
-		log.Println("Single library scan finished, updating final status.")
 		db.Exec("UPDATE scan_status SET is_scanning = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+		log.Println("Single library scan process finished, final status updated.")
 	}()
 
 	var path string
 	err := db.QueryRow("SELECT path FROM library_paths WHERE id = ?", pathId).Scan(&path)
 	if err != nil {
 		log.Printf("Cannot start single scan, path not found for id %d: %v", pathId, err)
-		return // The defer will handle resetting the scan status.
+		return
 	}
 
 	log.Printf("Background scan started for single path: %s", path)
 	isScanCancelled.Store(false)
 
 	songsAdded := processPath(path)
-	updateSongCountForPath(path, pathId) // Update count for this path.
+	updateSongCountForPath(path, pathId)
+	db.Exec("UPDATE library_paths SET last_scan_ended = ? WHERE id = ?", time.Now().Format(time.RFC3339), pathId)
 
-	// Update the global count of songs added *in this specific run*.
 	db.Exec("UPDATE scan_status SET songs_added = ? WHERE id = 1", songsAdded)
 
 	if isScanCancelled.Load() {
@@ -46,12 +43,10 @@ func scanSingleLibrary(pathId int) {
 	}
 }
 
-// scanAllLibraries is a background worker function that scans all configured library paths.
 func scanAllLibraries() {
 	defer func() {
-		// This deferred block ensures the scanning status is always reset.
-		log.Println("Finished scanning all libraries, updating final status.")
 		db.Exec("UPDATE scan_status SET is_scanning = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+		log.Println("Finished scanning all libraries, final status updated.")
 	}()
 
 	log.Println("Background scan started for ALL library paths.")
@@ -82,15 +77,14 @@ func scanAllLibraries() {
 		}
 		songsAdded := processPath(p.Path)
 		totalSongsAdded += songsAdded
-		updateSongCountForPath(p.Path, p.ID) // Update count for each path as it completes.
+		updateSongCountForPath(p.Path, p.ID)
+		db.Exec("UPDATE library_paths SET last_scan_ended = ? WHERE id = ?", time.Now().Format(time.RFC3339), p.ID)
 	}
 
 	log.Printf("Total new songs added in this run across all paths: %d.", totalSongsAdded)
 	db.Exec("UPDATE scan_status SET songs_added = ? WHERE id = 1", totalSongsAdded)
 }
 
-// processPath walks a single directory path and adds songs to the database.
-// It returns the number of new songs added from that path.
 func processPath(scanPath string) int64 {
 	var songsAdded int64
 	log.Printf("Processing path: %s", scanPath)
@@ -142,11 +136,9 @@ func processPath(scanPath string) int64 {
 	if walkErr != nil {
 		log.Printf("Stopped walking path %s due to error: %v", scanPath, walkErr)
 	}
-
 	return songsAdded
 }
 
-// updateSongCountForPath calculates and updates the total number of songs for a specific library path.
 func updateSongCountForPath(path string, pathId int) {
 	var count int
 	likePath := filepath.Join(path, "%")
@@ -164,7 +156,6 @@ func updateSongCountForPath(path string, pathId int) {
 	}
 }
 
-// browseFiles is a UI helper not part of the Subsonic API standard.
 func browseFiles(c *gin.Context) {
 	path := c.DefaultQuery("path", "/")
 	if path == "" {
@@ -187,15 +178,12 @@ func browseFiles(c *gin.Context) {
 			items = append(items, FileItem{Name: entry.Name(), Type: "dir"})
 		}
 	}
-
 	c.JSON(http.StatusOK, gin.H{"path": path, "items": items})
 }
 
-// cancelAdminScan is a UI helper to signal a running scan to stop.
 func cancelAdminScan(c *gin.Context) {
 	log.Println("Received request to cancel library scan.")
 	isScanCancelled.Store(true)
-	// The running scan functions will now handle updating the DB status upon cancellation.
 	c.JSON(http.StatusOK, gin.H{"message": "Scan cancellation signal sent."})
 }
 

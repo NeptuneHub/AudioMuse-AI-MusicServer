@@ -40,14 +40,14 @@ type FileItem struct {
 }
 
 type LibraryPath struct {
-	ID        int    `json:"id"`
-	Path      string `json:"path"`
-	SongCount int    `json:"song_count"`
+	ID            int    `json:"id"`
+	Path          string `json:"path"`
+	SongCount     int    `json:"song_count"`
+	LastScanEnded string `json:"last_scan_ended"`
 }
 
 // --- Subsonic Data Structures ---
 
-// SubsonicResponse is the top-level wrapper for all Subsonic API responses.
 type SubsonicResponse struct {
 	XMLName       xml.Name `xml:"subsonic-response" json:"-"`
 	Status        string   `xml:"status,attr" json:"status"`
@@ -59,20 +59,17 @@ type SubsonicResponse struct {
 	Body          interface{}
 }
 
-// SubsonicError represents an error message in a Subsonic response.
 type SubsonicError struct {
 	XMLName xml.Name `xml:"error" json:"-"`
 	Code    int      `xml:"code,attr" json:"code"`
 	Message string   `xml:"message,attr" json:"message"`
 }
 
-// SubsonicLicense represents the license status.
 type SubsonicLicense struct {
 	XMLName xml.Name `xml:"license" json:"-"`
 	Valid   bool     `xml:"valid,attr" json:"valid"`
 }
 
-// SubsonicDirectory represents a container for songs (e.g., a playlist).
 type SubsonicDirectory struct {
 	XMLName   xml.Name       `xml:"directory" json:"-"`
 	ID        string         `xml:"id,attr,omitempty" json:"id,omitempty"`
@@ -82,7 +79,6 @@ type SubsonicDirectory struct {
 	Songs     []SubsonicSong `xml:"song" json:"song"`
 }
 
-// SubsonicAlbumWithSongs represents an album and its songs for getAlbum responses.
 type SubsonicAlbumWithSongs struct {
 	XMLName   xml.Name       `xml:"album" json:"-"`
 	ID        string         `xml:"id,attr,omitempty" json:"id,omitempty"`
@@ -92,7 +88,6 @@ type SubsonicAlbumWithSongs struct {
 	Songs     []SubsonicSong `xml:"song" json:"song"`
 }
 
-// SubsonicSong represents a single song.
 type SubsonicSong struct {
 	XMLName    xml.Name `xml:"song" json:"-"`
 	ID         string   `xml:"id,attr" json:"id"`
@@ -105,26 +100,22 @@ type SubsonicSong struct {
 	LastPlayed string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
 }
 
-// SubsonicArtists represents a list of artists.
 type SubsonicArtists struct {
 	XMLName xml.Name         `xml:"artists" json:"-"`
 	Artists []SubsonicArtist `xml:"artist" json:"artist"`
 }
 
-// SubsonicArtist represents a single artist.
 type SubsonicArtist struct {
 	XMLName xml.Name `xml:"artist" json:"-"`
 	ID      string   `xml:"id,attr" json:"id"`
 	Name    string   `xml:"name,attr" json:"name"`
 }
 
-// SubsonicAlbumList2 represents a list of albums.
 type SubsonicAlbumList2 struct {
 	XMLName xml.Name        `xml:"albumList2" json:"-"`
 	Albums  []SubsonicAlbum `xml:"album" json:"album"`
 }
 
-// SubsonicAlbum represents a single album in a list.
 type SubsonicAlbum struct {
 	XMLName  xml.Name `xml:"album" json:"-"`
 	ID       string   `xml:"id,attr" json:"id"`
@@ -133,13 +124,11 @@ type SubsonicAlbum struct {
 	CoverArt string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
 }
 
-// SubsonicPlaylists represents a list of playlists.
 type SubsonicPlaylists struct {
 	XMLName   xml.Name           `xml:"playlists" json:"-"`
 	Playlists []SubsonicPlaylist `xml:"playlist" json:"playlist"`
 }
 
-// SubsonicPlaylist represents a single playlist.
 type SubsonicPlaylist struct {
 	XMLName   xml.Name `xml:"playlist" json:"-"`
 	ID        int      `xml:"id,attr" json:"id"`
@@ -150,57 +139,50 @@ type SubsonicPlaylist struct {
 	Duration  int      `xml:"duration,attr" json:"duration"`
 }
 
-// SubsonicTokenInfo represents information about an API key.
 type SubsonicTokenInfo struct {
 	XMLName  xml.Name `xml:"tokenInfo" json:"-"`
 	Username string   `xml:"username,attr" json:"username"`
 }
 
-// SubsonicScanStatus represents the status of a library scan.
 type SubsonicScanStatus struct {
 	XMLName  xml.Name `xml:"scanStatus" json:"-"`
 	Scanning bool     `xml:"scanning,attr" json:"scanning"`
 	Count    int64    `xml:"count,attr" json:"count"`
 }
 
-// SubsonicUsers represents a list of users for user management.
 type SubsonicUsers struct {
 	XMLName xml.Name       `xml:"users" json:"-"`
 	Users   []SubsonicUser `xml:"user" json:"user"`
 }
 
-// SubsonicUser represents a single user.
 type SubsonicUser struct {
 	XMLName      xml.Name `xml:"user" json:"-"`
 	Username     string   `xml:"username,attr" json:"username"`
 	AdminRole    bool     `xml:"adminRole,attr" json:"adminRole"`
-	SettingsRole bool     `xml:"settingsRole,attr" json:"settingsRole"` // Same as admin for us
+	SettingsRole bool     `xml:"settingsRole,attr" json:"settingsRole"`
 }
 
-// SubsonicConfigurations represents a list of server configurations.
 type SubsonicConfigurations struct {
 	XMLName        xml.Name                `xml:"configurations" json:"-"`
 	Configurations []SubsonicConfiguration `xml:"configuration" json:"configuration"`
 }
 
-// SubsonicConfiguration represents a single key-value configuration pair.
 type SubsonicConfiguration struct {
 	XMLName xml.Name `xml:"configuration" json:"-"`
 	Name    string   `xml:"name,attr" json:"name"`
 	Value   string   `xml:"value,attr" json:"value"`
 }
 
-// SubsonicLibraryPaths represents a list of library paths for scanning.
 type SubsonicLibraryPaths struct {
 	XMLName xml.Name              `xml:"libraryPaths" json:"-"`
 	Paths   []SubsonicLibraryPath `xml:"path" json:"path"`
 }
 
-// SubsonicLibraryPath represents a single library path.
 type SubsonicLibraryPath struct {
-	XMLName   xml.Name `xml:"path" json:"-"`
-	ID        int      `xml:"id,attr" json:"id"`
-	Path      string   `xml:"path,attr" json:"path"`
-	SongCount int      `xml:"songCount,attr" json:"songCount"`
+	XMLName       xml.Name `xml:"path" json:"-"`
+	ID            int      `xml:"id,attr" json:"id"`
+	Path          string   `xml:"path,attr" json:"path"`
+	SongCount     int      `xml:"songCount,attr" json:"songCount"`
+	LastScanEnded string   `xml:"lastScanEnded,attr,omitempty" json:"lastScanEnded"`
 }
 

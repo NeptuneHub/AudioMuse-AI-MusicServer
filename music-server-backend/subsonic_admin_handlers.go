@@ -31,7 +31,6 @@ func subsonicStartScan(c *gin.Context) {
 		return
 	}
 
-	// Set status to scanning BEFORE starting the goroutine to avoid race condition.
 	_, err = db.Exec("UPDATE scan_status SET is_scanning = 1, songs_added = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
 	if err != nil {
 		log.Printf("Error starting scan in DB: %v", err)
@@ -44,12 +43,11 @@ func subsonicStartScan(c *gin.Context) {
 		pathId, err := strconv.Atoi(pathIdStr)
 		if err != nil {
 			subsonicRespond(c, newSubsonicErrorResponse(10, "Invalid pathId provided."))
-			db.Exec("UPDATE scan_status SET is_scanning = 0 WHERE id = 1") // Reset status
+			db.Exec("UPDATE scan_status SET is_scanning = 0 WHERE id = 1")
 			return
 		}
 		go scanSingleLibrary(pathId)
 	} else {
-		// Scan all paths
 		go scanAllLibraries()
 	}
 
@@ -71,14 +69,12 @@ func subsonicGetScanStatus(c *gin.Context) {
 	subsonicRespond(c, newSubsonicResponse(&SubsonicScanStatus{Scanning: isScanning, Count: songsAdded}))
 }
 
-// --- Library Path Management ---
-
 func subsonicGetLibraryPaths(c *gin.Context) {
 	if _, ok := subsonicAuthenticate(c); !ok {
 		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
-	rows, err := db.Query("SELECT id, path, song_count FROM library_paths ORDER BY path")
+	rows, err := db.Query("SELECT id, path, song_count, last_scan_ended FROM library_paths ORDER BY path")
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "DB error fetching library paths."))
 		return
@@ -88,11 +84,14 @@ func subsonicGetLibraryPaths(c *gin.Context) {
 	var paths []SubsonicLibraryPath
 	for rows.Next() {
 		var p LibraryPath
-		if err := rows.Scan(&p.ID, &p.Path, &p.SongCount); err != nil {
+		var lastScan sql.NullString
+		if err := rows.Scan(&p.ID, &p.Path, &p.SongCount, &lastScan); err != nil {
 			log.Printf("Error scanning library path row: %v", err)
 			continue
 		}
-		paths = append(paths, SubsonicLibraryPath{ID: p.ID, Path: p.Path, SongCount: p.SongCount})
+		paths = append(paths, SubsonicLibraryPath{
+			ID: p.ID, Path: p.Path, SongCount: p.SongCount, LastScanEnded: lastScan.String,
+		})
 	}
 	subsonicRespond(c, newSubsonicResponse(&SubsonicLibraryPaths{Paths: paths}))
 }
@@ -116,7 +115,7 @@ func subsonicAddLibraryPath(c *gin.Context) {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			subsonicRespond(c, newSubsonicErrorResponse(0, "This library path already exists."))
 		} else {
-			subsonicRespond(c, newSubsonicErrorResponse(0, "A database error occurred while adding the path."))
+			subsonicRespond(c, newSubsonicErrorResponse(0, "A database error occurred."))
 		}
 		return
 	}
@@ -164,22 +163,18 @@ func subsonicDeleteLibraryPath(c *gin.Context) {
 	subsonicGetLibraryPaths(c)
 }
 
-// --- Configuration Management ---
-
 func subsonicGetConfiguration(c *gin.Context) {
 	user, ok := subsonicAuthenticate(c)
 	if !ok || !user.IsAdmin {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
-
 	rows, err := db.Query("SELECT key, value FROM configuration")
 	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching configuration."))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "DB error fetching configuration."))
 		return
 	}
 	defer rows.Close()
-
 	var configs []SubsonicConfiguration
 	for rows.Next() {
 		var key, value string
@@ -189,25 +184,21 @@ func subsonicGetConfiguration(c *gin.Context) {
 		}
 		configs = append(configs, SubsonicConfiguration{Name: key, Value: value})
 	}
-
 	subsonicRespond(c, newSubsonicResponse(&SubsonicConfigurations{Configurations: configs}))
 }
 
 func subsonicSetConfiguration(c *gin.Context) {
 	user, ok := subsonicAuthenticate(c)
 	if !ok || !user.IsAdmin {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
-
 	key := c.Query("key")
 	value := c.Query("value")
-
 	if key == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Parameter 'key' is required."))
 		return
 	}
-
 	_, err := db.Exec("INSERT OR REPLACE INTO configuration (key, value) VALUES (?, ?)", key, value)
 	if err != nil {
 		log.Printf("Error saving configuration key '%s': %v", key, err)
@@ -215,26 +206,30 @@ func subsonicSetConfiguration(c *gin.Context) {
 		return
 	}
 
-	// After setting, return all configurations
+	// Restart scheduler if schedule-related config changed
+	if key == "scan_schedule" || key == "scan_enabled" {
+		log.Println("Scheduler configuration changed, restarting scheduler...")
+		if scheduler != nil {
+			scheduler.Stop()
+		}
+		startScheduler()
+	}
+
 	subsonicGetConfiguration(c)
 }
-
-
-// --- Subsonic User Management Handlers ---
 
 func subsonicGetUsers(c *gin.Context) {
 	user, ok := subsonicAuthenticate(c)
 	if !ok || !user.IsAdmin {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
 	rows, err := db.Query("SELECT username, is_admin FROM users ORDER BY username")
 	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching users."))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "DB error fetching users."))
 		return
 	}
 	defer rows.Close()
-
 	var users []SubsonicUser
 	for rows.Next() {
 		var u User
@@ -250,7 +245,7 @@ func subsonicGetUsers(c *gin.Context) {
 func subsonicCreateUser(c *gin.Context) {
 	user, ok := subsonicAuthenticate(c)
 	if !ok || !user.IsAdmin {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
 	username := c.Query("username")
@@ -266,10 +261,9 @@ func subsonicCreateUser(c *gin.Context) {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to hash password."))
 		return
 	}
-
 	_, err = db.Exec("INSERT INTO users (username, password_hash, password_plain, is_admin) VALUES (?, ?, ?, ?)", username, hashedPassword, password, isAdmin)
 	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Could not create user; username might already exist."))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Could not create user."))
 		return
 	}
 	subsonicRespond(c, newSubsonicResponse(nil))
@@ -278,7 +272,7 @@ func subsonicCreateUser(c *gin.Context) {
 func subsonicUpdateUser(c *gin.Context) {
 	user, ok := subsonicAuthenticate(c)
 	if !ok || !user.IsAdmin {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
 	username := c.Query("username")
@@ -288,7 +282,6 @@ func subsonicUpdateUser(c *gin.Context) {
 		return
 	}
 
-	// Only updating password for now, as it's the main use case for the UI
 	if password != "" {
 		hashedPassword, err := hashPassword(password)
 		if err != nil {
@@ -307,7 +300,7 @@ func subsonicUpdateUser(c *gin.Context) {
 func subsonicDeleteUser(c *gin.Context) {
 	requestingUser, ok := subsonicAuthenticate(c)
 	if !ok || !requestingUser.IsAdmin {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
 	usernameToDelete := c.Query("username")
@@ -319,7 +312,6 @@ func subsonicDeleteUser(c *gin.Context) {
 		subsonicRespond(c, newSubsonicErrorResponse(50, "You cannot delete your own account."))
 		return
 	}
-
 	res, err := db.Exec("DELETE FROM users WHERE username = ?", usernameToDelete)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to delete user."))

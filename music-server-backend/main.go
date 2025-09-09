@@ -11,10 +11,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/robfig/cron/v3"
 )
 
 var db *sql.DB
 var isScanCancelled atomic.Bool // Global flag to signal scan cancellation.
+var scheduler *cron.Cron
 
 func loggingMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -37,7 +39,6 @@ func loggingMiddleware() gin.HandlerFunc {
 
 func main() {
 	var err error
-	// Enabled WAL mode for better concurrency and to prevent locking issues.
 	db, err = sql.Open("sqlite3", "./music.db?_journal_mode=WAL")
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
@@ -45,16 +46,15 @@ func main() {
 	defer db.Close()
 
 	initDB()
+	startScheduler()
 
-	// On startup, always reset scan status to ensure a clean state.
-	// This prevents the UI from getting stuck if the server crashed mid-scan.
 	if _, err := db.Exec("UPDATE scan_status SET is_scanning = 0 WHERE id = 1"); err != nil {
 		log.Fatalf("Failed to reset scan status on startup: %v", err)
 	}
 
 	r := gin.New()
 	r.Use(gin.Recovery())
-	r.Use(loggingMiddleware()) // Use custom logging middleware
+	r.Use(loggingMiddleware())
 
 	// Subsonic API routes
 	rest := r.Group("/rest")
@@ -71,57 +71,43 @@ func main() {
 		rest.GET("/deletePlaylist.view", subsonicDeletePlaylist)
 		rest.GET("/getAlbum.view", subsonicGetAlbum)
 		rest.GET("/search2.view", subsonicSearch2)
-		rest.GET("/search3.view", subsonicSearch2) // search3 is an alias for search2
+		rest.GET("/search3.view", subsonicSearch2)
 		rest.GET("/getRandomSongs.view", subsonicGetRandomSongs)
 		rest.GET("/getCoverArt.view", subsonicGetCoverArt)
 		rest.GET("/tokenInfo.view", subsonicTokenInfo)
-
-		// Scanning and Library Management
 		rest.Any("/startScan.view", subsonicStartScan)
 		rest.GET("/getScanStatus.view", subsonicGetScanStatus)
 		rest.GET("/getLibraryPaths.view", subsonicGetLibraryPaths)
 		rest.POST("/addLibraryPath.view", subsonicAddLibraryPath)
 		rest.POST("/updateLibraryPath.view", subsonicUpdateLibraryPath)
 		rest.POST("/deleteLibraryPath.view", subsonicDeleteLibraryPath)
-
-		// User Management Endpoints (OpenSubsonic Standard)
 		rest.GET("/getUsers.view", subsonicGetUsers)
 		rest.GET("/createUser.view", subsonicCreateUser)
 		rest.GET("/updateUser.view", subsonicUpdateUser)
 		rest.GET("/deleteUser.view", subsonicDeleteUser)
 		rest.GET("/changePassword.view", subsonicChangePassword)
-
-		// Configuration
 		rest.GET("/getConfiguration.view", subsonicGetConfiguration)
 		rest.GET("/setConfiguration.view", subsonicSetConfiguration)
-
-		// AudioMuse-AI Core integration
 		rest.GET("/getSimilarSongs.view", subsonicGetSimilarSongs)
 		rest.GET("/getSongPath.view", subsonicGetSongPath)
 	}
 
-	// JSON API routes for the web UI
 	v1 := r.Group("/api/v1")
 	{
-		// This login endpoint remains as a bridge to get a JWT for the UI.
 		userRoutes := v1.Group("/user")
 		{
 			userRoutes.POST("/login", loginUser)
 		}
-
-		// Admin routes - only non-Subsonic helpers remain
 		adminRoutes := v1.Group("/admin")
 		adminRoutes.Use(AuthMiddleware(), adminOnly())
 		{
-			// Filesystem browsing is a UI helper not in the Subsonic spec.
 			adminRoutes.GET("/browse", browseFiles)
-			// Add a non-standard endpoint to cancel a scan from the UI.
 			adminRoutes.POST("/scan/cancel", cancelAdminScan)
 		}
 	}
 
 	log.Println("[GIN-debug] Listening and serving HTTP on :8080")
-	r.Run(":8080") // listen and serve on 0.0.0.0:8080
+	r.Run(":8080")
 }
 
 func adminOnly() gin.HandlerFunc {
@@ -137,115 +123,82 @@ func adminOnly() gin.HandlerFunc {
 }
 
 func initDB() {
-	// ... existing initDB code ...
-	// Create users table
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			username TEXT UNIQUE,
 			password_hash TEXT,
-			password_plain TEXT, -- WARNING: Storing plaintext passwords is a security risk. Required for Subsonic token auth.
+			password_plain TEXT,
 			is_admin BOOLEAN
-		);
-	`)
+		);`)
 	if err != nil {
 		log.Fatal("Failed to create users table:", err)
 	}
-
-	// Add password_plain column for Subsonic token auth if it doesn't exist.
 	alterAndLog("ALTER TABLE users ADD COLUMN password_plain TEXT")
 
-	// Create scan_status table to track library scans
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS scan_status (
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS scan_status (
 			id INTEGER PRIMARY KEY CHECK (id = 1),
 			is_scanning BOOLEAN NOT NULL DEFAULT 0,
 			songs_added INTEGER NOT NULL DEFAULT 0,
 			last_update_time TEXT
-		);
-	`)
+		);`)
 	if err != nil {
 		log.Fatal("Failed to create scan_status table:", err)
 	}
-	// Ensure the single row exists for tracking status
 	db.Exec(`INSERT OR IGNORE INTO scan_status (id) VALUES (1);`)
 
-	// Create songs table with new columns for tracking
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS songs (
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS songs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			title TEXT,
-			artist TEXT,
-			album TEXT,
-			path TEXT UNIQUE,
-			play_count INTEGER NOT NULL DEFAULT 0,
-			last_played TEXT,
-			date_added TEXT,
-			date_updated TEXT
-		);
-	`)
+			title TEXT, artist TEXT, album TEXT, path TEXT UNIQUE,
+			play_count INTEGER NOT NULL DEFAULT 0, last_played TEXT,
+			date_added TEXT, date_updated TEXT
+		);`)
 	if err != nil {
 		log.Fatal("Failed to create songs table:", err)
 	}
-
-	// Add new columns to existing songs table if they don't exist, for graceful upgrades
 	alterAndLog("ALTER TABLE songs ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0")
 	alterAndLog("ALTER TABLE songs ADD COLUMN last_played TEXT")
 	alterAndLog("ALTER TABLE songs ADD COLUMN date_added TEXT")
 	alterAndLog("ALTER TABLE songs ADD COLUMN date_updated TEXT")
 
-	// Create playlists table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS playlists (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT,
-			user_id INTEGER,
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS playlists (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, user_id INTEGER,
 			FOREIGN KEY(user_id) REFERENCES users(id)
-		);
-	`)
+		);`)
 	if err != nil {
 		log.Fatal("Failed to create playlists table:", err)
 	}
 
-	// Create playlist_songs table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS playlist_songs (
-			playlist_id INTEGER,
-			song_id INTEGER,
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS playlist_songs (
+			playlist_id INTEGER, song_id INTEGER,
 			FOREIGN KEY(playlist_id) REFERENCES playlists(id),
 			FOREIGN KEY(song_id) REFERENCES songs(id),
 			PRIMARY KEY (playlist_id, song_id)
-		);
-	`)
+		);`)
 	if err != nil {
 		log.Fatal("Failed to create playlist_songs table:", err)
 	}
 
-	// Create library_paths table to store multiple library locations
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS library_paths (
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS configuration (key TEXT PRIMARY KEY, value TEXT);`)
+	if err != nil {
+		log.Fatal("Failed to create configuration table:", err)
+	}
+	// Add default cron job settings if they don't exist
+	db.Exec(`INSERT OR IGNORE INTO configuration (key, value) VALUES ('scan_enabled', 'true');`)
+	db.Exec(`INSERT OR IGNORE INTO configuration (key, value) VALUES ('scan_schedule', '0 2 * * *');`)
+
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS library_paths (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			path TEXT UNIQUE,
-			song_count INTEGER NOT NULL DEFAULT 0
-		);
-	`)
+			song_count INTEGER NOT NULL DEFAULT 0,
+			last_scan_ended TEXT
+		);`)
 	if err != nil {
 		log.Fatal("Failed to create library_paths table:", err)
 	}
 	alterAndLog("ALTER TABLE library_paths ADD COLUMN song_count INTEGER NOT NULL DEFAULT 0")
+	alterAndLog("ALTER TABLE library_paths ADD COLUMN last_scan_ended TEXT")
 
-	// Create configuration table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS configuration (
-			key TEXT PRIMARY KEY,
-			value TEXT
-		);
-	`)
-	if err != nil {
-		log.Fatal("Failed to create configuration table:", err)
-	}
-
-	// Create initial admin user if not exists
 	var count int
 	row := db.QueryRow("SELECT COUNT(*) FROM users WHERE username = 'admin'")
 	if err := row.Scan(&count); err == nil && count == 0 {
@@ -259,12 +212,51 @@ func initDB() {
 	}
 }
 
-// alterAndLog is a helper to run an ALTER TABLE command and log a warning if it fails.
-// This is used for gracefully adding new columns to an existing database.
 func alterAndLog(query string) {
 	_, err := db.Exec(query)
 	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		log.Printf("Warning: Could not execute schema update '%s': %v", query, err)
+	}
+}
+
+func startScheduler() {
+	scheduler = cron.New()
+	var schedule, enabledStr string
+	var isEnabled bool
+
+	err := db.QueryRow("SELECT value FROM configuration WHERE key = 'scan_schedule'").Scan(&schedule)
+	if err != nil {
+		log.Printf("Could not read scan_schedule from config, using default. Error: %v", err)
+		schedule = "0 2 * * *" // Default: 2 AM daily
+	}
+
+	err = db.QueryRow("SELECT value FROM configuration WHERE key = 'scan_enabled'").Scan(&enabledStr)
+	if err != nil {
+		log.Printf("Could not read scan_enabled from config, defaulting to true. Error: %v", err)
+		isEnabled = true
+	} else {
+		isEnabled = (enabledStr == "true")
+	}
+
+	if isEnabled {
+		_, err := scheduler.AddFunc(schedule, func() {
+			log.Println("Cron job triggered: starting scheduled scan of all libraries.")
+			var isScanning bool
+			db.QueryRow("SELECT is_scanning FROM scan_status WHERE id = 1").Scan(&isScanning)
+			if !isScanning {
+				db.Exec("UPDATE scan_status SET is_scanning = 1, songs_added = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+				scanAllLibraries()
+			} else {
+				log.Println("Scheduled scan skipped: a scan is already in progress.")
+			}
+		})
+		if err != nil {
+			log.Fatalf("Error scheduling library scan cron job: %v", err)
+		}
+		scheduler.Start()
+		log.Printf("Scheduled library scan started with schedule: '%s'", schedule)
+	} else {
+		log.Println("Scheduled library scan is disabled.")
 	}
 }
 
