@@ -62,6 +62,7 @@ func main() {
 		rest.GET("/ping.view", subsonicPing)
 		rest.GET("/getLicense.view", subsonicGetLicense)
 		rest.GET("/stream.view", subsonicStream)
+		rest.GET("/scrobble.view", subsonicScrobble)
 		rest.GET("/getArtists.view", subsonicGetArtists)
 		rest.GET("/getAlbumList2.view", subsonicGetAlbumList2)
 		rest.GET("/getPlaylists.view", subsonicGetPlaylists)
@@ -74,7 +75,6 @@ func main() {
 		rest.GET("/search3.view", subsonicSearch2)
 		rest.GET("/getRandomSongs.view", subsonicGetRandomSongs)
 		rest.GET("/getCoverArt.view", subsonicGetCoverArt)
-		rest.GET("/scrobble.view", subsonicScrobble)
 		rest.GET("/tokenInfo.view", subsonicTokenInfo)
 		rest.Any("/startScan.view", subsonicStartScan)
 		rest.GET("/getScanStatus.view", subsonicGetScanStatus)
@@ -104,6 +104,14 @@ func main() {
 		{
 			adminRoutes.GET("/browse", browseFiles)
 			adminRoutes.POST("/scan/cancel", cancelAdminScan)
+
+			// NEW ROUTES for AudioMuse-AI Analysis
+			analysisRoutes := adminRoutes.Group("/analysis")
+			{
+				analysisRoutes.POST("/start", startSonicAnalysis)
+				analysisRoutes.POST("/cancel/:taskID", cancelSonicAnalysis)
+				analysisRoutes.GET("/status", getSonicAnalysisStatus)
+			}
 		}
 	}
 
