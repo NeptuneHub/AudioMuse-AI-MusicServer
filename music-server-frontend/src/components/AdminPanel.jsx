@@ -100,11 +100,47 @@ function FileBrowser({ onSelect, onClose }) {
     );
 }
 
-function LibraryManagement() {
+const LibraryPathModal = ({ path, onClose, onSave }) => {
+    const [currentPath, setCurrentPath] = useState(path ? path.path : '');
+    const [showBrowser, setShowBrowser] = useState(false);
+
+    const handleSave = () => {
+        onSave({ ...path, path: currentPath });
+    };
+
+    return (
+        <Modal onClose={onClose}>
+            <h3 className="text-xl font-bold mb-4 text-teal-400">{path ? 'Edit Library Path' : 'Add Library Path'}</h3>
+            <div className="flex space-x-2">
+                <input
+                    type="text"
+                    value={currentPath}
+                    placeholder="Enter or browse for a folder..."
+                    className="flex-grow p-2 bg-gray-700 rounded border border-gray-600"
+                    readOnly
+                />
+                <button onClick={() => setShowBrowser(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Browse</button>
+            </div>
+            <div className="flex justify-end space-x-4 mt-6">
+                <button onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                <button onClick={handleSave} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Save</button>
+            </div>
+            {showBrowser && <FileBrowser
+				onSelect={(selectedPath) => { setCurrentPath(selectedPath); setShowBrowser(false); }}
+				onClose={() => setShowBrowser(false)}
+			/>}
+        </Modal>
+    );
+};
+
+
+function LibraryManagement({ onConfigChange }) {
     const [scanStatus, setScanStatus] = useState({ scanning: false, count: 0 });
     const [message, setMessage] = useState('');
-    const [path, setPath] = useState('');
-    const [showBrowser, setShowBrowser] = useState(false);
+    const [libraryPaths, setLibraryPaths] = useState([]);
+    const [editingPath, setEditingPath] = useState(null);
+    const [isAddingPath, setIsAddingPath] = useState(false);
+    const [error, setError] = useState('');
 
     const subsonicApiRequest = useCallback(async (method, endpoint, body = null) => {
         const token = localStorage.getItem('token');
@@ -112,11 +148,11 @@ function LibraryManagement() {
             method,
             headers: { 'Authorization': `Bearer ${token}` }
         };
+         const url = new URL(`/rest/${endpoint}`, window.location.origin);
+        url.searchParams.append('f', 'json');
 
-        let url = `/rest/${endpoint}?f=json`;
-
-        if (body && method === 'GET') {
-             url += `&${new URLSearchParams(body).toString()}`;
+        if (method === 'GET' && body) {
+            Object.entries(body).forEach(([key, value]) => url.searchParams.append(key, value));
         } else if (body) {
             options.headers['Content-Type'] = 'application/json';
             options.body = JSON.stringify(body);
@@ -138,6 +174,9 @@ function LibraryManagement() {
             const data = await subsonicApiRequest('GET', 'getScanStatus.view');
             if (data && data.scanStatus) {
                 setScanStatus({ scanning: data.scanStatus.scanning, count: data.scanStatus.count });
+                 if (!data.scanStatus.scanning && !isInitialFetch) {
+                    fetchLibraryPaths(); // Refresh paths to update song counts
+                }
             } else {
                  throw new Error('Invalid response from server.');
             }
@@ -150,8 +189,20 @@ function LibraryManagement() {
         }
     }, [subsonicApiRequest]);
 
+    const fetchLibraryPaths = useCallback(async () => {
+        try {
+            const data = await subsonicApiRequest('GET', 'getLibraryPaths.view');
+            const paths = data?.libraryPaths?.path || [];
+            setLibraryPaths(Array.isArray(paths) ? paths : [paths].filter(Boolean));
+        } catch (err) {
+            setError(err.message || 'Failed to fetch library paths');
+        }
+    }, [subsonicApiRequest]);
+
+
     useEffect(() => {
         fetchStatus(true);
+        fetchLibraryPaths();
         let intervalId = null;
         if (scanStatus.scanning) {
             intervalId = setInterval(() => fetchStatus(false), 3000);
@@ -159,20 +210,45 @@ function LibraryManagement() {
         return () => {
             if (intervalId) clearInterval(intervalId);
         };
-    }, [scanStatus.scanning, fetchStatus]);
+    }, [scanStatus.scanning, fetchStatus, fetchLibraryPaths]);
 
-    const handleStartScan = async () => {
-        if (!path) {
-            setMessage('Please select a directory to scan first.');
-            return;
-        }
+    const handleStartScan = async (pathId = null) => {
         setMessage('');
+        setError('');
         setScanStatus(prev => ({ ...prev, scanning: true, count: 0 }));
         try {
-            await subsonicApiRequest('POST', 'startScan.view', { path });
+            const params = pathId ? { pathId } : {};
+            await subsonicApiRequest('GET', 'startScan.view', params);
         } catch (e) {
             setScanStatus(prev => ({ ...prev, scanning: false }));
-            setMessage(e.message || 'Error starting scan.');
+            setError(e.message || 'Error starting scan.');
+        }
+    };
+    
+    const handleSavePath = async (pathData) => {
+        setError('');
+        try {
+            const endpoint = pathData.id ? 'updateLibraryPath.view' : 'addLibraryPath.view';
+            const data = await subsonicApiRequest('POST', endpoint, pathData);
+            const paths = data?.libraryPaths?.path || [];
+            setLibraryPaths(Array.isArray(paths) ? paths : [paths].filter(Boolean));
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setEditingPath(null);
+            setIsAddingPath(false);
+        }
+    };
+
+    const handleDeletePath = async (pathId) => {
+        if (!window.confirm("Are you sure you want to delete this library path? This won't delete the files.")) return;
+        setError('');
+        try {
+            const data = await subsonicApiRequest('POST', 'deleteLibraryPath.view', { id: pathId });
+            const paths = data?.libraryPaths?.path || [];
+            setLibraryPaths(Array.isArray(paths) ? paths : [paths].filter(Boolean));
+        } catch (err) {
+            setError(err.message);
         }
     };
 
@@ -189,7 +265,7 @@ function LibraryManagement() {
                 throw new Error(data.error || 'Failed to cancel scan');
             }
             setMessage('Cancellation signal sent. Scan will stop shortly.');
-            await fetchStatus(); // Fetch status immediately for a quicker UI update
+            // Status will be updated by the polling fetchStatus
         } catch (e) {
             setMessage(e.message);
         }
@@ -197,33 +273,140 @@ function LibraryManagement() {
 
     return (
         <div className="bg-gray-800 p-4 sm:p-6 rounded-lg">
-            <h3 className="text-xl font-bold mb-4">Library Management</h3>
-            <div className="flex flex-col space-y-4">
-                <div className="flex flex-col sm:flex-row sm:space-x-2 space-y-2 sm:space-y-0">
-                    <input type="text" value={path} placeholder="Select a folder to scan..." className="flex-grow p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500" readOnly />
-                    <button onClick={() => setShowBrowser(true)} disabled={scanStatus.scanning} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:bg-blue-400 disabled:cursor-not-allowed">Browse</button>
-                </div>
-                <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
-                    <button onClick={handleStartScan} disabled={scanStatus.scanning || !path} className="flex-grow bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-green-400 disabled:cursor-not-allowed disabled:opacity-50">
-                        {scanStatus.scanning ? 'Scan in Progress...' : 'Scan Selected Folder'}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 space-y-2 sm:space-y-0">
+                <h3 className="text-xl font-bold">Library Management</h3>
+                <div>
+                     <button onClick={() => handleStartScan(null)} disabled={scanStatus.scanning} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-green-400 disabled:cursor-not-allowed mr-2">
+                        Scan All
                     </button>
-                    {scanStatus.scanning && (
-                        <button onClick={handleCancelScan} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
-                            Cancel Scan
-                        </button>
-                    )}
+                    <button onClick={() => setIsAddingPath(true)} disabled={scanStatus.scanning} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded disabled:bg-indigo-400 disabled:cursor-not-allowed">
+                        Add Path
+                    </button>
                 </div>
-                {scanStatus.scanning && (
-                    <p className="text-sm text-center mt-2 p-3 bg-gray-700 rounded">
-                        Scanning... {scanStatus.count} new songs found so far.
-                    </p>
-                )}
-                {message && !scanStatus.scanning && <p className="text-sm text-center mt-2 p-3 bg-gray-700 rounded">{message}</p>}
             </div>
-            {showBrowser && <FileBrowser
-				onSelect={(selectedPath) => { setPath(selectedPath); setShowBrowser(false); }}
-				onClose={() => setShowBrowser(false)}
-			/>}
+
+            {error && <p className="text-red-500 mb-4 p-3 bg-red-900/50 rounded">{error}</p>}
+            {message && !scanStatus.scanning && <p className="text-sm text-center mb-2 p-3 bg-gray-700 rounded">{message}</p>}
+
+            {scanStatus.scanning && (
+                <div className="text-center my-4 p-3 bg-gray-700 rounded">
+                    <p>Scan in Progress... {scanStatus.count} new songs found.</p>
+                     <button onClick={handleCancelScan} className="mt-2 bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded text-sm">
+                        Cancel Scan
+                    </button>
+                </div>
+            )}
+            
+             <div className="overflow-x-auto">
+                <table className="min-w-full text-sm text-left text-gray-400">
+                    <thead className="text-xs text-gray-300 uppercase bg-gray-700">
+                        <tr>
+                            <th scope="col" className="px-6 py-3">Path</th>
+                            <th scope="col" className="px-6 py-3">Songs</th>
+                            <th scope="col" className="px-6 py-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {libraryPaths.map(path => (
+                            <tr key={path.id} className="bg-gray-800 border-b border-gray-700 hover:bg-gray-600">
+                                <td className="px-6 py-4 font-mono text-white break-all">{path.path}</td>
+                                <td className="px-6 py-4">{path.songCount}</td>
+                                <td className="px-6 py-4 text-right space-x-2 whitespace-nowrap">
+                                    <button onClick={() => handleStartScan(path.id)} disabled={scanStatus.scanning} className="font-medium text-green-500 hover:underline disabled:text-gray-500 disabled:cursor-not-allowed">Scan</button>
+                                    <button onClick={() => setEditingPath(path)} disabled={scanStatus.scanning} className="font-medium text-blue-500 hover:underline disabled:text-gray-500 disabled:cursor-not-allowed">Edit</button>
+                                    <button onClick={() => handleDeletePath(path.id)} disabled={scanStatus.scanning} className="font-medium text-red-500 hover:underline disabled:text-gray-500 disabled:cursor-not-allowed">Delete</button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+
+            {(isAddingPath || editingPath) && (
+                <LibraryPathModal
+                    path={editingPath}
+                    onClose={() => { setIsAddingPath(false); setEditingPath(null); }}
+                    onSave={handleSavePath}
+                />
+            )}
+        </div>
+    );
+}
+
+
+function AIConfigManagement({ onConfigChange }) {
+    const [configs, setConfigs] = useState([]);
+    const [audiomuseUrl, setAudiomuseUrl] = useState('');
+    const [message, setMessage] = useState('');
+    const [error, setError] = useState('');
+
+    const subsonicApiRequest = useCallback(async (endpoint, params = {}) => {
+        const token = localStorage.getItem('token');
+        const query = new URLSearchParams(params);
+        query.append('f', 'json');
+
+        const response = await fetch(`/rest/${endpoint}?${query.toString()}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        const subsonicResponse = data["subsonic-response"];
+
+        if (!response.ok || subsonicResponse.status === 'failed') {
+            const error = subsonicResponse?.error;
+            throw new Error(error?.message || `Server error: ${response.status}`);
+        }
+        return subsonicResponse;
+    }, []);
+
+    const fetchConfig = useCallback(async () => {
+        try {
+            const data = await subsonicApiRequest('getConfiguration.view');
+            const configList = data?.configurations?.configuration || [];
+            const allConfigs = Array.isArray(configList) ? configList : [configList].filter(Boolean);
+            setConfigs(allConfigs);
+            const urlConfig = allConfigs.find(c => c.name === 'audiomuse_ai_core_url');
+            setAudiomuseUrl(urlConfig?.value || '');
+        } catch (err) {
+            setError(err.message || 'Failed to fetch configuration');
+        }
+    }, [subsonicApiRequest]);
+
+    useEffect(() => {
+        fetchConfig();
+    }, [fetchConfig]);
+
+    const handleSave = async () => {
+        setError('');
+        setMessage('');
+        try {
+            await subsonicApiRequest('setConfiguration.view', { key: 'audiomuse_ai_core_url', value: audiomuseUrl });
+            setMessage('URL saved successfully!');
+            onConfigChange(); // Notify dashboard of the change
+            setTimeout(() => setMessage(''), 3000);
+        } catch (err) {
+            setError(err.message || 'Failed to save URL.');
+        }
+    };
+
+    return (
+        <div className="bg-gray-800 p-4 sm:p-6 rounded-lg">
+            <h3 className="text-xl font-bold mb-4">AudioMuse-AI Core Integration</h3>
+            <div className="space-y-2">
+                <label htmlFor="audiomuse-url" className="block text-sm font-medium text-gray-300">Core Service URL</label>
+                <input
+                    type="text"
+                    id="audiomuse-url"
+                    value={audiomuseUrl}
+                    onChange={(e) => setAudiomuseUrl(e.target.value)}
+                    placeholder="http://localhost:8000"
+                    className="w-full p-2 bg-gray-700 rounded border border-gray-600"
+                />
+            </div>
+            <div className="mt-4 flex justify-end">
+                <button onClick={handleSave} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Save</button>
+            </div>
+            {message && <p className="text-green-400 mt-2">{message}</p>}
+            {error && <p className="text-red-500 mt-2">{error}</p>}
         </div>
     );
 }
@@ -257,7 +440,7 @@ function UserManagement() {
 		try {
 			const data = await subsonicApiRequest('getUsers.view');
 			const userList = data?.users?.user || [];
-            setUsers(Array.isArray(userList) ? userList.map(u => ({ username: u.username, is_admin: u.adminRole })) : [{ username: userList.username, is_admin: userList.adminRole }]);
+			setUsers(userList.map(u => ({ username: u.username, is_admin: u.adminRole })));
 		} catch (err) {
 			setError(err.message || 'Failed to fetch users');
 		}
@@ -423,114 +606,12 @@ const PasswordEditModal = ({ user, onClose, onSubmit }) => {
 	);
 };
 
-
-function ConfigurationManagement({ onConfigChange }) {
-    const [audioMuseUrl, setAudioMuseUrl] = useState('');
-    const [message, setMessage] = useState('');
-    const [error, setError] = useState('');
-
-    const subsonicApiRequest = useCallback(async (endpoint, params = {}) => {
-        const token = localStorage.getItem('token');
-        const query = new URLSearchParams(params);
-        query.append('f', 'json');
-
-        const response = await fetch(`/rest/${endpoint}?${query.toString()}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        const subsonicResponse = data["subsonic-response"];
-
-        if (!response.ok || subsonicResponse.status === 'failed') {
-            const error = subsonicResponse?.error;
-            throw new Error(error?.message || `Server error: ${response.status}`);
-        }
-        return subsonicResponse;
-    }, []);
-
-    const fetchConfig = useCallback(async () => {
-        try {
-            const data = await subsonicApiRequest('getConfiguration.view');
-            const configList = data?.configurations?.configuration || [];
-            const urlConfig = Array.isArray(configList) 
-                ? configList.find(c => c.name === 'audiomuse_ai_core_url')
-                : (configList.name === 'audiomuse_ai_core_url' ? configList : null);
-            
-            if (urlConfig) {
-                 setAudioMuseUrl(urlConfig.value || '');
-            } else {
-                 setAudioMuseUrl('');
-            }
-        } catch (err) {
-            setError(err.message || 'Failed to fetch configuration.');
-        }
-    }, [subsonicApiRequest]);
-
-    useEffect(() => {
-        fetchConfig();
-    }, [fetchConfig]);
-
-    const handleSave = async () => {
-        setError('');
-        setMessage('');
-        try {
-            await subsonicApiRequest('setConfiguration.view', { key: 'audiomuse_ai_core_url', value: audioMuseUrl });
-            setMessage('URL saved successfully.');
-            onConfigChange(); // Notify parent to refetch config
-        } catch (err) {
-            setError(err.message || 'Failed to save URL.');
-        }
-    };
-
-    const handleRemove = async () => {
-        setError('');
-        setMessage('');
-        try {
-            await subsonicApiRequest('setConfiguration.view', { key: 'audiomuse_ai_core_url', value: '' });
-            setMessage('URL removed successfully.');
-            setAudioMuseUrl('');
-            onConfigChange(); // Notify parent to refetch config
-        } catch (err) {
-            setError(err.message || 'Failed to remove URL.');
-        }
-    }
-
-    return (
-        <div className="bg-gray-800 p-4 sm:p-6 rounded-lg">
-            <h3 className="text-xl font-bold mb-4">AudioMuse-AI Core</h3>
-            <p className="text-sm text-gray-400 mb-4">
-                Enter the base URL for the AudioMuse-AI Core service to enable "Instant Mix" and other AI features.
-            </p>
-            {error && <p className="text-red-500 mb-4 p-3 bg-red-900/50 rounded">{error}</p>}
-            {message && <p className="text-green-400 mb-4 p-3 bg-green-900/50 rounded">{message}</p>}
-            <div className="flex flex-col space-y-4">
-                <div className="flex flex-col sm:flex-row sm:space-x-2 space-y-2 sm:space-y-0">
-                    <input 
-                        type="text" 
-                        value={audioMuseUrl}
-                        onChange={(e) => setAudioMuseUrl(e.target.value)}
-                        placeholder="http://localhost:5000" 
-                        className="flex-grow p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500" 
-                    />
-                </div>
-                <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
-                    <button onClick={handleSave} className="flex-grow bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
-                        Save URL
-                    </button>
-                     <button onClick={handleRemove} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
-                        Remove
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
 export default function AdminPanel({ onConfigChange }) {
 	return (
-		<div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="flex flex-col gap-8">
-                <LibraryManagement />
-                <ConfigurationManagement onConfigChange={onConfigChange} />
+		<div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+            <div className="space-y-8">
+                 <LibraryManagement onConfigChange={onConfigChange} />
+                 <AIConfigManagement onConfigChange={onConfigChange} />
             </div>
             <UserManagement />
         </div>

@@ -1,4 +1,4 @@
-// admin_handlers.go
+// Suggested path: music-server-backend/admin_handlers.go
 package main
 
 import (
@@ -14,23 +14,94 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// scanLibrary is a background worker function that scans the library path.
-func scanLibrary(scanPath string) {
-	isScanCancelled.Store(false) // Reset cancellation flag for this new scan.
+// scanSingleLibrary is a robust wrapper to scan one library and manage global status.
+func scanSingleLibrary(pathId int) {
+	// This function now handles the entire lifecycle of a single scan.
+	defer func() {
+		// This deferred block ensures the scanning status is always reset.
+		log.Println("Single library scan finished, updating final status.")
+		db.Exec("UPDATE scan_status SET is_scanning = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+	}()
 
-	// The status is now set to 'scanning' by the handler that calls this function.
-	log.Printf("Background scan started for path: %s", scanPath)
+	var path string
+	err := db.QueryRow("SELECT path FROM library_paths WHERE id = ?", pathId).Scan(&path)
+	if err != nil {
+		log.Printf("Cannot start single scan, path not found for id %d: %v", pathId, err)
+		return // The defer will handle resetting the scan status.
+	}
+
+	log.Printf("Background scan started for single path: %s", path)
+	isScanCancelled.Store(false)
+
+	songsAdded := processPath(path)
+	updateSongCountForPath(path, pathId) // Update count for this path.
+
+	// Update the global count of songs added *in this specific run*.
+	db.Exec("UPDATE scan_status SET songs_added = ? WHERE id = 1", songsAdded)
+
+	if isScanCancelled.Load() {
+		log.Printf("Scan was cancelled for path %s. Songs added before stop: %d.", path, songsAdded)
+	} else {
+		log.Printf("Scan finished for path %s. Total songs added: %d.", path, songsAdded)
+	}
+}
+
+// scanAllLibraries is a background worker function that scans all configured library paths.
+func scanAllLibraries() {
+	defer func() {
+		// This deferred block ensures the scanning status is always reset.
+		log.Println("Finished scanning all libraries, updating final status.")
+		db.Exec("UPDATE scan_status SET is_scanning = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+	}()
+
+	log.Println("Background scan started for ALL library paths.")
+	isScanCancelled.Store(false)
+
+	rows, err := db.Query("SELECT id, path FROM library_paths")
+	if err != nil {
+		log.Printf("Error fetching library paths for scanning: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	var pathsToScan []LibraryPath
+	for rows.Next() {
+		var p LibraryPath
+		if err := rows.Scan(&p.ID, &p.Path); err != nil {
+			log.Printf("Error scanning library path row for scan job: %v", err)
+			continue
+		}
+		pathsToScan = append(pathsToScan, p)
+	}
+
+	var totalSongsAdded int64
+	for _, p := range pathsToScan {
+		if isScanCancelled.Load() {
+			log.Println("Scan All was cancelled, stopping further processing.")
+			break
+		}
+		songsAdded := processPath(p.Path)
+		totalSongsAdded += songsAdded
+		updateSongCountForPath(p.Path, p.ID) // Update count for each path as it completes.
+	}
+
+	log.Printf("Total new songs added in this run across all paths: %d.", totalSongsAdded)
+	db.Exec("UPDATE scan_status SET songs_added = ? WHERE id = 1", totalSongsAdded)
+}
+
+// processPath walks a single directory path and adds songs to the database.
+// It returns the number of new songs added from that path.
+func processPath(scanPath string) int64 {
 	var songsAdded int64
+	log.Printf("Processing path: %s", scanPath)
 
 	walkErr := filepath.WalkDir(scanPath, func(path string, d os.DirEntry, err error) error {
-		// Check for cancellation signal at the start of each file/dir operation.
 		if isScanCancelled.Load() {
 			return errors.New("scan cancelled by user")
 		}
-
 		if err != nil {
 			log.Printf("Error accessing path %q: %v\n", path, err)
-			return nil // Don't stop the walk on a single file error
+			return nil
 		}
 
 		if !d.IsDir() {
@@ -62,29 +133,34 @@ func scanLibrary(scanPath string) {
 				rowsAffected, _ := res.RowsAffected()
 				if rowsAffected > 0 {
 					songsAdded++
-					// Update DB with new count periodically for better UI feedback
-					if songsAdded%20 == 0 {
-						db.Exec("UPDATE scan_status SET songs_added = ? WHERE id = 1", songsAdded)
-					}
 				}
 			}
 		}
 		return nil
 	})
 
-	if walkErr != nil && walkErr.Error() == "scan cancelled by user" {
-		log.Println("Scan was cancelled by user.")
-	} else if walkErr != nil {
-		log.Printf("Error walking directory %s: %v", scanPath, walkErr)
+	if walkErr != nil {
+		log.Printf("Stopped walking path %s due to error: %v", scanPath, walkErr)
 	}
 
-	// Final update and status change, but only if the scan was not cancelled.
-	// If it was cancelled, the cancel handler has already updated the status.
-	if !isScanCancelled.Load() {
-		db.Exec("UPDATE scan_status SET is_scanning = 0, songs_added = ?, last_update_time = ? WHERE id = 1", songsAdded, time.Now().Format(time.RFC3339))
-		log.Printf("Scan finished. Total songs added in this run: %d.", songsAdded)
+	return songsAdded
+}
+
+// updateSongCountForPath calculates and updates the total number of songs for a specific library path.
+func updateSongCountForPath(path string, pathId int) {
+	var count int
+	likePath := filepath.Join(path, "%")
+	err := db.QueryRow("SELECT COUNT(*) FROM songs WHERE path LIKE ?", likePath).Scan(&count)
+	if err != nil {
+		log.Printf("Error counting songs for path %s: %v", path, err)
+		return
+	}
+
+	_, err = db.Exec("UPDATE library_paths SET song_count = ? WHERE id = ?", count, pathId)
+	if err != nil {
+		log.Printf("Error updating song count for path ID %d: %v", pathId, err)
 	} else {
-		log.Printf("Scan was cancelled. Total songs added before cancellation: %d.", songsAdded)
+		log.Printf("Updated song count for path '%s' to %d", path, count)
 	}
 }
 
@@ -115,20 +191,11 @@ func browseFiles(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"path": path, "items": items})
 }
 
-// cancelAdminScan is a UI helper to signal a running scan to stop and update the DB.
+// cancelAdminScan is a UI helper to signal a running scan to stop.
 func cancelAdminScan(c *gin.Context) {
 	log.Println("Received request to cancel library scan.")
 	isScanCancelled.Store(true)
-
-	// Immediately update the database to reflect the cancellation.
-	// This prevents a stuck state if the server restarts.
-	_, err := db.Exec("UPDATE scan_status SET is_scanning = 0 WHERE id = 1")
-	if err != nil {
-		log.Printf("Error updating scan status to cancelled in DB: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to update scan status in database."})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Scan cancellation signal sent and status updated."})
+	// The running scan functions will now handle updating the DB status upon cancellation.
+	c.JSON(http.StatusOK, gin.H{"message": "Scan cancellation signal sent."})
 }
 

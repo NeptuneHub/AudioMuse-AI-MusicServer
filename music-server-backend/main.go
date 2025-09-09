@@ -1,4 +1,4 @@
-// main.go
+// Suggested path: music-server-backend/main.go
 package main
 
 import (
@@ -75,8 +75,14 @@ func main() {
 		rest.GET("/getRandomSongs.view", subsonicGetRandomSongs)
 		rest.GET("/getCoverArt.view", subsonicGetCoverArt)
 		rest.GET("/tokenInfo.view", subsonicTokenInfo)
+
+		// Scanning and Library Management
 		rest.Any("/startScan.view", subsonicStartScan)
 		rest.GET("/getScanStatus.view", subsonicGetScanStatus)
+		rest.GET("/getLibraryPaths.view", subsonicGetLibraryPaths)
+		rest.POST("/addLibraryPath.view", subsonicAddLibraryPath)
+		rest.POST("/updateLibraryPath.view", subsonicUpdateLibraryPath)
+		rest.POST("/deleteLibraryPath.view", subsonicDeleteLibraryPath)
 
 		// User Management Endpoints (OpenSubsonic Standard)
 		rest.GET("/getUsers.view", subsonicGetUsers)
@@ -85,11 +91,11 @@ func main() {
 		rest.GET("/deleteUser.view", subsonicDeleteUser)
 		rest.GET("/changePassword.view", subsonicChangePassword)
 
-		// Configuration Management
+		// Configuration
 		rest.GET("/getConfiguration.view", subsonicGetConfiguration)
 		rest.GET("/setConfiguration.view", subsonicSetConfiguration)
 
-		// AudioMuse-AI Core Endpoints
+		// AudioMuse-AI Core integration
 		rest.GET("/getSimilarSongs.view", subsonicGetSimilarSongs)
 		rest.GET("/getSongPath.view", subsonicGetSongPath)
 	}
@@ -147,10 +153,7 @@ func initDB() {
 	}
 
 	// Add password_plain column for Subsonic token auth if it doesn't exist.
-	_, err = db.Exec("ALTER TABLE users ADD COLUMN password_plain TEXT")
-	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
-		log.Printf("Warning: Could not add password_plain column, token auth may fail if not already present: %v", err)
-	}
+	alterAndLog("ALTER TABLE users ADD COLUMN password_plain TEXT")
 
 	// Create scan_status table to track library scans
 	_, err = db.Exec(`
@@ -218,18 +221,20 @@ func initDB() {
 		log.Fatal("Failed to create playlist_songs table:", err)
 	}
 
-	// Create settings table to store application settings like library path
+	// Create library_paths table to store multiple library locations
 	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS settings (
-			key TEXT PRIMARY KEY,
-			value TEXT
+		CREATE TABLE IF NOT EXISTS library_paths (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			path TEXT UNIQUE,
+			song_count INTEGER NOT NULL DEFAULT 0
 		);
 	`)
 	if err != nil {
-		log.Fatal("Failed to create settings table:", err)
+		log.Fatal("Failed to create library_paths table:", err)
 	}
+	alterAndLog("ALTER TABLE library_paths ADD COLUMN song_count INTEGER NOT NULL DEFAULT 0")
 
-	// Create configuration table to store general application configuration.
+	// Create configuration table
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS configuration (
 			key TEXT PRIMARY KEY,

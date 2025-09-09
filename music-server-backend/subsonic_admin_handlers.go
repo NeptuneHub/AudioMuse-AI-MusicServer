@@ -1,10 +1,11 @@
-// subsonic_admin_handlers.go
+// Suggested path: music-server-backend/subsonic_admin_handlers.go
 package main
 
 import (
 	"database/sql"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,58 +13,44 @@ import (
 
 func subsonicStartScan(c *gin.Context) {
 	user, ok := subsonicAuthenticate(c)
-	if !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
-	if !user.IsAdmin {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "User is not authorized to start a scan."))
+	if !ok || !user.IsAdmin {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
 
 	var isScanning bool
 	err := db.QueryRow("SELECT is_scanning FROM scan_status WHERE id = 1").Scan(&isScanning)
 	if err != nil && err != sql.ErrNoRows {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error checking scan status."))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "DB error checking scan status."))
 		return
 	}
 
-	if !isScanning {
-		var libraryPath string
-		if c.Request.Method == "POST" {
-			var req struct {
-				Path string `json:"path"`
-			}
-			if err := c.ShouldBindJSON(&req); err != nil || req.Path == "" {
-				subsonicRespond(c, newSubsonicErrorResponse(10, "A valid path is required for the initial scan."))
-				return
-			}
-			libraryPath = req.Path
-			_, err := db.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "library_path", libraryPath)
-			if err != nil {
-				log.Printf("Warning: Could not save library path to settings: %v", err)
-			}
-		} else {
-			err := db.QueryRow("SELECT value FROM settings WHERE key = 'library_path'").Scan(&libraryPath)
-			if err != nil || libraryPath == "" {
-				msg := "Music library path not configured. Please perform an initial scan from the admin web panel first."
-				subsonicRespond(c, newSubsonicErrorResponse(50, msg))
-				return
-			}
-		}
+	if isScanning {
+		log.Println("Scan requested, but a scan is already in progress.")
+		subsonicGetScanStatus(c)
+		return
+	}
 
-		// Set status to scanning BEFORE starting the goroutine to avoid race condition.
-		_, err := db.Exec("UPDATE scan_status SET is_scanning = 1, songs_added = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+	// Set status to scanning BEFORE starting the goroutine to avoid race condition.
+	_, err = db.Exec("UPDATE scan_status SET is_scanning = 1, songs_added = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+	if err != nil {
+		log.Printf("Error starting scan in DB: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "DB error starting scan."))
+		return
+	}
+
+	pathIdStr := c.Query("pathId")
+	if pathIdStr != "" {
+		pathId, err := strconv.Atoi(pathIdStr)
 		if err != nil {
-			log.Printf("Error starting scan in DB: %v", err)
-			subsonicRespond(c, newSubsonicErrorResponse(0, "Database error starting scan."))
+			subsonicRespond(c, newSubsonicErrorResponse(10, "Invalid pathId provided."))
+			db.Exec("UPDATE scan_status SET is_scanning = 0 WHERE id = 1") // Reset status
 			return
 		}
-
-		log.Printf("Library scan triggered for path: %s", libraryPath)
-		go scanLibrary(libraryPath)
+		go scanSingleLibrary(pathId)
 	} else {
-		log.Println("Scan requested, but a scan is already in progress.")
+		// Scan all paths
+		go scanAllLibraries()
 	}
 
 	subsonicGetScanStatus(c)
@@ -83,6 +70,155 @@ func subsonicGetScanStatus(c *gin.Context) {
 	}
 	subsonicRespond(c, newSubsonicResponse(&SubsonicScanStatus{Scanning: isScanning, Count: songsAdded}))
 }
+
+// --- Library Path Management ---
+
+func subsonicGetLibraryPaths(c *gin.Context) {
+	if _, ok := subsonicAuthenticate(c); !ok {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
+		return
+	}
+	rows, err := db.Query("SELECT id, path, song_count FROM library_paths ORDER BY path")
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "DB error fetching library paths."))
+		return
+	}
+	defer rows.Close()
+
+	var paths []SubsonicLibraryPath
+	for rows.Next() {
+		var p LibraryPath
+		if err := rows.Scan(&p.ID, &p.Path, &p.SongCount); err != nil {
+			log.Printf("Error scanning library path row: %v", err)
+			continue
+		}
+		paths = append(paths, SubsonicLibraryPath{ID: p.ID, Path: p.Path, SongCount: p.SongCount})
+	}
+	subsonicRespond(c, newSubsonicResponse(&SubsonicLibraryPaths{Paths: paths}))
+}
+
+func subsonicAddLibraryPath(c *gin.Context) {
+	if _, ok := subsonicAuthenticate(c); !ok {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Path == "" {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "A valid path is required."))
+		return
+	}
+
+	_, err := db.Exec("INSERT INTO library_paths (path) VALUES (?)", req.Path)
+	if err != nil {
+		log.Printf("Database error adding library path '%s': %v", req.Path, err)
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			subsonicRespond(c, newSubsonicErrorResponse(0, "This library path already exists."))
+		} else {
+			subsonicRespond(c, newSubsonicErrorResponse(0, "A database error occurred while adding the path."))
+		}
+		return
+	}
+	subsonicGetLibraryPaths(c)
+}
+
+func subsonicUpdateLibraryPath(c *gin.Context) {
+	if _, ok := subsonicAuthenticate(c); !ok {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
+		return
+	}
+	var req struct {
+		ID   int    `json:"id"`
+		Path string `json:"path"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Path == "" || req.ID == 0 {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Valid ID and path are required."))
+		return
+	}
+	_, err := db.Exec("UPDATE library_paths SET path = ? WHERE id = ?", req.Path, req.ID)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to update library path."))
+		return
+	}
+	subsonicGetLibraryPaths(c)
+}
+
+func subsonicDeleteLibraryPath(c *gin.Context) {
+	if _, ok := subsonicAuthenticate(c); !ok {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
+		return
+	}
+	var req struct {
+		ID int `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.ID == 0 {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "A valid ID is required."))
+		return
+	}
+	_, err := db.Exec("DELETE FROM library_paths WHERE id = ?", req.ID)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to delete library path."))
+		return
+	}
+	subsonicGetLibraryPaths(c)
+}
+
+// --- Configuration Management ---
+
+func subsonicGetConfiguration(c *gin.Context) {
+	user, ok := subsonicAuthenticate(c)
+	if !ok || !user.IsAdmin {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		return
+	}
+
+	rows, err := db.Query("SELECT key, value FROM configuration")
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching configuration."))
+		return
+	}
+	defer rows.Close()
+
+	var configs []SubsonicConfiguration
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			log.Printf("Error scanning configuration row: %v", err)
+			continue
+		}
+		configs = append(configs, SubsonicConfiguration{Name: key, Value: value})
+	}
+
+	subsonicRespond(c, newSubsonicResponse(&SubsonicConfigurations{Configurations: configs}))
+}
+
+func subsonicSetConfiguration(c *gin.Context) {
+	user, ok := subsonicAuthenticate(c)
+	if !ok || !user.IsAdmin {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		return
+	}
+
+	key := c.Query("key")
+	value := c.Query("value")
+
+	if key == "" {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Parameter 'key' is required."))
+		return
+	}
+
+	_, err := db.Exec("INSERT OR REPLACE INTO configuration (key, value) VALUES (?, ?)", key, value)
+	if err != nil {
+		log.Printf("Error saving configuration key '%s': %v", key, err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to save configuration."))
+		return
+	}
+
+	// After setting, return all configurations
+	subsonicGetConfiguration(c)
+}
+
 
 // --- Subsonic User Management Handlers ---
 
@@ -221,66 +357,3 @@ func subsonicChangePassword(c *gin.Context) {
 	subsonicRespond(c, newSubsonicResponse(nil))
 }
 
-// --- Configuration Handlers ---
-
-func subsonicGetConfiguration(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok || !user.IsAdmin {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
-		return
-	}
-
-	keyFilter := c.Query("key")
-	query := "SELECT key, value FROM configuration"
-	args := []interface{}{}
-
-	if keyFilter != "" {
-		query += " WHERE key = ?"
-		args = append(args, keyFilter)
-	}
-
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		log.Printf("Error querying configuration: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching configuration."))
-		return
-	}
-	defer rows.Close()
-
-	var configs []SubsonicConfiguration
-	for rows.Next() {
-		var key, value string
-		if err := rows.Scan(&key, &value); err != nil {
-			log.Printf("Error scanning configuration row: %v", err)
-			continue
-		}
-		configs = append(configs, SubsonicConfiguration{Name: key, Value: value})
-	}
-
-	subsonicRespond(c, newSubsonicResponse(&SubsonicConfigurations{Configurations: configs}))
-}
-
-func subsonicSetConfiguration(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok || !user.IsAdmin {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
-		return
-	}
-
-	key := c.Query("key")
-	value := c.Query("value")
-
-	if key == "" {
-		subsonicRespond(c, newSubsonicErrorResponse(10, "Parameter 'key' is required."))
-		return
-	}
-
-	_, err := db.Exec("INSERT OR REPLACE INTO configuration (key, value) VALUES (?, ?)", key, value)
-	if err != nil {
-		log.Printf("Error updating configuration '%s': %v", key, err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to update configuration."))
-		return
-	}
-
-	subsonicRespond(c, newSubsonicResponse(nil))
-}
