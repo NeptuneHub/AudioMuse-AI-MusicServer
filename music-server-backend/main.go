@@ -91,12 +91,14 @@ func main() {
 		rest.GET("/setConfiguration.view", subsonicSetConfiguration)
 		rest.GET("/getSimilarSongs.view", subsonicGetSimilarSongs)
 		rest.GET("/getSongPath.view", subsonicGetSongPath)
+		rest.GET("/getSonicFingerprint.view", subsonicGetSonicFingerprint)
 
 		// AudioMuse-AI Subsonic routes
 		rest.Any("/startSonicAnalysis.view", subsonicStartSonicAnalysis)
 		rest.GET("/getSonicAnalysisStatus.view", subsonicGetSonicAnalysisStatus)
 		rest.Any("/cancelSonicAnalysis.view", subsonicCancelSonicAnalysis)
 		rest.Any("/startSonicClustering.view", subsonicStartClusteringAnalysis)
+
 	}
 
 	v1 := r.Group("/api/v1")

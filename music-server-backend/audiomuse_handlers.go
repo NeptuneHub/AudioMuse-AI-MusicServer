@@ -201,3 +201,66 @@ func subsonicGetSongPath(c *gin.Context) {
 	subsonicRespond(c, response)
 }
 
+func subsonicGetSonicFingerprint(c *gin.Context) {
+	user, ok := subsonicAuthenticate(c)
+	if !ok || !user.IsAdmin {
+		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
+		return
+	}
+
+	var coreURL string
+	err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(50, "AudioMuse-AI Core URL not configured."))
+		return
+	}
+
+	// Forward the request to python backend, which uses its own configured default user.
+	resp, err := http.Get(fmt.Sprintf("%s/api/sonic_fingerprint/generate", coreURL))
+	if err != nil {
+		log.Printf("Error calling AudioMuse-AI Core for sonic fingerprint: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to read response from AudioMuse-AI Core."))
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("AudioMuse-AI Core returned non-OK status: %d - %s", resp.StatusCode, string(body))
+		subsonicRespond(c, newSubsonicErrorResponse(0, fmt.Sprintf("AudioMuse-AI Core error: %s", string(body))))
+		return
+	}
+
+	// The python response is a JSON array of objects with "item_id".
+	var fingerprintTracks []struct {
+		ItemID string `json:"item_id"`
+	}
+	if err := json.Unmarshal(body, &fingerprintTracks); err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to parse sonic fingerprint from AudioMuse-AI Core."))
+		return
+	}
+
+	var songIDs []string
+	for _, track := range fingerprintTracks {
+		songIDs = append(songIDs, track.ItemID)
+	}
+
+	songs, err := getSongsByIDs(songIDs)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching song details for fingerprint."))
+		return
+	}
+
+	response := newSubsonicResponse(&SubsonicDirectory{
+		Name:      "Sonic Fingerprint",
+		SongCount: len(songs),
+		Songs:     songs,
+	})
+	subsonicRespond(c, response)
+}
+
