@@ -74,6 +74,7 @@ func main() {
 		rest.GET("/search3.view", subsonicSearch2)
 		rest.GET("/getRandomSongs.view", subsonicGetRandomSongs)
 		rest.GET("/getCoverArt.view", subsonicGetCoverArt)
+		rest.GET("/scrobble.view", subsonicScrobble)
 		rest.GET("/tokenInfo.view", subsonicTokenInfo)
 		rest.Any("/startScan.view", subsonicStartScan)
 		rest.GET("/getScanStatus.view", subsonicGetScanStatus)

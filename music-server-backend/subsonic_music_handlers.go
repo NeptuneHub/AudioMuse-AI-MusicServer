@@ -58,6 +58,33 @@ func subsonicStream(c *gin.Context) {
 	http.ServeContent(c.Writer, c.Request, fileInfo.Name(), fileInfo.ModTime(), file)
 }
 
+func subsonicScrobble(c *gin.Context) {
+	user, ok := subsonicAuthenticate(c)
+	if !ok {
+		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
+		return
+	}
+
+	songID := c.Query("id")
+	if songID == "" {
+		subsonicRespond(c, newSubsonicResponse(nil))
+		return
+	}
+
+	_, err := db.Exec(`
+		UPDATE songs
+		SET play_count = play_count + 1, last_played = ?
+		WHERE id = ?
+	`, time.Now().Format(time.RFC3339), songID)
+
+	if err != nil {
+		log.Printf("Error updating play count for user '%s' on song '%s': %v", user.Username, songID, err)
+	}
+
+	log.Printf("Scrobbled song '%s' for user '%s'", songID, user.Username)
+	subsonicRespond(c, newSubsonicResponse(nil))
+}
+
 func subsonicGetArtists(c *gin.Context) {
 	if _, ok := subsonicAuthenticate(c); !ok {
 		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
@@ -90,7 +117,6 @@ func subsonicGetArtists(c *gin.Context) {
 		artist.ID = artist.Name
 		artist.CoverArt = artist.Name
 
-		// Get the first letter for indexing
 		var indexChar string
 		for _, r := range artist.Name {
 			if unicode.IsLetter(r) || unicode.IsNumber(r) {
@@ -105,7 +131,6 @@ func subsonicGetArtists(c *gin.Context) {
 		artistIndex[indexChar] = append(artistIndex[indexChar], artist)
 	}
 
-	// Convert map to slice for sorting and final structure
 	var indices []SubsonicArtistIndex
 	for name, artists := range artistIndex {
 		indices = append(indices, SubsonicArtistIndex{
@@ -114,7 +139,6 @@ func subsonicGetArtists(c *gin.Context) {
 		})
 	}
 
-	// Sort indices alphabetically by name
 	sort.Slice(indices, func(i, j int) bool {
 		return indices[i].Name < indices[j].Name
 	})
@@ -174,7 +198,7 @@ func subsonicGetAlbum(c *gin.Context) {
 		return
 	}
 
-	rows, err := db.Query("SELECT id, title, artist, album FROM songs WHERE album = ? AND artist = ? ORDER BY title", albumName, artistName)
+	rows, err := db.Query("SELECT id, title, artist, album, play_count, last_played FROM songs WHERE album = ? AND artist = ? ORDER BY title", albumName, artistName)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Error querying for songs in album."))
 		return
@@ -183,19 +207,19 @@ func subsonicGetAlbum(c *gin.Context) {
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var s Song
-		if err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album); err != nil {
+		var s SubsonicSong
+		var lastPlayed sql.NullString
+		var songId int
+		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed); err != nil {
 			log.Printf("Error scanning song in getAlbum: %v", err)
 			continue
 		}
-		songIDStr := strconv.Itoa(s.ID)
-		songs = append(songs, SubsonicSong{
-			ID:       songIDStr,
-			Title:    s.Title,
-			Artist:   s.Artist,
-			Album:    s.Album,
-			CoverArt: albumSongId,
-		})
+		s.ID = strconv.Itoa(songId)
+		s.CoverArt = albumSongId
+		if lastPlayed.Valid {
+			s.LastPlayed = lastPlayed.String
+		}
+		songs = append(songs, s)
 	}
 
 	responseBody := &SubsonicAlbumWithSongs{
@@ -220,7 +244,7 @@ func subsonicGetRandomSongs(c *gin.Context) {
 		size = 500
 	}
 
-	rows, err := db.Query("SELECT id, title, artist, album FROM songs ORDER BY RANDOM() LIMIT ?", size)
+	rows, err := db.Query("SELECT id, title, artist, album, play_count, last_played FROM songs ORDER BY RANDOM() LIMIT ?", size)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching random songs."))
 		return
@@ -229,19 +253,19 @@ func subsonicGetRandomSongs(c *gin.Context) {
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var s Song
-		if err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album); err != nil {
+		var s SubsonicSong
+		var songId int
+		var lastPlayed sql.NullString
+		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed); err != nil {
 			log.Printf("Error scanning random song: %v", err)
 			continue
 		}
-		songIDStr := strconv.Itoa(s.ID)
-		songs = append(songs, SubsonicSong{
-			ID:       songIDStr,
-			Title:    s.Title,
-			Artist:   s.Artist,
-			Album:    s.Album,
-			CoverArt: songIDStr,
-		})
+		s.ID = strconv.Itoa(songId)
+		s.CoverArt = s.ID
+		if lastPlayed.Valid {
+			s.LastPlayed = lastPlayed.String
+		}
+		songs = append(songs, s)
 	}
 
 	responseBody := &SubsonicDirectory{
@@ -253,7 +277,6 @@ func subsonicGetRandomSongs(c *gin.Context) {
 }
 
 func subsonicGetCoverArt(c *gin.Context) {
-	// Authentication is optional for cover art in many clients.
 	id := c.Query("id")
 	if id == "" {
 		c.Status(http.StatusBadRequest)
@@ -289,7 +312,6 @@ func handleAlbumArt(c *gin.Context, songID string) {
 		return
 	}
 
-	// Fallback: search for cover art in the song's directory
 	albumDir := filepath.Dir(path)
 	if imagePath, ok := findLocalImage(albumDir); ok {
 		c.File(imagePath)
@@ -302,7 +324,6 @@ func handleAlbumArt(c *gin.Context, songID string) {
 func handleArtistArt(c *gin.Context, artistName string) {
 	log.Printf("[ARTIST ART] Handling request for artist: '%s'", artistName)
 
-	// 1. Try MusicBrainz
 	log.Printf("[ARTIST ART] Attempting to fetch image from MusicBrainz for '%s'", artistName)
 	if imageUrl, err := fetchArtistImageFromMusicBrainz(artistName); err == nil && imageUrl != "" {
 		log.Printf("[ARTIST ART] Found image on MusicBrainz for '%s'. Proxying URL: %s", artistName, imageUrl)
@@ -314,7 +335,6 @@ func handleArtistArt(c *gin.Context, artistName string) {
 		log.Printf("[ARTIST ART] No image found on MusicBrainz for '%s'", artistName)
 	}
 
-	// 2. Try local file
 	log.Printf("[ARTIST ART] MusicBrainz failed. Falling back to local file search for '%s'", artistName)
 	var songPath string
 	err := db.QueryRow("SELECT path FROM songs WHERE artist = ? LIMIT 1", artistName).Scan(&songPath)
@@ -331,7 +351,6 @@ func handleArtistArt(c *gin.Context, artistName string) {
 		log.Printf("[ARTIST ART] Could not find any song path for artist '%s' to locate local art. DB error: %v", artistName, err)
 	}
 
-	// 3. Fallback: Since the frontend now handles placeholders, we just return Not Found.
 	log.Printf("[ARTIST ART] All methods failed for '%s'. Returning 404.", artistName)
 	c.Status(http.StatusNotFound)
 }
@@ -382,13 +401,12 @@ func fetchArtistImageFromMusicBrainz(artistName string) (string, error) {
 
 	if len(searchResult.Artists) == 0 || searchResult.Artists[0].Score < 90 {
 		log.Printf("[MBrainz] No artist found or score too low for '%s'", artistName)
-		return "", nil // No definitive artist found
+		return "", nil
 	}
 
 	artistID := searchResult.Artists[0].ID
 	log.Printf("[MBrainz] Found artist ID '%s' for '%s'", artistID, artistName)
 
-	// Now fetch the artist details to find the image relation
 	lookupURL := fmt.Sprintf("https://musicbrainz.org/ws/2/artist/%s?inc=url-rels&fmt=json", artistID)
 	log.Printf("[MBrainz] Constructed lookup URL: %s", lookupURL)
 
@@ -433,12 +451,12 @@ func fetchArtistImageFromMusicBrainz(artistName string) (string, error) {
 	}
 
 	log.Printf("[MBrainz] No 'image' type relation found for artist ID %s", artistID)
-	return "", nil // No image relation found
+	return "", nil
 }
 
-func proxyImage(c *gin.Context, url string) {
-	log.Printf("[PROXY] Proxying image from URL: %s", url)
-	resp, err := http.Get(url)
+func proxyImage(c *gin.Context, imageUrl string) {
+	log.Printf("[PROXY] Proxying image from URL: %s", imageUrl)
+	resp, err := http.Get(imageUrl)
 	if err != nil {
 		log.Printf("[PROXY] Error fetching image for proxy: %v", err)
 		c.Status(http.StatusNotFound)
@@ -447,13 +465,13 @@ func proxyImage(c *gin.Context, url string) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("[PROXY] Remote server returned non-200 status: %d for URL: %s", resp.StatusCode, url)
+		log.Printf("[PROXY] Remote server returned non-200 status: %d for URL: %s", resp.StatusCode, imageUrl)
 		c.Status(resp.StatusCode)
 		return
 	}
 
 	c.Header("Content-Type", resp.Header.Get("Content-Type"))
-	c.Header("Cache-Control", "public, max-age=86400") // Cache for 1 day
+	c.Header("Cache-Control", "public, max-age=86400")
 
 	_, err = io.Copy(c.Writer, resp.Body)
 	if err != nil {

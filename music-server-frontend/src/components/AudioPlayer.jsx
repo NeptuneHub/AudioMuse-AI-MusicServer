@@ -15,7 +15,7 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
     const [error, setError] = useState(false);
     const audioRef = useRef(null);
 
-    // Effect for fetching audio data
+    // Effect for fetching audio data and scrobbling
     useEffect(() => {
         if (!song) {
             setAudioSrc(null);
@@ -30,6 +30,17 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
 
         const fetchAndSetAudio = async () => {
             try {
+                // Scrobble the song play
+                if (credentials) {
+                    try {
+                        // Fire and forget, no need to handle response
+                        subsonicFetch('scrobble.view', credentials, { id: song.id });
+                    } catch (e) {
+                        console.error("Failed to scrobble song:", e);
+                    }
+                }
+
+                // Fetch audio stream
                 const response = await subsonicFetch('stream.view', credentials, { id: song.id });
                 if (!response.ok) {
                     throw new Error(`Failed to fetch song: ${response.statusText}`);
@@ -47,7 +58,6 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
             }
         };
 
-        // Adding a small delay to allow the UI to update before fetching
         const timer = setTimeout(fetchAndSetAudio, 50);
 
         return () => {
@@ -66,9 +76,9 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                 album: song.album,
                 artwork: [
                     { 
-                        src: `/rest/getCoverArt.view?id=${song.coverArt}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI`, 
+                        src: `/rest/getCoverArt.view?id=${encodeURIComponent(song.coverArt)}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI`, 
                         sizes: '300x300', 
-                        type: 'image/png' 
+                        type: 'image/jpeg' 
                     },
                 ]
             });
@@ -107,8 +117,8 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
 
                 <div className="flex-grow flex items-center justify-center gap-2">
                     {hasQueue && (
-                        <button onClick={onPlayPrevious} className="bg-gray-600 p-2 rounded-full hover:bg-gray-500" title="Previous">
-                            <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20"><path d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"></path></svg>
+                        <button onClick={onPlayPrevious} className="text-white p-2 rounded-full hover:bg-gray-700" title="Previous">
+                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M8.447 4.854a1 1 0 00-1.414 0L3.326 8.56a1.5 1.5 0 000 2.122l3.707 3.707a1 1 0 001.414-1.414L5.414 10l3.033-3.032a1 1 0 000-1.414zM15.447 4.854a1 1 0 00-1.414 0L10.326 8.56a1.5 1.5 0 000 2.122l3.707 3.707a1 1 0 001.414-1.414L12.414 10l3.033-3.032a1 1 0 000-1.414z"></path></svg>
                         </button>
                     )}
                     <audio
@@ -121,8 +131,8 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                         style={{ display: song ? 'block' : 'none' }}
                     />
                     {hasQueue && (
-                        <button onClick={onPlayNext} className="bg-gray-600 p-2 rounded-full hover:bg-gray-500" title="Next">
-                            <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"></path></svg>
+                        <button onClick={onPlayNext} className="text-white p-2 rounded-full hover:bg-gray-700" title="Next">
+                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M11.553 4.854a1 1 0 011.414 0l3.707 3.707a1.5 1.5 0 010 2.122l-3.707 3.707a1 1 0 01-1.414-1.414L14.586 10l-3.033-3.032a1 1 0 010-1.414zM4.553 4.854a1 1 0 011.414 0l3.707 3.707a1.5 1.5 0 010 2.122l-3.707 3.707a1 1 0 01-1.414-1.414L7.586 10 4.553 6.968a1 1 0 010-1.414z"></path></svg>
                         </button>
                     )}
                 </div>

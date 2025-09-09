@@ -15,6 +15,16 @@ const subsonicFetch = async (endpoint, creds, params = {}) => {
     return data['subsonic-response'];
 };
 
+const formatDate = (isoString) => {
+    if (!isoString) return 'Never';
+    try {
+        const date = new Date(isoString);
+        return date.toLocaleDateString(undefined, { year: '2-digit', month: 'short', day: 'numeric' });
+    } catch (e) {
+        return 'Invalid Date';
+    }
+};
+
 export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
     const [playlists, setPlaylists] = useState([]);
     const [selectedPlaylist, setSelectedPlaylist] = useState('');
@@ -88,7 +98,6 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
     const [isLoading, setIsLoading] = useState(false);
     
     useEffect(() => {
-        // If the songs are preloaded from an instant mix, just display them.
         if (filter?.preloadedSongs) {
             setSongs(filter.preloadedSongs);
             return;
@@ -179,6 +188,8 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                 <th className="px-4 py-3">Title</th>
                                 <th className="px-4 py-3 hidden sm:table-cell">Artist</th>
                                 <th className="px-4 py-3 hidden md:table-cell">Album</th>
+                                <th className="px-4 py-3 hidden xl:table-cell text-center">Plays</th>
+                                <th className="px-4 py-3 hidden lg:table-cell">Last Played</th>
                                 <th className="px-4 py-3 w-32 text-right">Actions</th>
                             </tr>
                         </thead>
@@ -203,6 +214,8 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                         </td>
                                         <td className="px-4 py-4 hidden sm:table-cell">{song.artist}</td>
                                         <td className="px-4 py-4 hidden md:table-cell">{song.album}</td>
+                                        <td className="px-4 py-4 hidden xl:table-cell text-center">{song.playCount > 0 ? song.playCount : ''}</td>
+                                        <td className="px-4 py-4 hidden lg:table-cell">{formatDate(song.lastPlayed)}</td>
                                         <td className="px-4 py-4">
                                             <div className="flex items-center justify-end space-x-2">
                                                 <button 

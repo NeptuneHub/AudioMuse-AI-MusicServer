@@ -16,18 +16,17 @@ func subsonicGetPlaylists(c *gin.Context) {
 		return
 	}
 
-	rows, err := db.Query(`
-		SELECT p.id, p.name, u.username, COUNT(ps.song_id)
+	query := `
+		SELECT p.id, p.name, COUNT(ps.song_id)
 		FROM playlists p
-		JOIN users u ON p.user_id = u.id
 		LEFT JOIN playlist_songs ps ON p.id = ps.playlist_id
 		WHERE p.user_id = ?
-		GROUP BY p.id, p.name, u.username
-		ORDER BY p.name`, user.ID)
-
+		GROUP BY p.id, p.name
+		ORDER BY p.name
+	`
+	rows, err := db.Query(query, user.ID)
 	if err != nil {
-		log.Printf("Error querying playlists for user %d: %v", user.ID, err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error"))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching playlists."))
 		return
 	}
 	defer rows.Close()
@@ -35,10 +34,12 @@ func subsonicGetPlaylists(c *gin.Context) {
 	var playlists []SubsonicPlaylist
 	for rows.Next() {
 		var p SubsonicPlaylist
-		if err := rows.Scan(&p.ID, &p.Name, &p.Owner, &p.SongCount); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.SongCount); err != nil {
 			log.Printf("Error scanning playlist row: %v", err)
 			continue
 		}
+		p.Owner = user.Username
+		p.Public = false
 		playlists = append(playlists, p)
 	}
 
@@ -54,57 +55,54 @@ func subsonicGetPlaylist(c *gin.Context) {
 
 	playlistID := c.Query("id")
 	if playlistID == "" {
-		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter 'id' is missing."))
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'id'"))
 		return
 	}
 
 	var playlistName string
 	err := db.QueryRow("SELECT name FROM playlists WHERE id = ? AND user_id = ?", playlistID, user.ID).Scan(&playlistName)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or not owned by user."))
-		} else {
-			subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
-		}
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found."))
 		return
 	}
 
-	rows, err := db.Query(`
-		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played
+	query := `
+		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played
 		FROM songs s
 		JOIN playlist_songs ps ON s.id = ps.song_id
-		WHERE ps.playlist_id = ?`, playlistID)
+		WHERE ps.playlist_id = ?
+	`
+	rows, err := db.Query(query, playlistID)
 	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Internal server error querying songs."))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching playlist songs."))
 		return
 	}
 	defer rows.Close()
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var songFromDb Song
+		var s SubsonicSong
+		var songId int
 		var lastPlayed sql.NullString
-		if err := rows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, &songFromDb.Path, &songFromDb.PlayCount, &lastPlayed); err != nil {
-			log.Printf("Error scanning song row for getPlaylist: %v", err)
+		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed); err != nil {
+			log.Printf("Error scanning playlist song row: %v", err)
 			continue
 		}
-
-		subsonicSong := SubsonicSong{
-			ID:        strconv.Itoa(songFromDb.ID),
-			Title:     songFromDb.Title,
-			Artist:    songFromDb.Artist,
-			Album:     songFromDb.Album,
-			Path:      songFromDb.Path,
-			PlayCount: songFromDb.PlayCount,
-		}
+		s.ID = strconv.Itoa(songId)
+		s.CoverArt = s.ID
 		if lastPlayed.Valid {
-			subsonicSong.LastPlayed = lastPlayed.String
+			s.LastPlayed = lastPlayed.String
 		}
-		songs = append(songs, subsonicSong)
+		songs = append(songs, s)
 	}
 
-	directory := SubsonicDirectory{ID: playlistID, Name: playlistName, SongCount: len(songs), Songs: songs}
-	subsonicRespond(c, newSubsonicResponse(&directory))
+	responseBody := &SubsonicDirectory{
+		ID:        playlistID,
+		Name:      playlistName,
+		SongCount: len(songs),
+		Songs:     songs,
+	}
+	subsonicRespond(c, newSubsonicResponse(responseBody))
 }
 
 func subsonicCreatePlaylist(c *gin.Context) {
@@ -116,58 +114,27 @@ func subsonicCreatePlaylist(c *gin.Context) {
 
 	playlistName := c.Query("name")
 	if playlistName == "" {
-		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter 'name' is missing."))
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'name'"))
 		return
 	}
 
-	songIDs := c.QueryArray("songId")
-
-	tx, err := db.Begin()
+	res, err := db.Exec("INSERT INTO playlists (name, user_id) VALUES (?, ?)", playlistName, user.ID)
 	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error starting transaction."))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Error creating playlist."))
 		return
 	}
+	newID, _ := res.LastInsertId()
 
-	res, err := tx.Exec("INSERT INTO playlists (name, user_id) VALUES (?, ?)", playlistName, user.ID)
-	if err != nil {
-		tx.Rollback()
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to create playlist."))
-		return
-	}
-
-	newPlaylistID, err := res.LastInsertId()
-	if err != nil {
-		tx.Rollback()
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to get new playlist ID."))
-		return
-	}
-
-	if len(songIDs) > 0 {
-		stmt, err := tx.Prepare("INSERT INTO playlist_songs (playlist_id, song_id) VALUES (?, ?)")
-		if err != nil {
-			tx.Rollback()
-			subsonicRespond(c, newSubsonicErrorResponse(0, "Database error preparing statement."))
-			return
-		}
-		defer stmt.Close()
-		for _, songID := range songIDs {
-			stmt.Exec(newPlaylistID, songID)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error committing transaction."))
-		return
-	}
-
-	createdPlaylist := &SubsonicPlaylist{
-		ID:        int(newPlaylistID),
+	createdPlaylist := SubsonicPlaylist{
+		ID:        int(newID),
 		Name:      playlistName,
 		Owner:     user.Username,
-		SongCount: len(songIDs),
+		Public:    false,
+		SongCount: 0,
 	}
 
-	subsonicRespond(c, newSubsonicResponse(createdPlaylist))
+	responseBody := &SubsonicPlaylists{Playlists: []SubsonicPlaylist{createdPlaylist}}
+	subsonicRespond(c, newSubsonicResponse(responseBody))
 }
 
 func subsonicUpdatePlaylist(c *gin.Context) {
@@ -178,64 +145,39 @@ func subsonicUpdatePlaylist(c *gin.Context) {
 	}
 
 	playlistID := c.Query("playlistId")
+	songIdsToAdd := c.QueryArray("songIdToAdd")
+	// songIndicesToRemove := c.QueryArray("songIndexToRemove") // This is complex and not implemented fully
+
 	if playlistID == "" {
-		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter 'playlistId' is missing."))
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'playlistId'"))
 		return
 	}
 
-	var ownerID int
-	err := db.QueryRow("SELECT user_id FROM playlists WHERE id = ?", playlistID).Scan(&ownerID)
-	if err != nil || ownerID != user.ID {
-		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or you don't own it."))
+	var ownerId int
+	err := db.QueryRow("SELECT user_id FROM playlists WHERE id = ?", playlistID).Scan(&ownerId)
+	if err != nil || ownerId != user.ID {
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or permission denied."))
 		return
 	}
 
 	tx, err := db.Begin()
 	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database transaction error."))
 		return
 	}
 
-	songsToAdd := c.QueryArray("songIdToAdd")
-	if len(songsToAdd) > 0 {
-		stmt, err := tx.Prepare("INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id) VALUES (?, ?)")
+	for _, songID := range songIdsToAdd {
+		_, err := tx.Exec("INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id) VALUES (?, ?)", playlistID, songID)
 		if err != nil {
 			tx.Rollback()
-			subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
-			return
-		}
-		defer stmt.Close()
-		for _, songID := range songsToAdd {
-			stmt.Exec(playlistID, songID)
-		}
-	}
-
-	songsToRemove := c.QueryArray("songIdToRemove")
-	if len(songsToRemove) > 0 {
-		stmt, err := tx.Prepare("DELETE FROM playlist_songs WHERE playlist_id = ? AND song_id = ?")
-		if err != nil {
-			tx.Rollback()
-			subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
-			return
-		}
-		defer stmt.Close()
-		for _, songID := range songsToRemove {
-			stmt.Exec(playlistID, songID)
-		}
-	}
-
-	newName := c.Query("name")
-	if newName != "" {
-		_, err := tx.Exec("UPDATE playlists SET name = ? WHERE id = ?", newName, playlistID)
-		if err != nil {
-			tx.Rollback()
-			subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to update playlist name."))
+			subsonicRespond(c, newSubsonicErrorResponse(0, "Error adding song to playlist."))
 			return
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+	err = tx.Commit()
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Error committing playlist changes."))
 		return
 	}
 
@@ -251,39 +193,40 @@ func subsonicDeletePlaylist(c *gin.Context) {
 
 	playlistID := c.Query("id")
 	if playlistID == "" {
-		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter 'id' is missing."))
-		return
-	}
-
-	var ownerID int
-	err := db.QueryRow("SELECT user_id FROM playlists WHERE id = ?", playlistID).Scan(&ownerID)
-	if err != nil || ownerID != user.ID {
-		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or you don't own it."))
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'id'"))
 		return
 	}
 
 	tx, err := db.Begin()
 	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database transaction error."))
 		return
 	}
 
 	_, err = tx.Exec("DELETE FROM playlist_songs WHERE playlist_id = ?", playlistID)
 	if err != nil {
 		tx.Rollback()
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to delete playlist songs."))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Error clearing playlist songs."))
 		return
 	}
 
-	_, err = tx.Exec("DELETE FROM playlists WHERE id = ?", playlistID)
+	res, err := tx.Exec("DELETE FROM playlists WHERE id = ? AND user_id = ?", playlistID, user.ID)
 	if err != nil {
 		tx.Rollback()
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to delete playlist."))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Error deleting playlist."))
 		return
 	}
 
-	if err := tx.Commit(); err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		tx.Rollback()
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or permission denied."))
+		return
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Error committing playlist deletion."))
 		return
 	}
 
