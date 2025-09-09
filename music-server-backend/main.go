@@ -105,12 +105,13 @@ func main() {
 			adminRoutes.GET("/browse", browseFiles)
 			adminRoutes.POST("/scan/cancel", cancelAdminScan)
 
-			// NEW ROUTES for AudioMuse-AI Analysis
+			// ROUTES for AudioMuse-AI Analysis and Clustering
 			analysisRoutes := adminRoutes.Group("/analysis")
 			{
 				analysisRoutes.POST("/start", startSonicAnalysis)
 				analysisRoutes.POST("/cancel/:taskID", cancelSonicAnalysis)
 				analysisRoutes.GET("/status", getSonicAnalysisStatus)
+				analysisRoutes.POST("/clustering", startClusteringAnalysis) // Correctly added route
 			}
 		}
 	}
@@ -268,4 +269,3 @@ func startScheduler() {
 		log.Println("Scheduled library scan is disabled.")
 	}
 }
-
