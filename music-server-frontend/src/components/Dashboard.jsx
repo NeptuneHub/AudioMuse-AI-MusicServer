@@ -102,7 +102,31 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
             return newQueue;
         });
     }, [currentTrackIndex]);
+
+    const handleClearQueue = useCallback(() => {
+        setPlayQueue([]);
+        setCurrentTrackIndex(0);
+    }, []);
     
+    const handleReorderQueue = useCallback((oldIndex, newIndex) => {
+        if (newIndex < 0 || newIndex >= playQueue.length) return;
+
+        setPlayQueue(prevQueue => {
+            const newQueue = [...prevQueue];
+            const [movedItem] = newQueue.splice(oldIndex, 1);
+            newQueue.splice(newIndex, 0, movedItem);
+
+            const currentSongId = prevQueue[currentTrackIndex]?.id;
+            if (currentSongId) {
+                const newPlayingIndex = newQueue.findIndex(s => s.id === currentSongId);
+                if (newPlayingIndex !== -1) {
+                    setCurrentTrackIndex(newPlayingIndex);
+                }
+            }
+            return newQueue;
+        });
+    }, [playQueue, currentTrackIndex]);
+
     const handleRemoveSongById = useCallback((songId) => {
         const indexToRemove = playQueue.findIndex(s => s.id === songId);
         if (indexToRemove > -1) handleRemoveFromQueue(indexToRemove);
@@ -134,18 +158,41 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
             const newQueue = [song, ...similarSongs];
             handlePlaySong(song, newQueue); 
             
-            // Navigate to the new view
             handleNavigate({
                 page: 'songs',
                 title: `Instant Mix: ${song.title}`,
                 filter: { similarToSongId: song.id, preloadedSongs: newQueue } 
             });
-
             setMixMessage('');
-
         } catch (error) {
             console.error("Failed to create Instant Mix:", error);
             setMixMessage('Error creating Instant Mix.');
+            setTimeout(() => setMixMessage(''), 3000);
+        }
+    };
+
+    const handleCreateSongPath = async (startId, endId) => {
+        if (!audioMuseUrl) return;
+        setMixMessage(`Creating Song Path...`);
+        setQueueViewOpen(false);
+        try {
+            const data = await subsonicFetch('getSongPath.view', credentials, { startId, endId });
+            let pathSongs = data.directory?.song || [];
+            pathSongs = Array.isArray(pathSongs) ? pathSongs : [pathSongs].filter(Boolean);
+
+            if (pathSongs.length > 0) {
+                // This function correctly replaces the entire queue and starts playing the first song.
+                handlePlaySong(pathSongs[0], pathSongs);
+                // This function navigates to the songs view with the new list preloaded.
+                handleNavigate({ page: 'songs', title: `Song Path`, filter: { preloadedSongs: pathSongs } });
+                setMixMessage('');
+            } else {
+                 setMixMessage('No path found between the selected songs.');
+                 setTimeout(() => setMixMessage(''), 3000);
+            }
+        } catch (error) {
+            console.error("Failed to create Song Path:", error);
+            setMixMessage('Error creating Song Path.');
             setTimeout(() => setMixMessage(''), 3000);
         }
     };
@@ -228,7 +275,9 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                 onAddToPlaylist={setSelectedSongForPlaylist}
                 onInstantMix={handleInstantMix}
                 audioMuseUrl={audioMuseUrl}
-                credentials={credentials}
+                onClearQueue={handleClearQueue}
+                onReorder={handleReorderQueue}
+                onCreateSongPath={handleCreateSongPath}
             />
             {selectedSongForPlaylist && (
                 <AddToPlaylistModal
