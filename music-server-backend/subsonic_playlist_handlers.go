@@ -118,23 +118,57 @@ func subsonicCreatePlaylist(c *gin.Context) {
 		return
 	}
 
-	res, err := db.Exec("INSERT INTO playlists (name, user_id) VALUES (?, ?)", playlistName, user.ID)
+	songIds := c.QueryArray("songId")
+
+	tx, err := db.Begin()
 	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Error creating playlist."))
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database transaction error."))
+		return
+	}
+
+	res, err := tx.Exec("INSERT INTO playlists (name, user_id) VALUES (?, ?)", playlistName, user.ID)
+	if err != nil {
+		tx.Rollback()
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Error creating playlist entry."))
 		return
 	}
 	newID, _ := res.LastInsertId()
+
+	if len(songIds) > 0 {
+		stmt, err := tx.Prepare("INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id) VALUES (?, ?)")
+		if err != nil {
+			tx.Rollback()
+			subsonicRespond(c, newSubsonicErrorResponse(0, "Error preparing to add songs."))
+			return
+		}
+		defer stmt.Close()
+
+		for _, songID := range songIds {
+			if _, err := stmt.Exec(newID, songID); err != nil {
+				tx.Rollback()
+				log.Printf("Error adding song %s to new playlist %d: %v", songID, newID, err)
+				subsonicRespond(c, newSubsonicErrorResponse(0, "Error adding a song to the playlist."))
+				return
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Error finalizing playlist creation."))
+		return
+	}
 
 	createdPlaylist := SubsonicPlaylist{
 		ID:        int(newID),
 		Name:      playlistName,
 		Owner:     user.Username,
 		Public:    false,
-		SongCount: 0,
+		SongCount: len(songIds),
 	}
 
-	responseBody := &SubsonicPlaylists{Playlists: []SubsonicPlaylist{createdPlaylist}}
-	subsonicRespond(c, newSubsonicResponse(responseBody))
+	// Respond with the created playlist object, which subsonicRespond will correctly wrap under a "playlist" key for JSON.
+	response := newSubsonicResponse(&createdPlaylist)
+	subsonicRespond(c, response)
 }
 
 func subsonicUpdatePlaylist(c *gin.Context) {
@@ -146,7 +180,7 @@ func subsonicUpdatePlaylist(c *gin.Context) {
 
 	playlistID := c.Query("playlistId")
 	songIdsToAdd := c.QueryArray("songIdToAdd")
-	// songIndicesToRemove := c.QueryArray("songIndexToRemove") // This is complex and not implemented fully
+	// songIndicesToRemove := c.QueryArray("songIndexToRemove") // Not implemented
 
 	if playlistID == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'playlistId'"))
@@ -232,3 +266,4 @@ func subsonicDeletePlaylist(c *gin.Context) {
 
 	subsonicRespond(c, newSubsonicResponse(nil))
 }
+
