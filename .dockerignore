@@ -1,0 +1,74 @@
+# Git and version control
+.git
+.gitignore
+.gitattributes
+.github
+
+# Docker-specific files that shouldn't be in the image
+.dockerignore
+Dockerfile
+Dockerfile*
+
+# Local deployment/testing files
+deployment/
+test/
+
+# Python virtual environment and cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv
+.venv
+env
+.env*
+
+# IDE and editor configuration
+.vscode/
+.idea/
+
+# Documentation and local test files
+README.md
+docs/
+query/
+screenshot/
+.pytest_cache/
+htmlcov/
+.coverage
+*.log
+
+# Binaries for programs and plugins
+*.exe
+*.dll
+.so
+*.dylib
+*.test
+*.out
+
+# Go workspace file
+go.work
+
+# Go built binary (should be built inside the container)
+music-server-backend/music-server
+
+### Node ###
+# Logs
+logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependency directories
+node_modules/
+
+# Optional cache directories
+.npm
+.eslintcache
+
+# Output of 'npm pack'
+*.tgz
+
+# Local database file
+music-server-backend/music.db
+music-server-backend/music.db-shm
+music-server-backend/music.db-wal
