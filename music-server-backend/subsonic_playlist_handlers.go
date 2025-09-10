@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -71,6 +72,7 @@ func subsonicGetPlaylist(c *gin.Context) {
 		FROM songs s
 		JOIN playlist_songs ps ON s.id = ps.song_id
 		WHERE ps.playlist_id = ?
+		ORDER BY ps.position ASC
 	`
 	rows, err := db.Query(query, playlistID)
 	if err != nil {
@@ -135,7 +137,7 @@ func subsonicCreatePlaylist(c *gin.Context) {
 	newID, _ := res.LastInsertId()
 
 	if len(songIds) > 0 {
-		stmt, err := tx.Prepare("INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id) VALUES (?, ?)")
+		stmt, err := tx.Prepare("INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)")
 		if err != nil {
 			tx.Rollback()
 			subsonicRespond(c, newSubsonicErrorResponse(0, "Error preparing to add songs."))
@@ -143,8 +145,8 @@ func subsonicCreatePlaylist(c *gin.Context) {
 		}
 		defer stmt.Close()
 
-		for _, songID := range songIds {
-			if _, err := stmt.Exec(newID, songID); err != nil {
+		for i, songID := range songIds {
+			if _, err := stmt.Exec(newID, songID, i); err != nil {
 				tx.Rollback()
 				log.Printf("Error adding song %s to new playlist %d: %v", songID, newID, err)
 				subsonicRespond(c, newSubsonicErrorResponse(0, "Error adding a song to the playlist."))
@@ -166,7 +168,6 @@ func subsonicCreatePlaylist(c *gin.Context) {
 		SongCount: len(songIds),
 	}
 
-	// Respond with the created playlist object, which subsonicRespond will correctly wrap under a "playlist" key for JSON.
 	response := newSubsonicResponse(&createdPlaylist)
 	subsonicRespond(c, response)
 }
@@ -179,8 +180,16 @@ func subsonicUpdatePlaylist(c *gin.Context) {
 	}
 
 	playlistID := c.Query("playlistId")
+	newName := c.Query("name")
 	songIdsToAdd := c.QueryArray("songIdToAdd")
-	// songIndicesToRemove := c.QueryArray("songIndexToRemove") // Not implemented
+	songIndicesToRemoveStr := c.QueryArray("songIndexToRemove")
+
+	// Correctly parse comma-separated list for full playlist updates
+	songIdParam := c.Query("songId")
+	var fullSongIdList []string
+	if songIdParam != "" {
+		fullSongIdList = strings.Split(songIdParam, ",")
+	}
 
 	if playlistID == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'playlistId'"))
@@ -199,18 +208,101 @@ func subsonicUpdatePlaylist(c *gin.Context) {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database transaction error."))
 		return
 	}
+	defer tx.Rollback()
 
-	for _, songID := range songIdsToAdd {
-		_, err := tx.Exec("INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id) VALUES (?, ?)", playlistID, songID)
+	if newName != "" {
+		_, err := tx.Exec("UPDATE playlists SET name = ? WHERE id = ?", newName, playlistID)
 		if err != nil {
-			tx.Rollback()
-			subsonicRespond(c, newSubsonicErrorResponse(0, "Error adding song to playlist."))
+			log.Printf("Error renaming playlist %s: %v", playlistID, err)
+			subsonicRespond(c, newSubsonicErrorResponse(0, "Error renaming playlist."))
 			return
 		}
 	}
 
-	err = tx.Commit()
+	// If no song modifications are requested, commit potential name change and exit
+	if len(fullSongIdList) == 0 && len(songIdsToAdd) == 0 && len(songIndicesToRemoveStr) == 0 {
+		if err := tx.Commit(); err != nil {
+			subsonicRespond(c, newSubsonicErrorResponse(0, "Error committing playlist changes."))
+		} else {
+			subsonicRespond(c, newSubsonicResponse(nil))
+		}
+		return
+	}
+
+	var finalSongIds []string
+
+	if len(fullSongIdList) > 0 {
+		// This handles full replacement of playlist content (e.g., for reordering)
+		finalSongIds = fullSongIdList
+	} else {
+		// This handles incremental additions/removals
+		rows, err := tx.Query("SELECT song_id FROM playlist_songs WHERE playlist_id = ? ORDER BY position ASC", playlistID)
+		if err != nil {
+			subsonicRespond(c, newSubsonicErrorResponse(0, "Could not fetch current playlist state."))
+			return
+		}
+
+		var currentSongIds []string
+		for rows.Next() {
+			var songId string
+			if err := rows.Scan(&songId); err != nil {
+				rows.Close()
+				subsonicRespond(c, newSubsonicErrorResponse(0, "Error reading current playlist state."))
+				return
+			}
+			currentSongIds = append(currentSongIds, songId)
+		}
+		rows.Close()
+
+		if len(songIndicesToRemoveStr) > 0 {
+			indicesToRemove := make(map[int]bool)
+			for _, idxStr := range songIndicesToRemoveStr {
+				if idx, err := strconv.Atoi(idxStr); err == nil {
+					indicesToRemove[idx] = true
+				}
+			}
+
+			var songsToKeep []string
+			for i, songId := range currentSongIds {
+				if !indicesToRemove[i] {
+					songsToKeep = append(songsToKeep, songId)
+				}
+			}
+			currentSongIds = songsToKeep
+		}
+
+		currentSongIds = append(currentSongIds, songIdsToAdd...)
+		finalSongIds = currentSongIds
+	}
+
+	// Atomically update the playlist songs
+	_, err = tx.Exec("DELETE FROM playlist_songs WHERE playlist_id = ?", playlistID)
 	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Error clearing playlist for update."))
+		return
+	}
+
+	if len(finalSongIds) > 0 {
+		stmt, err := tx.Prepare("INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)")
+		if err != nil {
+			subsonicRespond(c, newSubsonicErrorResponse(0, "Error preparing to update playlist songs."))
+			return
+		}
+		defer stmt.Close()
+
+		for i, songID := range finalSongIds {
+			// Ensure songID is not an empty string which can happen from trailing commas
+			if songID != "" {
+				if _, err := stmt.Exec(playlistID, songID, i); err != nil {
+					log.Printf("Error inserting song %s into playlist %s at position %d: %v", songID, playlistID, i, err)
+					subsonicRespond(c, newSubsonicErrorResponse(0, "Error inserting song into playlist."))
+					return
+				}
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Error committing playlist changes."))
 		return
 	}
@@ -231,36 +323,16 @@ func subsonicDeletePlaylist(c *gin.Context) {
 		return
 	}
 
-	tx, err := db.Begin()
+	// ON DELETE CASCADE in the schema handles deleting from playlist_songs
+	res, err := db.Exec("DELETE FROM playlists WHERE id = ? AND user_id = ?", playlistID, user.ID)
 	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database transaction error."))
-		return
-	}
-
-	_, err = tx.Exec("DELETE FROM playlist_songs WHERE playlist_id = ?", playlistID)
-	if err != nil {
-		tx.Rollback()
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Error clearing playlist songs."))
-		return
-	}
-
-	res, err := tx.Exec("DELETE FROM playlists WHERE id = ? AND user_id = ?", playlistID, user.ID)
-	if err != nil {
-		tx.Rollback()
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Error deleting playlist."))
 		return
 	}
 
 	rowsAffected, _ := res.RowsAffected()
 	if rowsAffected == 0 {
-		tx.Rollback()
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or permission denied."))
-		return
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Error committing playlist deletion."))
 		return
 	}
 

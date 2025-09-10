@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -132,82 +131,98 @@ func adminOnly() gin.HandlerFunc {
 }
 
 func initDB() {
+	// User table
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			username TEXT UNIQUE,
-			password_hash TEXT,
-			password_plain TEXT,
-			is_admin BOOLEAN
-		);`)
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT UNIQUE NOT NULL,
+		password_hash TEXT NOT NULL,
+		password_plain TEXT NOT NULL,
+		is_admin BOOLEAN NOT NULL DEFAULT 0
+	);`)
 	if err != nil {
-		log.Fatal("Failed to create users table:", err)
+		log.Fatalf("Failed to create users table: %v", err)
 	}
-	alterAndLog("ALTER TABLE users ADD COLUMN password_plain TEXT")
 
+	// Scan status table
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS scan_status (
-			id INTEGER PRIMARY KEY CHECK (id = 1),
-			is_scanning BOOLEAN NOT NULL DEFAULT 0,
-			songs_added INTEGER NOT NULL DEFAULT 0,
-			last_update_time TEXT
-		);`)
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		is_scanning BOOLEAN NOT NULL DEFAULT 0,
+		songs_added INTEGER NOT NULL DEFAULT 0,
+		last_update_time TEXT
+	);`)
 	if err != nil {
-		log.Fatal("Failed to create scan_status table:", err)
+		log.Fatalf("Failed to create scan_status table: %v", err)
 	}
-	db.Exec(`INSERT OR IGNORE INTO scan_status (id) VALUES (1);`)
+	db.Exec(`INSERT OR IGNORE INTO scan_status (id, is_scanning, songs_added) VALUES (1, 0, 0);`)
 
+	// Songs table
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS songs (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			title TEXT, artist TEXT, album TEXT, path TEXT UNIQUE,
-			play_count INTEGER NOT NULL DEFAULT 0, last_played TEXT,
-			date_added TEXT, date_updated TEXT
-		);`)
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		title TEXT,
+		artist TEXT,
+		album TEXT,
+		path TEXT UNIQUE NOT NULL,
+		play_count INTEGER NOT NULL DEFAULT 0,
+		last_played TEXT,
+		date_added TEXT,
+		date_updated TEXT
+	);`)
 	if err != nil {
-		log.Fatal("Failed to create songs table:", err)
+		log.Fatalf("Failed to create songs table: %v", err)
 	}
-	alterAndLog("ALTER TABLE songs ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0")
-	alterAndLog("ALTER TABLE songs ADD COLUMN last_played TEXT")
-	alterAndLog("ALTER TABLE songs ADD COLUMN date_added TEXT")
-	alterAndLog("ALTER TABLE songs ADD COLUMN date_updated TEXT")
 
+	// Playlists table
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS playlists (
-			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, user_id INTEGER,
-			FOREIGN KEY(user_id) REFERENCES users(id)
-		);`)
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		user_id INTEGER,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	);`)
 	if err != nil {
-		log.Fatal("Failed to create playlists table:", err)
+		log.Fatalf("Failed to create playlists table: %v", err)
 	}
 
+	// Playlist songs table
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS playlist_songs (
-			playlist_id INTEGER, song_id INTEGER,
-			FOREIGN KEY(playlist_id) REFERENCES playlists(id),
-			FOREIGN KEY(song_id) REFERENCES songs(id),
-			PRIMARY KEY (playlist_id, song_id)
-		);`)
+		playlist_id INTEGER NOT NULL,
+		song_id INTEGER NOT NULL,
+		position INTEGER NOT NULL,
+		FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+		FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE
+	);`)
 	if err != nil {
-		log.Fatal("Failed to create playlist_songs table:", err)
+		log.Fatalf("Failed to create playlist_songs table: %v", err)
 	}
 
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS configuration (key TEXT PRIMARY KEY, value TEXT);`)
+	// Create index for performance
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_playlist_songs_order ON playlist_songs (playlist_id, position);`)
 	if err != nil {
-		log.Fatal("Failed to create configuration table:", err)
+		log.Fatalf("Failed to create index on playlist_songs: %v", err)
 	}
-	// Add default cron job settings if they don't exist
+
+	// Configuration table
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS configuration (
+		key TEXT PRIMARY KEY NOT NULL,
+		value TEXT
+	);`)
+	if err != nil {
+		log.Fatalf("Failed to create configuration table: %v", err)
+	}
 	db.Exec(`INSERT OR IGNORE INTO configuration (key, value) VALUES ('scan_enabled', 'true');`)
 	db.Exec(`INSERT OR IGNORE INTO configuration (key, value) VALUES ('scan_schedule', '0 2 * * *');`)
 
-
+	// Library paths table
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS library_paths (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			path TEXT UNIQUE,
-			song_count INTEGER NOT NULL DEFAULT 0,
-			last_scan_ended TEXT
-		);`)
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		path TEXT UNIQUE NOT NULL,
+		song_count INTEGER NOT NULL DEFAULT 0,
+		last_scan_ended TEXT
+	);`)
 	if err != nil {
-		log.Fatal("Failed to create library_paths table:", err)
+		log.Fatalf("Failed to create library_paths table: %v", err)
 	}
-	alterAndLog("ALTER TABLE library_paths ADD COLUMN song_count INTEGER NOT NULL DEFAULT 0")
-	alterAndLog("ALTER TABLE library_paths ADD COLUMN last_scan_ended TEXT")
 
+	// Default admin user
 	var count int
 	row := db.QueryRow("SELECT COUNT(*) FROM users WHERE username = 'admin'")
 	if err := row.Scan(&count); err == nil && count == 0 {
@@ -218,13 +233,6 @@ func initDB() {
 		} else {
 			log.Println("Default admin user created with password 'admin'")
 		}
-	}
-}
-
-func alterAndLog(query string) {
-	_, err := db.Exec(query)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
-		log.Printf("Warning: Could not execute schema update '%s': %v", query, err)
 	}
 }
 

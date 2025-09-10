@@ -1,5 +1,5 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 const subsonicFetch = async (endpoint, creds, params = {}) => {
     const allParams = new URLSearchParams({
@@ -96,59 +96,64 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
     const [songs, setSongs] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    
-    useEffect(() => {
+    const [refreshKey, setRefreshKey] = useState(0);
+    const [error, setError] = useState('');
+
+    const isPlaylistView = !!filter?.playlistId;
+
+    const fetchSongs = useCallback(async () => {
         if (filter?.preloadedSongs) {
             setSongs(filter.preloadedSongs);
             return;
         }
 
-        const fetchSongs = async () => {
-            setIsLoading(true);
-            try {
-                let songList = [];
-                if (filter?.similarToSongId) {
-                     const data = await subsonicFetch('getSimilarSongs.view', credentials, { id: filter.similarToSongId, count: 20 });
-                     songList = data.directory?.song || [];
-                }
-                else if (searchTerm.length >= 3) {
-                    const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, songCount: 100 });
-                    songList = data.searchResult2?.song || [];
-                } 
-                else if (filter && !filter.similarToSongId && searchTerm.length === 0) {
-                    const endpoint = filter.albumId ? 'getAlbum.view' : 'getPlaylist.view';
-                    const idParam = filter.albumId || filter.playlistId;
-                    if (!idParam) { setSongs([]); setIsLoading(false); return; }
+        if (!filter?.albumId && !isPlaylistView && searchTerm.length < 3 && !filter?.similarToSongId) {
+            setSongs([]);
+            return;
+        }
 
-                    const data = await subsonicFetch(endpoint, credentials, { id: idParam });
-                    const songContainer = data.album || data.directory;
-                    if (songContainer && songContainer.song) {
-                        songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
-                    }
-                } 
-                else {
-                     setSongs([]);
-                }
-                setSongs(Array.isArray(songList) ? songList : [songList].filter(Boolean));
-            } catch (e) {
-                console.error("Failed to fetch songs:", e);
-                setSongs([]);
-            } finally {
-                setIsLoading(false);
+        setIsLoading(true);
+        setError('');
+        try {
+            let songList = [];
+            if (filter?.similarToSongId) {
+                 const data = await subsonicFetch('getSimilarSongs.view', credentials, { id: filter.similarToSongId, count: 20 });
+                 songList = data.directory?.song || [];
             }
-        };
+            else if (searchTerm.length >= 3) {
+                const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, songCount: 100 });
+                songList = data.searchResult2?.song || [];
+            } 
+            else if (filter && !filter.similarToSongId && searchTerm.length === 0) {
+                const endpoint = filter.albumId ? 'getAlbum.view' : 'getPlaylist.view';
+                const idParam = filter.albumId || filter.playlistId;
+                if (!idParam) { setSongs([]); setIsLoading(false); return; }
 
+                const data = await subsonicFetch(endpoint, credentials, { id: idParam });
+                const songContainer = data.album || data.directory;
+                if (songContainer && songContainer.song) {
+                    songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
+                }
+            } 
+            else {
+                 setSongs([]);
+            }
+            setSongs(Array.isArray(songList) ? songList : [songList].filter(Boolean));
+        } catch (e) {
+            console.error("Failed to fetch songs:", e);
+            setError(e.message || "Failed to fetch songs.");
+            setSongs([]);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [credentials, filter, searchTerm, isPlaylistView]);
+
+    useEffect(() => {
         const debounceFetch = setTimeout(() => {
-             if (filter?.similarToSongId || searchTerm.length >= 3 || (filter && !filter.similarToSongId && searchTerm.length === 0)) {
-                fetchSongs();
-            } else {
-                setSongs([]); 
-            }
+             fetchSongs();
         }, 300);
-
         return () => clearTimeout(debounceFetch);
-    }, [credentials, filter, searchTerm]);
-
+    }, [fetchSongs, searchTerm, refreshKey]);
 
     const handlePlayAlbum = () => {
         if (songs.length > 0) {
@@ -156,8 +161,53 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
         }
     };
 
+    const handleDeleteSong = async (songIdToRemove) => {
+        if (!isPlaylistView) return;
+
+        const currentSongIds = songs.map(s => s.id);
+        const newSongIds = currentSongIds.filter(id => id !== songIdToRemove);
+        
+        try {
+            await subsonicFetch('updatePlaylist.view', credentials, {
+                playlistId: filter.playlistId,
+                songId: newSongIds
+            });
+            setRefreshKey(k => k + 1); // Trigger a refetch
+        } catch (err) {
+            setError(err.message || 'Failed to delete song.');
+        }
+    };
+    
+    const handleMoveSong = async (index, direction) => {
+        if (!isPlaylistView) return;
+
+        const newSongs = [...songs];
+        const [movedSong] = newSongs.splice(index, 1);
+        const newIndex = direction === 'up' ? index - 1 : index + 1;
+
+        if (newIndex < 0 || newIndex > newSongs.length) return;
+
+        newSongs.splice(newIndex, 0, movedSong);
+        const newSongIds = newSongs.map(s => s.id);
+
+        const originalSongs = songs;
+        setSongs(newSongs); // Optimistic update
+
+        try {
+            await subsonicFetch('updatePlaylist.view', credentials, {
+                playlistId: filter.playlistId,
+                songId: newSongIds
+            });
+        } catch (err) {
+            setError(err.message || 'Failed to move song.');
+            setSongs(originalSongs); // Revert on failure
+        }
+    };
+
+
     return (
         <div>
+            {error && <p className="text-red-500 mb-4 p-3 bg-red-900/50 rounded">{error}</p>}
             <div className="mb-4">
                 <input
                     type="text"
@@ -190,11 +240,11 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                 <th className="px-4 py-3 hidden md:table-cell">Album</th>
                                 <th className="px-4 py-3 hidden xl:table-cell text-center">Plays</th>
                                 <th className="px-4 py-3 hidden lg:table-cell">Last Played</th>
-                                <th className="px-4 py-3 w-32 text-right">Actions</th>
+                                <th className="px-4 py-3 w-48 text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {songs.map(song => {
+                            {songs.map((song, index) => {
                                 const isPlaying = currentSong && currentSong.id === song.id;
                                 const isInQueue = playQueue.some(s => s.id === song.id);
                                 return (
@@ -218,6 +268,22 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                         <td className="px-4 py-4 hidden lg:table-cell">{formatDate(song.lastPlayed)}</td>
                                         <td className="px-4 py-4">
                                             <div className="flex items-center justify-end space-x-2">
+                                                 {isPlaylistView && (
+                                                    <>
+                                                        <div className="flex flex-col -my-1">
+                                                            <button onClick={() => handleMoveSong(index, 'up')} disabled={index === 0} className="p-1 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed" title="Move up">
+                                                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd"></path></svg>
+                                                            </button>
+                                                            <button onClick={() => handleMoveSong(index, 'down')} disabled={index === songs.length - 1} className="p-1 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed" title="Move down">
+                                                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"></path></svg>
+                                                            </button>
+                                                        </div>
+                                                        <button onClick={() => handleDeleteSong(song.id)} title="Remove from playlist" className="p-1 text-gray-400 hover:text-red-500">
+                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                                        </button>
+                                                        <div className="border-l border-gray-600 h-6 mx-1"></div>
+                                                    </>
+                                                )}
                                                 <button 
                                                     onClick={() => onInstantMix(song)} 
                                                     title="Instant Mix" 
@@ -402,4 +468,3 @@ export function Artists({ credentials, onNavigate }) {
         </div>
     );
 }
-
