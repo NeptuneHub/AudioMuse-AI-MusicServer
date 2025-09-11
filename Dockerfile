@@ -88,7 +88,7 @@ RUN echo '[supervisord]' > /etc/supervisor/conf.d/supervisord.conf && \
     echo 'stderr_logfile_maxbytes=0' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo '' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo '[program:postgres]' >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo 'command=/usr/lib/postgresql/14/bin/postgres -D /var/lib/postgresql/data' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'command=/usr/lib/postgresql/14/bin/postgres -D /config/postgresql/data' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'autostart=true' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'autorestart=true' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'user=postgres' >> /etc/supervisor/conf.d/supervisord.conf && \
@@ -107,7 +107,8 @@ RUN echo '[supervisord]' > /etc/supervisor/conf.d/supervisord.conf && \
     echo 'stderr_logfile=/dev/stderr' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'stderr_logfile_maxbytes=0' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'environment=' >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo '    GIN_MODE="release"' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo '    GIN_MODE="release",' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo '    DATABASE_PATH="/config/music.db"' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo '' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo '[program:python-flask-core]' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'command=python3 /app/audiomuse-core/app.py' >> /etc/supervisor/conf.d/supervisord.conf && \
@@ -147,7 +148,7 @@ RUN echo '[supervisord]' > /etc/supervisor/conf.d/supervisord.conf && \
 # --- Embedded Entrypoint Script ---
 RUN echo '#!/bin/bash' > /entrypoint.sh && \
     echo 'set -e' >> /entrypoint.sh && \
-    echo 'PGDATA_DIR="/var/lib/postgresql/data"' >> /entrypoint.sh && \
+    echo 'PGDATA_DIR="/config/postgresql/data"' >> /entrypoint.sh && \
     echo 'if [ ! -d "$PGDATA_DIR" ] || [ -z "$(ls -A "$PGDATA_DIR")" ]; then' >> /entrypoint.sh && \
     echo '    echo "PostgreSQL data directory not found or empty. Initializing database..."' >> /entrypoint.sh && \
     echo '    su postgres -c "/usr/lib/postgresql/14/bin/initdb -D \"$PGDATA_DIR\" --username=postgres"' >> /entrypoint.sh && \
@@ -163,8 +164,8 @@ RUN echo '#!/bin/bash' > /entrypoint.sh && \
 RUN chmod +x /entrypoint.sh
 
 # Create directories and copy application code
-RUN mkdir -p /var/run/supervisord /var/log/supervisor /var/lib/postgresql/data /run/postgresql /app/audiomuse-server
-RUN chown -R postgres:postgres /var/lib/postgresql/data /run/postgresql /var/log/supervisor
+RUN mkdir -p /var/run/supervisord /var/log/supervisor /config/postgresql/data /run/postgresql /app/audiomuse-server
+RUN chown -R postgres:postgres /config/postgresql/data /run/postgresql /var/log/supervisor
 WORKDIR /app
 COPY --from=python-builder /install/ /usr/
 COPY --from=source-fetcher /src/AudioMuse-AI /app/audiomuse-core
@@ -172,10 +173,11 @@ COPY --from=models /app/model/ /app/audiomuse-core/model/
 COPY --from=backend-builder /AudioMuse-AI-MusicServer/music-server-backend/music-server /app/audiomuse-server/music-server
 COPY --from=frontend-builder /AudioMuse-AI-MusicServer/music-server-frontend /app/audiomuse-server/music-server-frontend
 
+# Declare volumes for persistent data
+VOLUME ["/config"]
+
 ENV PYTHONPATH=/usr/local/lib/python3/dist-packages:/app/audiomuse-core
 EXPOSE 3000 8080 8000
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
-
-

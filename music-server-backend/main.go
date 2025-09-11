@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"os"
 	"sync/atomic"
+	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -36,9 +38,26 @@ func loggingMiddleware() gin.HandlerFunc {
 	}
 }
 
+// getEnv gets an environment variable or returns a default value.
+func getEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
+}
+
 func main() {
 	var err error
-	db, err = sql.Open("sqlite3", "./music.db?_journal_mode=WAL")
+	// Read database path from environment variable.
+	// If DATABASE_PATH is not set, it defaults to ../config/music.db as requested.
+	defaultDbPath := filepath.Join("..", "config", "music.db")
+	dbPath := getEnv("DATABASE_PATH", defaultDbPath)
+
+	// Ensure the directory exists
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		log.Fatalf("Failed to create database directory '%s': %v", filepath.Dir(dbPath), err)
+	}
+	db, err = sql.Open("sqlite3", dbPath + "?_journal_mode=WAL")
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
@@ -129,6 +148,7 @@ func adminOnly() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
 
 func initDB() {
 	// User table
@@ -276,4 +296,3 @@ func startScheduler() {
 		log.Println("Scheduled library scan is disabled.")
 	}
 }
-

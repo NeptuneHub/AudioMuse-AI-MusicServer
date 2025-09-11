@@ -88,9 +88,9 @@ web_modules/
 .env*.local
 
 #database
-music-server-backend/music.db
-music-server-backend/music.db-shm
-music-server-backend/music.db-wal
+config/music.db
+config/music.db-shm
+config/music.db-wal
 music-server-backend/music-server
 #go
 go.sum

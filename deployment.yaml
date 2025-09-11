@@ -5,6 +5,19 @@ metadata:
 
 ---
 
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: audiomuse-config-pvc
+  namespace: audiomuse-all-in-one
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi # Adjust size as needed for your databases and config
+---
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,6 +42,13 @@ spec:
         - containerPort: 3000
         - containerPort: 8080
         - containerPort: 8000
+        volumeMounts:
+        - name: config-storage
+          mountPath: /config
+      volumes:
+      - name: config-storage
+        persistentVolumeClaim:
+          claimName: audiomuse-config-pvc
 
 ---
 

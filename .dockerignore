@@ -69,6 +69,7 @@ node_modules/
 *.tgz
 
 # Local database file
-music-server-backend/music.db
-music-server-backend/music.db-shm
-music-server-backend/music.db-wal
+config/music.db
+config/music.db-shm
+config/music.db-wal
+config/music-server
