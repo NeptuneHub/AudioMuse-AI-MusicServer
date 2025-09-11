@@ -1,68 +1,67 @@
-# STAGE 1: Use the pre-built AudioMuse-AI image as our foundation.
-# This image already contains the Python core, dependencies, and ML models.
-FROM ghcr.io/neptunehub/audiomuse-ai:latest AS audiomuse-base
+# STAGE 1: Fetch all source code for a more robust build
+FROM ubuntu:22.04 AS source-fetcher
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+# Only clone the Music Server, as the AI Core comes from the base image
+RUN git clone https://github.com/NeptuneHub/AudioMuse-AI-MusicServer.git
 
-# STAGE 2: Build the Go Backend for the Music Server
+# STAGE 2: Build Go Backend for Music Server
 FROM golang:1.24-bullseye AS backend-builder
 WORKDIR /src
-# Clone only the music server repository
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-RUN git clone https://github.com/NeptuneHub/AudioMuse-AI-MusicServer.git
-WORKDIR /src/AudioMuse-AI-MusicServer/music-server-backend
-# Initialize the Go module before tidying dependencies
+COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer .
+WORKDIR /src/music-server-backend
 RUN go mod init music-server-backend
 RUN go mod tidy
-# Build the server executable
-RUN CGO_ENABLED=0 go build -o music-server .
+# Build with CGo enabled so go-sqlite3 works correctly.
+RUN go build -o music-server .
 
-# STAGE 3: Prepare the React Frontend
-FROM node:20-alpine AS frontend-preparer
+# STAGE 3: Install React Frontend Dependencies
+FROM node:20-alpine AS frontend-builder
 WORKDIR /src
-COPY --from=backend-builder /src/AudioMuse-AI-MusicServer /AudioMuse-AI-MusicServer
-WORKDIR /AudioMuse-AI-MusicServer/music-server-frontend
-# Only install dependencies. The dev server will build in memory.
+COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer .
+WORKDIR /src/music-server-frontend
+# Only install dependencies, do not build
 RUN npm install
 
-# STAGE 4: Final Image - Add services to the base image
-FROM audiomuse-base
+# STAGE 4: Final Assembled Image
+FROM ghcr.io/neptunehub/audiomuse-ai:latest
 
-# Set environment variables
-ENV LANG=C.UTF-8 \
-    PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Install remaining services: Postgres, Redis, Supervisor, and Node.js
-# The base image already has Python.
+# Install runtime dependencies for the Music Server (Postgres, Node.js for dev server)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql redis-server supervisor curl \
     && rm -rf /var/lib/apt/lists/*
+# Install Node.js and npm for the React dev server
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+RUN apt-get install -y nodejs
 
-# Install Node.js for the React dev server
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs
+# Re-organize the filesystem from the base image.
+# The base image has AI code in /app, we move it to /app/audiomuse-core
+# to make space for the other components.
+RUN cd / && mv app audiomuse-core && mkdir app && mv audiomuse-core app/
 
-# --- Supervisor Configuration ---
-# This is largely the same, but simplified as we don't need to configure Python paths
+# --- Copy Configurations and Scripts ---
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
-# --- Entrypoint for DB Initialization ---
-# This script initializes the PostgreSQL database on the first run
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Create directories and copy application code from our build stages
+# --- Copy Application Code ---
 WORKDIR /app
-# The audiomuse-core is already in the base image at /app/audiomuse-core
-# We just need to add the music server components
+# The audiomuse-core directory is now in /app from the step above.
 RUN mkdir -p /app/audiomuse-server
-COPY --from=backend-builder /src/AudioMuse-AI-MusicServer/music-server-backend/music-server /app/audiomuse-server/music-server
-COPY --from=frontend-preparer /AudioMuse-AI-MusicServer/music-server-frontend /app/audiomuse-server/music-server-frontend
 
-# Expose the ports for the different services
+# Copy the built Go backend
+COPY --from=backend-builder /src/music-server-backend/music-server /app/audiomuse-server/music-server
+# Copy the React frontend with its node_modules
+COPY --from=frontend-builder /src/music-server-frontend /app/audiomuse-server/music-server-frontend
+
+# Set up directories for supervisor and postgres
+RUN mkdir -p /var/run/supervisord /var/log/supervisor /run/postgresql && \
+    chown -R postgres:postgres /run/postgresql
+
 EXPOSE 3000 8080 8000
 
-# Set the entrypoint and default command
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
-
 
