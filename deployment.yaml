@@ -8,7 +8,7 @@ metadata:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: audiomuse-config-pvc
+  name: audiomuse-ai-config-pvc
   namespace: audiomuse-all-in-one
 spec:
   accessModes:
@@ -49,10 +49,25 @@ spec:
         volumeMounts:
         - name: config-storage
           mountPath: /config
+        - name: media-usb
+          mountPath: /media-usb
+        - name: nfs1
+          mountPath: /media-NFS1
+        - name: nfs2
+          mountPath: /media-NFS2
       volumes:
       - name: config-storage
         persistentVolumeClaim:
-          claimName: audiomuse-config-pvc
+          claimName: audiomuse-ai-config-pvc
+      - name: media-usb
+        persistentVolumeClaim:
+          claimName: servarr-pvc-usb
+      - name: nfs1
+        persistentVolumeClaim:
+          claimName: nfs1-pvc
+      - name: nfs2
+        persistentVolumeClaim:
+          claimName: nfs2-pvc
 
 ---
 
@@ -79,3 +94,4 @@ spec:
       protocol: TCP
       port: 8000
       targetPort: 8000
+
