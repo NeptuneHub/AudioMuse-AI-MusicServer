@@ -16,7 +16,7 @@ spec:
   storageClassName: local-path
   resources:
     requests:
-      storage: 5Gi # Adjust size as needed for your databases and config
+      storage: 5Gi
 ---
 
 apiVersion: apps/v1
@@ -34,9 +34,12 @@ spec:
       labels:
         app: audiomuse-all-in-one
     spec:
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
       containers:
       - name: audiomuse-all-in-one
-        # IMPORTANT: Replace this with the full path to your image in your local registry
         image: 192.168.3.99:5000/audiomuse-ai-server:local
         imagePullPolicy: Always
         ports:
