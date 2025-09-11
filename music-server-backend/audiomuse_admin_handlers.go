@@ -13,13 +13,20 @@ import (
 
 // getAudioMuseURL retrieves the configured URL for the AI core service.
 func getAudioMuseURL() (string, error) {
+	// Prioritize environment variable for containerized deployments
+	if coreURL, ok := os.LookupEnv("AUDIOMUSE_AI_CORE_URL"); ok {
+		log.Printf("DEBUG: Using AudioMuse AI Core URL from environment variable: %s", coreURL)
+		return coreURL, nil
+	}
+
+	// Fallback to database for legacy or non-containerized setups
 	var coreURL string
 	err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL)
 	if err != nil {
 		log.Printf("ERROR: Could not retrieve 'audiomuse_ai_core_url' from database: %v", err)
 		return "", fmt.Errorf("AudioMuse-AI Core URL not configured")
 	}
-	log.Printf("DEBUG: Retrieved AudioMuse AI Core URL from DB: %s", coreURL)
+	log.Printf("DEBUG: Using AudioMuse AI Core URL from database: %s", coreURL)
 	return coreURL, nil
 }
 
@@ -106,4 +113,3 @@ func subsonicStartClusteringAnalysis(c *gin.Context) {
 	}
 	proxyToAudioMuse(c, "POST", "/api/clustering/start")
 }
-

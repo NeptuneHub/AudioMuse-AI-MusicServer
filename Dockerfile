@@ -76,6 +76,7 @@ RUN apt-get install -y nodejs
 RUN echo '[supervisord]' > /etc/supervisor/conf.d/supervisord.conf && \
     echo 'nodaemon=true' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'user=root' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'environment=GIN_MODE="release",DATABASE_PATH="/config/music.db",AUDIOMUSE_AI_CORE_URL="http://127.0.0.1:8000"' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo '' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo '[program:redis]' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'command=/usr/bin/redis-server --loglevel warning' >> /etc/supervisor/conf.d/supervisord.conf && \
@@ -106,8 +107,6 @@ RUN echo '[supervisord]' > /etc/supervisor/conf.d/supervisord.conf && \
     echo 'stdout_logfile_maxbytes=0' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'stderr_logfile=/dev/stderr' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'stderr_logfile_maxbytes=0' >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo 'environment=' >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo '    GIN_MODE="release",DATABASE_PATH="/config/music.db"' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo '' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo '[program:python-flask-core]' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'command=python3 /app/audiomuse-core/app.py' >> /etc/supervisor/conf.d/supervisord.conf && \
