@@ -107,8 +107,7 @@ RUN echo '[supervisord]' > /etc/supervisor/conf.d/supervisord.conf && \
     echo 'stderr_logfile=/dev/stderr' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'stderr_logfile_maxbytes=0' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'environment=' >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo '    GIN_MODE="release",' >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo '    DATABASE_PATH="/config/music.db"' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo '    GIN_MODE="release",DATABASE_PATH="/config/music.db"' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo '' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo '[program:python-flask-core]' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'command=python3 /app/audiomuse-core/app.py' >> /etc/supervisor/conf.d/supervisord.conf && \
