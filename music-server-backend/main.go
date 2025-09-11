@@ -6,8 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sync/atomic"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -49,15 +49,16 @@ func getEnv(key, fallback string) string {
 func main() {
 	var err error
 	// Read database path from environment variable.
-	// If DATABASE_PATH is not set, it defaults to ../config/music.db as requested.
-	defaultDbPath := filepath.Join("..", "config", "music.db")
+	// If DATABASE_PATH is not set, it defaults to the absolute path /config/music.db
+	// This ensures it writes to the persistent volume.
+	defaultDbPath := "/config/music.db"
 	dbPath := getEnv("DATABASE_PATH", defaultDbPath)
 
 	// Ensure the directory exists
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		log.Fatalf("Failed to create database directory '%s': %v", filepath.Dir(dbPath), err)
 	}
-	db, err = sql.Open("sqlite3", dbPath + "?_journal_mode=WAL")
+	db, err = sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
