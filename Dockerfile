@@ -148,6 +148,11 @@ RUN echo '[supervisord]' > /etc/supervisor/conf.d/supervisord.conf && \
 RUN echo '#!/bin/bash' > /entrypoint.sh && \
     echo 'set -e' >> /entrypoint.sh && \
     echo 'PGDATA_DIR="/config/postgresql/data"' >> /entrypoint.sh && \
+    echo '' >> /entrypoint.sh && \
+    echo '# Ensure the PostgreSQL data directory exists with correct permissions at runtime.' >> /entrypoint.sh && \
+    echo '# This is critical for when an empty volume is mounted to /config.' >> /entrypoint.sh && \
+    echo 'mkdir -p "$PGDATA_DIR"' >> /entrypoint.sh && \
+    echo 'chown -R postgres:postgres "$PGDATA_DIR"' >> /entrypoint.sh && \
     echo 'if [ ! -d "$PGDATA_DIR" ] || [ -z "$(ls -A "$PGDATA_DIR")" ]; then' >> /entrypoint.sh && \
     echo '    echo "PostgreSQL data directory not found or empty. Initializing database..."' >> /entrypoint.sh && \
     echo '    su postgres -c "/usr/lib/postgresql/14/bin/initdb -D \"$PGDATA_DIR\" --username=postgres"' >> /entrypoint.sh && \
