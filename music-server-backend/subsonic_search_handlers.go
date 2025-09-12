@@ -4,7 +4,6 @@ package main
 import (
 	"database/sql"
 	"log"
-	"net/http"
 	"strconv"
 	"strings"
 
@@ -20,11 +19,8 @@ type SubsonicSearchResult2 struct {
 
 // subsonicSearch2 handles the search2 and search3 API endpoints.
 func subsonicSearch2(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
-
+	_ = c.MustGet("user") // Auth is handled by middleware
+	
 	query := c.Query("query")
 	if query == "" {
 		// Return empty result instead of error for empty query
@@ -134,11 +130,6 @@ func subsonicSearch2(c *gin.Context) {
 		}
 	}
 
-	response := newSubsonicResponse(nil)
-	c.JSON(http.StatusOK, gin.H{"subsonic-response": gin.H{
-		"status":        response.Status,
-		"version":       response.Version,
-		"searchResult2": result,
-	}})
+	response := newSubsonicResponse(&result)
+	subsonicRespond(c, response)
 }
-

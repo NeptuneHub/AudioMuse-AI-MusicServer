@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -76,20 +76,14 @@ func proxyToAudioMuse(c *gin.Context, method, path string) {
 
 // subsonicStartSonicAnalysis handles the Subsonic API request to start an analysis.
 func subsonicStartSonicAnalysis(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Authentication failed."))
-		return
-	}
+	_ = c.MustGet("user") // Auth is handled by middleware
 	proxyToAudioMuse(c, "POST", "/api/analysis/start")
 }
 
 // subsonicCancelSonicAnalysis handles the Subsonic API request to cancel an analysis.
 func subsonicCancelSonicAnalysis(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Authentication failed."))
-		return
-	}
-	taskID := c.Query("taskId") // Task ID from query parameter
+	_ = c.MustGet("user") // Auth is handled by middleware
+	taskID := c.Query("taskId")  // Task ID from query parameter
 	if taskID == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Parameter 'taskId' is required."))
 		return
@@ -99,18 +93,12 @@ func subsonicCancelSonicAnalysis(c *gin.Context) {
 
 // subsonicGetSonicAnalysisStatus handles the Subsonic API request to get analysis status.
 func subsonicGetSonicAnalysisStatus(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Authentication failed."))
-		return
-	}
+	_ = c.MustGet("user") // Auth is handled by middleware
 	proxyToAudioMuse(c, "GET", "/api/last_task")
 }
 
 // subsonicStartClusteringAnalysis handles the Subsonic API request to start clustering.
 func subsonicStartClusteringAnalysis(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Authentication failed."))
-		return
-	}
+	_ = c.MustGet("user") // Auth is handled by middleware
 	proxyToAudioMuse(c, "POST", "/api/clustering/start")
 }

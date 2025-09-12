@@ -61,8 +61,8 @@ func getSongsByIDs(ids []string) ([]SubsonicSong, error) {
 }
 
 func subsonicGetSimilarSongs(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok || !user.IsAdmin {
+	user := c.MustGet("user").(User)
+	if !user.IsAdmin {
 		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
 		return
 	}
@@ -131,8 +131,8 @@ func subsonicGetSimilarSongs(c *gin.Context) {
 }
 
 func subsonicGetSongPath(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok || !user.IsAdmin {
+	user := c.MustGet("user").(User)
+	if !user.IsAdmin {
 		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
 		return
 	}
@@ -202,8 +202,8 @@ func subsonicGetSongPath(c *gin.Context) {
 }
 
 func subsonicGetSonicFingerprint(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok || !user.IsAdmin {
+	user := c.MustGet("user").(User)
+	if !user.IsAdmin {
 		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
 		return
 	}
@@ -263,4 +263,3 @@ func subsonicGetSonicFingerprint(c *gin.Context) {
 	})
 	subsonicRespond(c, response)
 }
-

@@ -1,33 +1,51 @@
 #!/bin/bash
 set -e
 
+# --- PostgreSQL Initialization ---
 CONFIG_DIR="/config/postgres-data"
-
-# A robust way to check if the database is initialized is to look for a key file.
 if [ ! -f "$CONFIG_DIR/PG_VERSION" ]; then
     echo "PostgreSQL data directory not found. Initializing new database..."
-    
-    # Ensure the target directory exists and is owned by the postgres user.
     mkdir -p "$CONFIG_DIR"
     chown -R postgres:postgres "$CONFIG_DIR"
-    
-    # Run initdb as the postgres user, creating the database directly in our persistent volume.
-    # The --no-locale flag avoids potential locale errors inside the container.
     su postgres -c "/usr/lib/postgresql/14/bin/initdb --username=postgres --no-locale -D '$CONFIG_DIR'"
-    
-    # Temporarily start the server in the background to configure it.
     su postgres -c "/usr/lib/postgresql/14/bin/pg_ctl -D '$CONFIG_DIR' -w start"
-    
-    # Create the application user and database.
     su postgres -c "psql --command \"CREATE USER audiomuse WITH SUPERUSER PASSWORD 'audiomusepassword';\""
     su postgres -c "psql --command \"CREATE DATABASE audiomusedb OWNER audiomuse;\""
-    
-    # Stop the temporary server. Supervisor will manage it from now on.
     su postgres -c "/usr/lib/postgresql/14/bin/pg_ctl -D '$CONFIG_DIR' -w stop"
-    
     echo "Database initialization complete."
 fi
 
-# Execute the main command passed to the container (CMD in Dockerfile), which is supervisord.
-exec "$@"
+# --- Service Management and API Token Fetching ---
+# Start all services managed by supervisord in the background
+/usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf &
 
+echo "Waiting for music server to become available..."
+until curl -s -f -o /dev/null "http://localhost:8080/rest/ping.view"; do
+    echo "Music server is unavailable - sleeping..."
+    sleep 2
+done
+echo "Music server is up."
+
+echo "Requesting API token for admin user..."
+# The JSON key 'subsonic-response' contains a hyphen and must be quoted for jq.
+API_TOKEN=$(curl -s "http://localhost:8080/rest/getApiKey.view?u=admin&p=admin&f=json" | jq -r '."subsonic-response".apiKey.key')
+
+if [ -z "$API_TOKEN" ] || [ "$API_TOKEN" == "null" ]; then
+    echo "ERROR: Failed to retrieve API token. AI core may not function correctly."
+else
+    echo "Successfully retrieved API token. Exporting variables."
+    # These env vars are used by the python-flask-core process
+    export NAVIDROME_PASSWORD="$API_TOKEN"
+    export NAVIDROME_USER="admin"
+    export MEDIASERVER_TYPE="navidrome"
+    export NAVIDROME_URL="http://localhost:8080"
+
+    echo "Restarting AudioMuse-AI Core service..."
+    # The program name in supervisord.conf is 'python-flask-core'
+    supervisorctl restart python-flask-core
+fi
+
+# The 'wait' command is crucial. It tells the script to wait for all background
+# processes (like supervisord) to exit. Since supervisord is configured to run
+# forever (nodaemon=true), this keeps the container alive.
+wait

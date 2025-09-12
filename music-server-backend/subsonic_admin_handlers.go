@@ -12,8 +12,8 @@ import (
 )
 
 func subsonicStartScan(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok || !user.IsAdmin {
+	user := c.MustGet("user").(User)
+	if !user.IsAdmin {
 		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
@@ -55,10 +55,7 @@ func subsonicStartScan(c *gin.Context) {
 }
 
 func subsonicGetScanStatus(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
+	_ = c.MustGet("user") // Auth is handled by middleware
 	var isScanning bool
 	var songsAdded int64
 	err := db.QueryRow("SELECT is_scanning, songs_added FROM scan_status WHERE id = 1").Scan(&isScanning, &songsAdded)
@@ -70,10 +67,8 @@ func subsonicGetScanStatus(c *gin.Context) {
 }
 
 func subsonicGetLibraryPaths(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
-		return
-	}
+	user := c.MustGet("user").(User)
+	_ = user // Auth is handled by middleware
 	rows, err := db.Query("SELECT id, path, song_count, last_scan_ended FROM library_paths ORDER BY path")
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "DB error fetching library paths."))
@@ -97,10 +92,8 @@ func subsonicGetLibraryPaths(c *gin.Context) {
 }
 
 func subsonicAddLibraryPath(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
-		return
-	}
+	user := c.MustGet("user").(User)
+	_ = user // Auth is handled by middleware
 	var req struct {
 		Path string `json:"path"`
 	}
@@ -123,10 +116,8 @@ func subsonicAddLibraryPath(c *gin.Context) {
 }
 
 func subsonicUpdateLibraryPath(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
-		return
-	}
+	user := c.MustGet("user").(User)
+	_ = user // Auth is handled by middleware
 	var req struct {
 		ID   int    `json:"id"`
 		Path string `json:"path"`
@@ -144,10 +135,8 @@ func subsonicUpdateLibraryPath(c *gin.Context) {
 }
 
 func subsonicDeleteLibraryPath(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
-		return
-	}
+	user := c.MustGet("user").(User)
+	_ = user // Auth is handled by middleware
 	var req struct {
 		ID int `json:"id"`
 	}
@@ -164,8 +153,8 @@ func subsonicDeleteLibraryPath(c *gin.Context) {
 }
 
 func subsonicGetConfiguration(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok || !user.IsAdmin {
+	user := c.MustGet("user").(User)
+	if !user.IsAdmin {
 		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
@@ -188,8 +177,8 @@ func subsonicGetConfiguration(c *gin.Context) {
 }
 
 func subsonicSetConfiguration(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok || !user.IsAdmin {
+	user := c.MustGet("user").(User)
+	if !user.IsAdmin {
 		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
@@ -219,8 +208,8 @@ func subsonicSetConfiguration(c *gin.Context) {
 }
 
 func subsonicGetUsers(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok || !user.IsAdmin {
+	user := c.MustGet("user").(User)
+	if !user.IsAdmin {
 		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
@@ -243,8 +232,8 @@ func subsonicGetUsers(c *gin.Context) {
 }
 
 func subsonicCreateUser(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok || !user.IsAdmin {
+	user := c.MustGet("user").(User)
+	if !user.IsAdmin {
 		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
@@ -270,8 +259,8 @@ func subsonicCreateUser(c *gin.Context) {
 }
 
 func subsonicUpdateUser(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok || !user.IsAdmin {
+	user := c.MustGet("user").(User)
+	if !user.IsAdmin {
 		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
@@ -298,8 +287,8 @@ func subsonicUpdateUser(c *gin.Context) {
 }
 
 func subsonicDeleteUser(c *gin.Context) {
-	requestingUser, ok := subsonicAuthenticate(c)
-	if !ok || !requestingUser.IsAdmin {
+	requestingUser := c.MustGet("user").(User)
+	if !requestingUser.IsAdmin {
 		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required."))
 		return
 	}
@@ -326,7 +315,7 @@ func subsonicDeleteUser(c *gin.Context) {
 }
 
 func subsonicChangePassword(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
+	user, ok := c.Get("user")
 	if !ok {
 		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
 		return
@@ -341,11 +330,10 @@ func subsonicChangePassword(c *gin.Context) {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to hash password."))
 		return
 	}
-	_, err = db.Exec("UPDATE users SET password_hash = ?, password_plain = ? WHERE id = ?", hashedPassword, newPassword, user.ID)
+	_, err = db.Exec("UPDATE users SET password_hash = ?, password_plain = ? WHERE id = ?", hashedPassword, newPassword, user.(User).ID)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to update password."))
 		return
 	}
 	subsonicRespond(c, newSubsonicResponse(nil))
 }
-

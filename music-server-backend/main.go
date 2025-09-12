@@ -48,13 +48,9 @@ func getEnv(key, fallback string) string {
 
 func main() {
 	var err error
-	// Read database path from environment variable.
-	// If DATABASE_PATH is not set, it defaults to the absolute path /config/music.db
-	// This ensures it writes to the persistent volume.
 	defaultDbPath := "/config/music.db"
 	dbPath := getEnv("DATABASE_PATH", defaultDbPath)
 
-	// Ensure the directory exists
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		log.Fatalf("Failed to create database directory '%s': %v", filepath.Dir(dbPath), err)
 	}
@@ -75,51 +71,59 @@ func main() {
 	r.Use(gin.Recovery())
 	r.Use(loggingMiddleware())
 
-	// Subsonic API routes
-	rest := r.Group("/rest")
+	// Public Subsonic routes (no auth required)
+	r.GET("/rest/ping.view", subsonicPing)
+	r.GET("/rest/getOpenSubsonicExtensions.view", subsonicGetOpenSubsonicExtensions)
+
+	// Authenticated Subsonic API routes
+	subsonic := r.Group("/rest")
+	subsonic.Use(SubsonicAuthMiddleware())
 	{
-		rest.GET("/ping.view", subsonicPing)
-		rest.GET("/getLicense.view", subsonicGetLicense)
-		rest.GET("/stream.view", subsonicStream)
-		rest.GET("/scrobble.view", subsonicScrobble)
-		rest.GET("/getArtists.view", subsonicGetArtists)
-		rest.GET("/getAlbumList2.view", subsonicGetAlbumList2)
-		rest.GET("/getPlaylists.view", subsonicGetPlaylists)
-		rest.GET("/getPlaylist.view", subsonicGetPlaylist)
-		rest.Any("/createPlaylist.view", subsonicCreatePlaylist)
-		rest.GET("/updatePlaylist.view", subsonicUpdatePlaylist)
-		rest.GET("/deletePlaylist.view", subsonicDeletePlaylist)
-		rest.GET("/getAlbum.view", subsonicGetAlbum)
-		rest.GET("/search2.view", subsonicSearch2)
-		rest.GET("/search3.view", subsonicSearch2)
-		rest.GET("/getRandomSongs.view", subsonicGetRandomSongs)
-		rest.GET("/getCoverArt.view", subsonicGetCoverArt)
-		rest.GET("/tokenInfo.view", subsonicTokenInfo)
-		rest.Any("/startScan.view", subsonicStartScan)
-		rest.GET("/getScanStatus.view", subsonicGetScanStatus)
-		rest.GET("/getLibraryPaths.view", subsonicGetLibraryPaths)
-		rest.POST("/addLibraryPath.view", subsonicAddLibraryPath)
-		rest.POST("/updateLibraryPath.view", subsonicUpdateLibraryPath)
-		rest.POST("/deleteLibraryPath.view", subsonicDeleteLibraryPath)
-		rest.GET("/getUsers.view", subsonicGetUsers)
-		rest.GET("/createUser.view", subsonicCreateUser)
-		rest.GET("/updateUser.view", subsonicUpdateUser)
-		rest.GET("/deleteUser.view", subsonicDeleteUser)
-		rest.GET("/changePassword.view", subsonicChangePassword)
-		rest.GET("/getConfiguration.view", subsonicGetConfiguration)
-		rest.GET("/setConfiguration.view", subsonicSetConfiguration)
-		rest.GET("/getSimilarSongs.view", subsonicGetSimilarSongs)
-		rest.GET("/getSongPath.view", subsonicGetSongPath)
-		rest.GET("/getSonicFingerprint.view", subsonicGetSonicFingerprint)
+		subsonic.GET("/getLicense.view", subsonicGetLicense)
+		subsonic.GET("/stream.view", subsonicStream)
+		subsonic.GET("/scrobble.view", subsonicScrobble)
+		subsonic.GET("/getArtists.view", subsonicGetArtists)
+		subsonic.GET("/getAlbumList2.view", subsonicGetAlbumList2)
+		subsonic.GET("/getPlaylists.view", subsonicGetPlaylists)
+		subsonic.GET("/getPlaylist.view", subsonicGetPlaylist)
+		subsonic.Any("/createPlaylist.view", subsonicCreatePlaylist)
+		subsonic.GET("/updatePlaylist.view", subsonicUpdatePlaylist)
+		subsonic.GET("/deletePlaylist.view", subsonicDeletePlaylist)
+		subsonic.GET("/getAlbum.view", subsonicGetAlbum)
+		subsonic.GET("/search2.view", subsonicSearch2)
+		subsonic.GET("/search3.view", subsonicSearch2)
+		subsonic.GET("/getSong.view", subsonicGetSong)
+		subsonic.GET("/getRandomSongs.view", subsonicGetRandomSongs)
+		subsonic.GET("/getCoverArt.view", subsonicGetCoverArt)
+		subsonic.Any("/startScan.view", subsonicStartScan)
+		subsonic.GET("/getScanStatus.view", subsonicGetScanStatus)
+		subsonic.GET("/getLibraryPaths.view", subsonicGetLibraryPaths)
+		subsonic.POST("/addLibraryPath.view", subsonicAddLibraryPath)
+		subsonic.POST("/updateLibraryPath.view", subsonicUpdateLibraryPath)
+		subsonic.POST("/deleteLibraryPath.view", subsonicDeleteLibraryPath)
+		subsonic.GET("/getUsers.view", subsonicGetUsers)
+		subsonic.GET("/createUser.view", subsonicCreateUser)
+		subsonic.GET("/updateUser.view", subsonicUpdateUser)
+		subsonic.GET("/deleteUser.view", subsonicDeleteUser)
+		subsonic.GET("/changePassword.view", subsonicChangePassword)
+		subsonic.GET("/getConfiguration.view", subsonicGetConfiguration)
+		subsonic.GET("/setConfiguration.view", subsonicSetConfiguration)
+		subsonic.GET("/getSimilarSongs.view", subsonicGetSimilarSongs)
+		subsonic.GET("/getSongPath.view", subsonicGetSongPath)
+		subsonic.GET("/getSonicFingerprint.view", subsonicGetSonicFingerprint)
+
+		// API Key Management
+		subsonic.GET("/getApiKey.view", subsonicGetApiKey)
+		subsonic.POST("/revokeApiKey.view", subsonicRevokeApiKey)
 
 		// AudioMuse-AI Subsonic routes
-		rest.Any("/startSonicAnalysis.view", subsonicStartSonicAnalysis)
-		rest.GET("/getSonicAnalysisStatus.view", subsonicGetSonicAnalysisStatus)
-		rest.Any("/cancelSonicAnalysis.view", subsonicCancelSonicAnalysis)
-		rest.Any("/startSonicClustering.view", subsonicStartClusteringAnalysis)
-
+		subsonic.Any("/startSonicAnalysis.view", subsonicStartSonicAnalysis)
+		subsonic.GET("/getSonicAnalysisStatus.view", subsonicGetSonicAnalysisStatus)
+		subsonic.Any("/cancelSonicAnalysis.view", subsonicCancelSonicAnalysis)
+		subsonic.Any("/startSonicClustering.view", subsonicStartClusteringAnalysis)
 	}
 
+	// Separate JSON API for Web UI
 	v1 := r.Group("/api/v1")
 	{
 		userRoutes := v1.Group("/user")
@@ -150,19 +154,20 @@ func adminOnly() gin.HandlerFunc {
 	}
 }
 
-
 func initDB() {
-	// User table
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT UNIQUE NOT NULL,
 		password_hash TEXT NOT NULL,
 		password_plain TEXT NOT NULL,
-		is_admin BOOLEAN NOT NULL DEFAULT 0
+		is_admin BOOLEAN NOT NULL DEFAULT 0,
+		api_key TEXT UNIQUE
 	);`)
 	if err != nil {
-		log.Fatalf("Failed to create users table: %v", err)
+		log.Fatalf("Failed to create/update users table: %v", err)
 	}
+	// ... rest of initDB is unchanged
+	// ... (make sure to copy the rest of your initDB function here if it's not present)
 
 	// Scan status table
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS scan_status (

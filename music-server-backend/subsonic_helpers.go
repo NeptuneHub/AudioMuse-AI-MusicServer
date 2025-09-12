@@ -2,11 +2,8 @@
 package main
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"log"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,13 +32,12 @@ func newSubsonicErrorResponse(code int, message string) SubsonicResponse {
 func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 	httpStatus := http.StatusOK
 	if response.Status == "failed" {
-		// Default to a server error, then refine based on the code
 		httpStatus = http.StatusInternalServerError
 		if errBody, ok := response.Body.(*SubsonicError); ok {
 			switch errBody.Code {
 			case 10: // Missing parameter
 				httpStatus = http.StatusBadRequest
-			case 40: // Wrong username or password
+			case 40, 41, 42, 43, 44: // Auth errors
 				httpStatus = http.StatusUnauthorized
 			case 70: // Data not found
 				httpStatus = http.StatusNotFound
@@ -50,6 +46,7 @@ func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 	}
 
 	if c.Query("f") == "json" || c.Query("f") == "jsonp" {
+		// Simplified JSON response generation
 		inner := gin.H{
 			"status":  response.Status,
 			"version": response.Version,
@@ -65,36 +62,50 @@ func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 			inner["openSubsonic"] = response.OpenSubsonic
 		}
 
+		// Use a map to handle different body types dynamically
+		bodyMap := map[string]interface{}{}
 		switch body := response.Body.(type) {
 		case *SubsonicError:
 			inner["error"] = body
 		case *SubsonicLicense:
-			inner["license"] = body
+			bodyMap["license"] = body
 		case *SubsonicArtists:
-			inner["artists"] = body
+			bodyMap["artists"] = body
 		case *SubsonicAlbumList2:
-			inner["albumList2"] = body
+			bodyMap["albumList2"] = body
 		case *SubsonicPlaylists:
-			inner["playlists"] = body
+			bodyMap["playlists"] = body
 		case *SubsonicPlaylist:
-			inner["playlist"] = body
+			bodyMap["playlist"] = body
 		case *SubsonicDirectory:
-			inner["directory"] = body
+			bodyMap["directory"] = body
 		case *SubsonicAlbumWithSongs:
-			inner["album"] = body
-		case *SubsonicTokenInfo:
-			inner["tokenInfo"] = body
+			bodyMap["album"] = body
 		case *SubsonicScanStatus:
-			inner["scanStatus"] = body
+			bodyMap["scanStatus"] = body
 		case *SubsonicUsers:
-			inner["users"] = body
+			bodyMap["users"] = body
 		case *SubsonicConfigurations:
-			inner["configurations"] = body
+			bodyMap["configurations"] = body
 		case *SubsonicLibraryPaths:
-			inner["libraryPaths"] = body
+			bodyMap["libraryPaths"] = body
+		case *OpenSubsonicExtensions:
+			bodyMap["openSubsonicExtensions"] = body.Extensions // Directly embed the slice
+		case *ApiKeyResponse:
+			bodyMap["apiKey"] = body
+		case *SubsonicSongWrapper:
+			bodyMap["song"] = body.Song
+		case *SubsonicSearchResult2:
+			bodyMap["searchResult2"] = body
 		case nil:
+			// No body
 		default:
 			log.Printf("Warning: Unhandled Subsonic body type for JSON response: %T", body)
+		}
+
+		// Add non-error body content to the response
+		for key, val := range bodyMap {
+			inner[key] = val
 		}
 
 		finalResponse := gin.H{"subsonic-response": inner}
@@ -107,71 +118,3 @@ func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 		c.XML(httpStatus, response)
 	}
 }
-
-func subsonicAuthenticate(c *gin.Context) (User, bool) {
-	// First, check for JWT Bearer token for web UI integration.
-	authHeader := c.GetHeader("Authorization")
-	if strings.HasPrefix(authHeader, "Bearer ") {
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		claims, err := parseJWT(tokenString)
-		if err == nil {
-			user := User{ID: claims.UserID, Username: claims.Username, IsAdmin: claims.IsAdmin}
-			return user, true
-		}
-	}
-
-	// Fallback to standard Subsonic authentication methods.
-	username := c.Query("u")
-	password := c.Query("p")
-	token := c.Query("t")
-	salt := c.Query("s")
-
-	if password != "" {
-		// Handle Navidrome-style hex-encoded password: p=enc:....
-		if strings.HasPrefix(password, "enc:") {
-			hexEncodedPass := strings.TrimPrefix(password, "enc:")
-			decodedPassBytes, err := hex.DecodeString(hexEncodedPass)
-			if err != nil {
-				return User{}, false // Invalid hex encoding
-			}
-
-			var storedUser User
-			var storedPasswordPlain string
-			// We need to compare against the stored plaintext password.
-			row := db.QueryRow("SELECT id, username, password_plain, is_admin FROM users WHERE username = ?", username)
-			err = row.Scan(&storedUser.ID, &storedUser.Username, &storedPasswordPlain, &storedUser.IsAdmin)
-			if err != nil {
-				return User{}, false // User not found or DB error.
-			}
-			// Compare the decoded password with the stored plaintext password.
-			return storedUser, string(decodedPassBytes) == storedPasswordPlain
-		}
-
-		// Handle standard plaintext password: p=...
-		var storedUser User
-		var passwordHash string
-		row := db.QueryRow("SELECT id, username, password_hash, is_admin FROM users WHERE username = ?", username)
-		err := row.Scan(&storedUser.ID, &storedUser.Username, &passwordHash, &storedUser.IsAdmin)
-		if err != nil {
-			return User{}, false
-		}
-		return storedUser, checkPasswordHash(password, passwordHash)
-	}
-
-	if token != "" && salt != "" {
-		var storedUser User
-		var passwordPlain string
-		row := db.QueryRow("SELECT id, username, password_plain, is_admin FROM users WHERE username = ?", username)
-		err := row.Scan(&storedUser.ID, &storedUser.Username, &passwordPlain, &storedUser.IsAdmin)
-		if err != nil || passwordPlain == "" {
-			return User{}, false
-		}
-		hasher := md5.New()
-		hasher.Write([]byte(passwordPlain + salt))
-		expectedToken := hex.EncodeToString(hasher.Sum(nil))
-		return storedUser, token == expectedToken
-	}
-
-	return User{}, false
-}
-

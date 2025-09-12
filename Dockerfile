@@ -30,7 +30,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install runtime dependencies for the Music Server (Postgres, Node.js for dev server)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    postgresql redis-server supervisor curl \
+    postgresql redis-server supervisor curl jq \
     && rm -rf /var/lib/apt/lists/*
 # Install Node.js and npm for the React dev server
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -63,5 +63,4 @@ RUN mkdir -p /var/run/supervisord /var/log/supervisor /run/postgresql && \
 EXPOSE 3000 8080 8000
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
-
+CMD []

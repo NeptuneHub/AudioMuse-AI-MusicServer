@@ -11,12 +11,9 @@ import (
 )
 
 func subsonicGetPlaylists(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
-
+	user := c.MustGet("user").(User)
+	_ = user // Auth is handled by middleware
+	
 	query := `
 		SELECT p.id, p.name, COUNT(ps.song_id)
 		FROM playlists p
@@ -48,12 +45,9 @@ func subsonicGetPlaylists(c *gin.Context) {
 }
 
 func subsonicGetPlaylist(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
-
+	user := c.MustGet("user").(User)
+	_ = user // Auth is handled by middleware
+	
 	playlistID := c.Query("id")
 	if playlistID == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'id'"))
@@ -108,12 +102,9 @@ func subsonicGetPlaylist(c *gin.Context) {
 }
 
 func subsonicCreatePlaylist(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
-
+	user := c.MustGet("user").(User)
+	_ = user // Auth is handled by middleware
+	
 	playlistName := c.Query("name")
 	if playlistName == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'name'"))
@@ -173,12 +164,9 @@ func subsonicCreatePlaylist(c *gin.Context) {
 }
 
 func subsonicUpdatePlaylist(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
-
+	user := c.MustGet("user").(User)
+	_ = user // Auth is handled by middleware
+	
 	playlistID := c.Query("playlistId")
 	newName := c.Query("name")
 	songIdsToAdd := c.QueryArray("songIdToAdd")
@@ -311,12 +299,9 @@ func subsonicUpdatePlaylist(c *gin.Context) {
 }
 
 func subsonicDeletePlaylist(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
-
+	user := c.MustGet("user").(User)
+	_ = user // Auth is handled by middleware
+	
 	playlistID := c.Query("id")
 	if playlistID == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'id'"))
@@ -338,4 +323,3 @@ func subsonicDeletePlaylist(c *gin.Context) {
 
 	subsonicRespond(c, newSubsonicResponse(nil))
 }
-

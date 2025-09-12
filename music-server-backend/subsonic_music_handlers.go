@@ -24,11 +24,8 @@ import (
 // --- Subsonic Music Handlers ---
 
 func subsonicStream(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
-
+	_ = c.MustGet("user") // Auth is handled by middleware
+	
 	songID := c.Query("id")
 	var path string
 	err := db.QueryRow("SELECT path FROM songs WHERE id = ?", songID).Scan(&path)
@@ -59,11 +56,8 @@ func subsonicStream(c *gin.Context) {
 }
 
 func subsonicScrobble(c *gin.Context) {
-	user, ok := subsonicAuthenticate(c)
-	if !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
+	user := c.MustGet("user").(User)
+	_ = user // Auth is handled by middleware
 
 	songID := c.Query("id")
 	if songID == "" {
@@ -86,11 +80,8 @@ func subsonicScrobble(c *gin.Context) {
 }
 
 func subsonicGetArtists(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
-
+	_ = c.MustGet("user") // Auth is handled by middleware
+	
 	query := `
 		SELECT
 			s.artist,
@@ -149,11 +140,8 @@ func subsonicGetArtists(c *gin.Context) {
 }
 
 func subsonicGetAlbumList2(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
-
+	_ = c.MustGet("user") // Auth is handled by middleware
+	
 	rows, err := db.Query("SELECT album, artist, MIN(id) FROM songs WHERE album != '' GROUP BY album, artist ORDER BY artist, album")
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying albums."))
@@ -180,11 +168,8 @@ func subsonicGetAlbumList2(c *gin.Context) {
 }
 
 func subsonicGetAlbum(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
-		return
-	}
-
+	_ = c.MustGet("user") // Auth is handled by middleware
+	
 	albumSongId := c.Query("id")
 	if albumSongId == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'id'"))
@@ -233,12 +218,46 @@ func subsonicGetAlbum(c *gin.Context) {
 	subsonicRespond(c, newSubsonicResponse(responseBody))
 }
 
-func subsonicGetRandomSongs(c *gin.Context) {
-	if _, ok := subsonicAuthenticate(c); !ok {
-		subsonicRespond(c, newSubsonicErrorResponse(40, subsonicAuthErrorMsg))
+func subsonicGetSong(c *gin.Context) {
+	_ = c.MustGet("user") // Auth is handled by middleware
+
+	songID := c.Query("id")
+	if songID == "" {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'id'"))
 		return
 	}
 
+	var s SubsonicSong
+	var lastPlayed sql.NullString
+	var songId int
+
+	// Get the song details from the database
+	err := db.QueryRow(`
+		SELECT id, title, artist, album, play_count, last_played
+		FROM songs WHERE id = ?`, songID).Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))
+		} else {
+			log.Printf("Error querying for song in getSong: %v", err)
+			subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+		}
+		return
+	}
+
+	s.ID = strconv.Itoa(songId)
+	if lastPlayed.Valid {
+		s.LastPlayed = lastPlayed.String
+	}
+	s.CoverArt = s.ID // A song can serve as its own cover art reference
+
+	subsonicRespond(c, newSubsonicResponse(&SubsonicSongWrapper{Song: s}))
+}
+
+func subsonicGetRandomSongs(c *gin.Context) {
+	_ = c.MustGet("user") // Auth is handled by middleware
+	
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "10"))
 	if size > 500 {
 		size = 500
@@ -478,4 +497,3 @@ func proxyImage(c *gin.Context, imageUrl string) {
 		log.Printf("[PROXY] Error copying image stream to response: %v", err)
 	}
 }
-

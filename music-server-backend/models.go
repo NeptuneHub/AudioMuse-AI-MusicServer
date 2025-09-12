@@ -1,15 +1,19 @@
 // Suggested path: music-server-backend/models.go
 package main
 
-import "encoding/xml"
+import (
+	"database/sql"
+	"encoding/xml"
+)
 
 // --- Data Structures ---
 
 type User struct {
-	ID       int    `json:"id"`
-	Username string `json:"username"`
-	Password string `json:"password,omitempty"`
-	IsAdmin  bool   `json:"is_admin"`
+	ID       int            `json:"id"`
+	Username string         `json:"username"`
+	Password string         `json:"password,omitempty"`
+	IsAdmin  bool           `json:"is_admin"`
+	APIKey   sql.NullString `json:"-"` // Use sql.NullString for the nullable api_key field
 }
 
 type Song struct {
@@ -59,6 +63,7 @@ type SubsonicResponse struct {
 	Body          interface{}
 }
 
+// ... (Rest of the Subsonic structs are unchanged)
 type SubsonicError struct {
 	XMLName xml.Name `xml:"error" json:"-"`
 	Code    int      `xml:"code,attr" json:"code"`
@@ -147,11 +152,6 @@ type SubsonicPlaylist struct {
 	Duration  int      `xml:"duration,attr" json:"duration"`
 }
 
-type SubsonicTokenInfo struct {
-	XMLName  xml.Name `xml:"tokenInfo" json:"-"`
-	Username string   `xml:"username,attr" json:"username"`
-}
-
 type SubsonicScanStatus struct {
 	XMLName  xml.Name `xml:"scanStatus" json:"-"`
 	Scanning bool     `xml:"scanning,attr" json:"scanning"`
@@ -194,3 +194,24 @@ type SubsonicLibraryPath struct {
 	LastScanEnded string   `xml:"lastScanEnded,attr,omitempty" json:"lastScanEnded"`
 }
 
+// --- OpenSubsonic Extension Structs ---
+
+type OpenSubsonicExtension struct {
+	Name     string `json:"name" xml:"name,attr"`
+	Versions []int  `json:"versions" xml:"versions>version"`
+}
+
+type OpenSubsonicExtensions struct {
+	XMLName    xml.Name                `xml:"openSubsonicExtensions" json:"-"`
+	Extensions []OpenSubsonicExtension `xml:"extension" json:"extension"`
+}
+
+type ApiKeyResponse struct {
+	XMLName xml.Name `xml:"apiKey" json:"-"`
+	Key     string   `xml:"key,attr" json:"key"`
+}
+
+type SubsonicSongWrapper struct {
+	XMLName xml.Name `xml:"song" json:"-"`
+	Song    SubsonicSong
+}
