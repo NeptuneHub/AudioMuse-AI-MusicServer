@@ -24,17 +24,27 @@ until curl -s -f -o /dev/null "http://localhost:8080/rest/ping.view"; do
 done
 echo "AI Core detects Music Server is up."
 
-# --- Get API Token ---
+# --- Get API Token with Retry Logic ---
 echo "AI Core is requesting API token..."
-API_TOKEN=$(curl -s "http://localhost:8080/rest/getApiKey.view?u=admin&p=admin&f=json" | jq -r '."subsonic-response".apiKey.key')
+API_TOKEN=""
+# Loop until the API_TOKEN variable is not empty.
+until [ -n "$API_TOKEN" ]; do
+    echo "Attempting to fetch API token..."
+    # The '|| true' prevents the script from exiting if curl/jq fails.
+    API_TOKEN=$(curl -s "http://localhost:8080/rest/getApiKey.view?u=admin&p=admin&f=json" | jq -r '."subsonic-response".apiKey.key // ""') || true
+    if [ -z "$API_TOKEN" ]; then
+        echo "Failed to get API token, music server might still be starting. Retrying in 5 seconds..."
+        sleep 5
+    fi
+done
 
 # --- Start the actual Python application ---
 echo "All dependencies are ready. Starting AudioMuse-AI Core..."
 
-if [ -z "$API_TOKEN" ] || [ "$API_TOKEN" == "null" ]; then
-    echo "ERROR: AI Core failed to retrieve API token. Starting without it."
+if [ "$API_TOKEN" == "null" ]; then
+    echo "ERROR: AI Core received a null API token. Starting without it."
     # Start the app without the API token variables
-    exec python3 /app/audiomuse-core/app.py
+    exec python3 /app/audiomose-core/app.py
 else
     echo "AI Core successfully retrieved API token. Starting with token."
     # Use exec and the 'env' command to set environment variables
