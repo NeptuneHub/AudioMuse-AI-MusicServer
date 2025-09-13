@@ -1,13 +1,20 @@
 #!/bin/bash
 set -e
 
-# --- 1. Perform one-time DB initialization if needed ---
 CONFIG_DIR="/config/postgres-data"
+
+# --- 1. ALWAYS ensure correct ownership and permissions ---
+# This is the critical fix. These commands must run every time to prevent
+# permission errors on subsequent container starts with a persistent volume.
+echo "Ensuring correct permissions for PostgreSQL data directory..."
+mkdir -p "$CONFIG_DIR"
+chown -R postgres:postgres "$CONFIG_DIR"
+chmod 700 "$CONFIG_DIR"
+
+# --- 2. Perform one-time DB initialization if needed ---
 if [ ! -f "$CONFIG_DIR/PG_VERSION" ]; then
     echo "PostgreSQL data directory not found. Initializing new database..."
-    mkdir -p "$CONFIG_DIR"
-    chown -R postgres:postgres "$CONFIG_DIR"
-    chmod 700 "$CONFIG_DIR"
+    # The directory and permissions are already set, we just need to init.
     su postgres -c "/usr/lib/postgresql/14/bin/initdb --username=postgres --no-locale -D '$CONFIG_DIR'"
     
     # Temporarily start postgres to create user, db, and seed initial config
@@ -16,9 +23,7 @@ if [ ! -f "$CONFIG_DIR/PG_VERSION" ]; then
     su postgres -c "psql --command \"CREATE USER audiomuse WITH SUPERUSER PASSWORD 'audiomusepassword';\""
     su postgres -c "psql --command \"CREATE DATABASE audiomusedb OWNER audiomuse;\""
     
-    # FIX: Seed the database with the required configuration for the music server.
-    # This must be done before the music server starts for the first time.
-    # We assume the AI core will run on localhost:8000 inside the container.
+    # Seed the database with the required configuration for the music server.
     echo "Seeding initial configuration for music server..."
     su postgres -c "psql audiomusedb --command \"CREATE TABLE IF NOT EXISTS configuration (key TEXT PRIMARY KEY, value TEXT);\""
     su postgres -c "psql audiomusedb --command \"INSERT INTO configuration (key, value) VALUES ('audiomuse_ai_core_url', 'http://localhost:8000') ON CONFLICT (key) DO NOTHING;\""
@@ -27,11 +32,11 @@ if [ ! -f "$CONFIG_DIR/PG_VERSION" ]; then
     echo "Database initialization complete."
 fi
 
-# --- 2. Start Supervisord to manage background services ---
+# --- 3. Start Supervisord to manage background services ---
 echo "Starting background services (Postgres, Redis, Music Server)..."
 /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf &
 
-# --- 3. Wait for all background services to be ready ---
+# --- 4. Wait for all background services to be ready ---
 echo "Waiting for background services to become available..."
 
 # Wait for PostgreSQL
@@ -55,7 +60,7 @@ until curl -s -f -o /dev/null "http://localhost:8080/rest/ping.view"; do
 done
 echo "Music Server is up."
 
-# --- 4. Get API Token with Retry Logic ---
+# --- 5. Get API Token with Retry Logic ---
 echo "All services are up. Requesting API token..."
 API_TOKEN=""
 until [ -n "$API_TOKEN" ] && [ "$API_TOKEN" != "null" ]; do
@@ -68,14 +73,14 @@ until [ -n "$API_TOKEN" ] && [ "$API_TOKEN" != "null" ]; do
 done
 echo "Successfully retrieved API token."
 
-# --- 5. Start the AI Core (Flask App and RQ Workers) ---
+# --- 6. Start the AI Core (Flask App and RQ Workers) ---
 echo "Starting AudioMuse-AI Core services..."
 
 # Set environment variables for the following processes
 export NAVIDROME_PASSWORD="$API_TOKEN"
 export NAVIDROME_USER="admin"
 export MEDIASERVER_TYPE="navidrome"
-export NAVIDROME_URL="http://localhost:8080"
+export NAVIDROME_URL="http://localhost:8000"
 export SERVICE_TYPE="flask"
 export POSTGRES_HOST="127.0.0.1"
 
