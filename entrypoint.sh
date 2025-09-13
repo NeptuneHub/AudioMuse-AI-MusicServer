@@ -16,8 +16,21 @@ if [ ! -f "$CONFIG_DIR/PG_VERSION" ]; then
 fi
 
 # --- Service Management and API Token Fetching ---
-# Start all services managed by supervisord in the background
+# Start all services managed by supervisord (except the Python core) in the background
 /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf &
+
+echo "Waiting for PostgreSQL database to become available..."
+# Use pg_isready to reliably check if PostgreSQL is ready to accept connections.
+# This command is run as the postgres user to ensure it has the necessary permissions.
+until su postgres -c "pg_isready -h 127.0.0.1 -p 5432" > /dev/null 2>&1; do
+    echo "PostgreSQL is unavailable - sleeping..."
+    sleep 2
+done
+echo "PostgreSQL is up and running."
+
+# Now that the database is ready, start the Python Flask application
+echo "Starting AudioMuse-AI Core service..."
+supervisorctl start python-flask-core
 
 echo "Waiting for music server to become available..."
 until curl -s -f -o /dev/null "http://localhost:8080/rest/ping.view"; do
@@ -40,7 +53,7 @@ else
     export MEDIASERVER_TYPE="navidrome"
     export NAVIDROME_URL="http://localhost:8080"
 
-    echo "Restarting AudioMuse-AI Core service..."
+    echo "Restarting AudioMuse-AI Core service to apply API token..."
     # The program name in supervisord.conf is 'python-flask-core'
     supervisorctl restart python-flask-core
 fi
