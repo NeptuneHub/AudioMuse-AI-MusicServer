@@ -56,7 +56,8 @@ COPY --from=backend-builder /src/music-server-backend/music-server /app/audiomus
 # Copy the React frontend with its node_modules
 COPY --from=frontend-builder /src/music-server-frontend /app/audiomuse-server/music-server-frontend
 
-# Set up directories for supervisor and postgres
+# Set up directories for supervisor and postgres.
+# The entrypoint.sh script will handle the database initialization at runtime.
 RUN mkdir -p /var/run/supervisord /var/log/supervisor /run/postgresql && \
     chown -R postgres:postgres /run/postgresql
 
