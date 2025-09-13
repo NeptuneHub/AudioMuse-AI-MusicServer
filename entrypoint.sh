@@ -73,7 +73,21 @@ wait $REDIS_WAIT_PID
 wait $MUSIC_SERVER_WAIT_PID
 echo "All independent services are ready."
 
-# --- Start the AI Core (which depends on the other three) ---
+# --- Get API Token Before Starting AI Core ---
+echo "Requesting API token for admin user..."
+API_TOKEN=$(curl -s "http://localhost:8080/rest/getApiKey.view?u=admin&p=admin&f=json" | jq -r '."subsonic-response".apiKey.key')
+
+if [ -z "$API_TOKEN" ] || [ "$API_TOKEN" == "null" ]; then
+    echo "ERROR: Failed to retrieve API token. AI Core may not function correctly."
+else
+    echo "Successfully retrieved API token. Exporting variables for AI Core."
+    export NAVIDROME_PASSWORD="$API_TOKEN"
+    export NAVIDROME_USER="admin"
+    export MEDIASERVER_TYPE="navidrome"
+    export NAVIDROME_URL="http://localhost:8080"
+fi
+
+# --- Start the AI Core with the token now in the environment ---
 echo "Starting AudioMuse-AI Core services..."
 supervisorctl start python-flask-core python-rq-worker
 
@@ -83,23 +97,6 @@ until curl -s -f -o /dev/null "http://localhost:8000/"; do
     sleep 2
 done
 echo "AudioMuse-AI Core is up."
-
-# --- Configure AI Core with API Token ---
-echo "Requesting API token for admin user..."
-API_TOKEN=$(curl -s "http://localhost:8080/rest/getApiKey.view?u=admin&p=admin&f=json" | jq -r '."subsonic-response".apiKey.key')
-
-if [ -z "$API_TOKEN" ] || [ "$API_TOKEN" == "null" ]; then
-    echo "ERROR: Failed to retrieve API token. AI core may not function correctly."
-else
-    echo "Successfully retrieved API token. Exporting variables."
-    export NAVIDROME_PASSWORD="$API_TOKEN"
-    export NAVIDROME_USER="admin"
-    export MEDIASERVER_TYPE="navidrome"
-    export NAVIDROME_URL="http://localhost:8080"
-
-    echo "Restarting AudioMuse-AI Core service to apply API token..."
-    supervisorctl restart python-flask-core
-fi
 
 echo "All services are running."
 # The 'wait' command keeps the container alive by waiting for supervisord to exit.
