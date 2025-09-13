@@ -48,6 +48,14 @@ echo "PostgreSQL is up and running."
 echo "Starting AudioMuse-AI Core service..."
 supervisorctl start python-flask-core
 
+echo "Waiting for AudioMuse-AI Core to become available..."
+# We must wait for the Python service on port 8000 to be ready before other services try to use it.
+until curl -s -f -o /dev/null "http://localhost:8000/"; do
+    echo "AudioMuse-AI Core is unavailable - sleeping..."
+    sleep 2
+done
+echo "AudioMuse-AI Core is up."
+
 echo "Waiting for music server to become available..."
 until curl -s -f -o /dev/null "http://localhost:8080/rest/ping.view"; do
     echo "Music server is unavailable - sleeping..."
