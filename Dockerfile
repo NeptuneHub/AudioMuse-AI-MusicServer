@@ -44,7 +44,12 @@ RUN cd / && mv app audiomuse-core && mkdir app && mv audiomuse-core app/
 # --- Copy Configurations and Scripts ---
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY entrypoint.sh /entrypoint.sh
+# Copy the new AI Core wrapper script
+COPY start-ai-core.sh /app/audiomuse-core/start-ai-core.sh
+
 RUN chmod +x /entrypoint.sh
+# Make the new wrapper script executable
+RUN chmod +x /app/audiomuse-core/start-ai-core.sh
 
 # --- Copy Application Code ---
 WORKDIR /app
@@ -56,12 +61,13 @@ COPY --from=backend-builder /src/music-server-backend/music-server /app/audiomus
 # Copy the React frontend with its node_modules
 COPY --from=frontend-builder /src/music-server-frontend /app/audiomuse-server/music-server-frontend
 
-# Set up directories for supervisor and postgres.
-# The entrypoint.sh script will handle the database initialization at runtime.
+# Set up directories for supervisor and postgres
 RUN mkdir -p /var/run/supervisord /var/log/supervisor /run/postgresql && \
     chown -R postgres:postgres /run/postgresql
 
 EXPOSE 3000 8080 8000
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD []
+# The command to run is supervisord. The entrypoint will handle initialization first.
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+
