@@ -9,9 +9,20 @@ if [ ! -f "$CONFIG_DIR/PG_VERSION" ]; then
     chown -R postgres:postgres "$CONFIG_DIR"
     chmod 700 "$CONFIG_DIR"
     su postgres -c "/usr/lib/postgresql/14/bin/initdb --username=postgres --no-locale -D '$CONFIG_DIR'"
+    
+    # Temporarily start postgres to create user, db, and seed initial config
     su postgres -c "/usr/lib/postgresql/14/bin/pg_ctl -D '$CONFIG_DIR' -w start"
+    
     su postgres -c "psql --command \"CREATE USER audiomuse WITH SUPERUSER PASSWORD 'audiomusepassword';\""
     su postgres -c "psql --command \"CREATE DATABASE audiomusedb OWNER audiomuse;\""
+    
+    # FIX: Seed the database with the required configuration for the music server.
+    # This must be done before the music server starts for the first time.
+    # We assume the AI core will run on localhost:8000 inside the container.
+    echo "Seeding initial configuration for music server..."
+    su postgres -c "psql audiomusedb --command \"CREATE TABLE IF NOT EXISTS configuration (key TEXT PRIMARY KEY, value TEXT);\""
+    su postgres -c "psql audiomusedb --command \"INSERT INTO configuration (key, value) VALUES ('audiomuse_ai_core_url', 'http://localhost:8000') ON CONFLICT (key) DO NOTHING;\""
+
     su postgres -c "/usr/lib/postgresql/14/bin/pg_ctl -D '$CONFIG_DIR' -w stop"
     echo "Database initialization complete."
 fi
@@ -49,7 +60,6 @@ echo "All services are up. Requesting API token..."
 API_TOKEN=""
 until [ -n "$API_TOKEN" ] && [ "$API_TOKEN" != "null" ]; do
     echo "Attempting to fetch API token..."
-    # Note: Using port 8080 for the backend API server.
     API_TOKEN=$(curl -s "http://localhost:8080/rest/getApiKey.view?u=admin&p=admin&f=json" | jq -r '."subsonic-response".apiKey.key // ""') || true
     if [ -z "$API_TOKEN" ] || [ "$API_TOKEN" == "null" ]; then
         echo "Failed to get API token, retrying in 5 seconds..."
@@ -78,7 +88,6 @@ rq worker -u redis://127.0.0.1:6379/0 &
 rq worker -u redis://127.0.0.1:6379/0 &
 
 # Start the main Flask app in the foreground using exec
-# 'exec' replaces the script with the python process, making it the main process
 echo "Starting Flask server..."
 exec python3 app.py
 
