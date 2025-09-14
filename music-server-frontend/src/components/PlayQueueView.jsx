@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, onClose, onSetStart, onSetEnd, positionStyle }) => {
     const menuRef = useRef(null);
@@ -46,6 +46,7 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
     const [activeMenu, setActiveMenu] = useState({ index: null, style: {} });
     const [startSongId, setStartSongId] = useState(null);
     const [endSongId, setEndSongId] = useState(null);
+    const [visibleCount, setVisibleCount] = useState(50);
     const queueListRef = useRef(null);
 
     useEffect(() => {
@@ -57,6 +58,34 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
              setEndSongId(queue[1].id);
         }
     }, [queue]);
+    
+    // Reset visible count when queue changes or view is opened
+    useEffect(() => {
+        if (isOpen) {
+            setVisibleCount(50);
+        }
+    }, [isOpen, queue]);
+
+    const songsToDisplay = queue.slice(0, visibleCount);
+    const hasMore = visibleCount < queue.length;
+
+    const loadMore = useCallback(() => {
+        if (hasMore) {
+            setVisibleCount(prev => prev + 50);
+        }
+    }, [hasMore]);
+
+    const observer = useRef();
+    const lastSongElementRef = useCallback(node => {
+        if (observer.current) observer.current.disconnect();
+        observer.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting && hasMore) {
+                loadMore();
+            }
+        });
+        if (node) observer.current.observe(node);
+    }, [hasMore, loadMore]);
+
 
     if (!isOpen) return null;
 
@@ -75,10 +104,8 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
 
         let style = {};
         if (spaceBelow < menuHeight && buttonRect.top > menuHeight) {
-            // Not enough space below, and enough space above, so open upwards
             style = { bottom: '100%' };
         } else {
-            // Default to opening downwards
             style = { top: '100%' };
         }
         
@@ -120,7 +147,7 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                 </div>
 
                 <ul ref={queueListRef} className="overflow-y-auto flex-grow p-2">
-                    {queue.length > 0 ? queue.map((song, index) => {
+                    {songsToDisplay.length > 0 ? songsToDisplay.map((song, index) => {
                         const isPlaying = index === currentIndex;
                         const isStart = song.id === startSongId;
                         const isEnd = song.id === endSongId;
@@ -132,6 +159,7 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
 
                         return (
                             <li 
+                                ref={index === songsToDisplay.length - 1 ? lastSongElementRef : null}
                                 key={`${song.id}-${index}`} 
                                 className={`flex items-center justify-between p-3 rounded-md cursor-pointer transition-colors ${rowClass}`}
                                 onClick={() => onSelect(index)}
@@ -189,4 +217,3 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
 }
 
 export default PlayQueueView;
-

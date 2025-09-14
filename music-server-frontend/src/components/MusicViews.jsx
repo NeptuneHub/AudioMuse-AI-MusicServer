@@ -1,5 +1,5 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 const subsonicFetch = async (endpoint, creds, params = {}) => {
     const allParams = new URLSearchParams({
@@ -34,13 +34,15 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
     useEffect(() => {
         const fetchPlaylists = async () => {
             try {
+                // The getPlaylists.view endpoint doesn't support pagination, so we fetch all.
                 const data = await subsonicFetch('getPlaylists.view', credentials);
                 const playlistData = data.playlists?.playlist || [];
                 setPlaylists(Array.isArray(playlistData) ? playlistData : [playlistData]);
                 if (playlistData.length > 0) {
                     setSelectedPlaylist(playlistData[0].id);
                 }
-            } catch (err) {
+            } catch (err)
+                {
                 setError('Failed to fetch playlists.');
             }
         };
@@ -94,85 +96,104 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
 
 export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQueue, playQueue = [], currentSong, onNavigate, audioMuseUrl, onInstantMix, onAddToPlaylist }) {
     const [songs, setSongs] = useState([]);
+    const [allSongs, setAllSongs] = useState([]); // For client-side pagination
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [refreshKey, setRefreshKey] = useState(0);
     const [error, setError] = useState('');
+    const [hasMore, setHasMore] = useState(true);
+    const [refreshKey, setRefreshKey] = useState(0);
 
     const isPlaylistView = !!filter?.playlistId;
-
-    const fetchSongs = useCallback(async () => {
-        if (filter?.preloadedSongs) {
-            setSongs(filter.preloadedSongs);
-            return;
-        }
-
-        if (!filter?.albumId && !isPlaylistView && searchTerm.length < 3 && !filter?.similarToSongId) {
-            setSongs([]);
-            return;
-        }
-
-        setIsLoading(true);
-        setError('');
-        try {
-            let songList = [];
-            if (filter?.similarToSongId) {
-                 const data = await subsonicFetch('getSimilarSongs.view', credentials, { id: filter.similarToSongId, count: 20 });
-                 songList = data.directory?.song || [];
-            }
-            else if (searchTerm.length >= 3) {
-                const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, songCount: 100 });
-                songList = data.searchResult2?.song || [];
-            } 
-            else if (filter && !filter.similarToSongId && searchTerm.length === 0) {
-                const endpoint = filter.albumId ? 'getAlbum.view' : 'getPlaylist.view';
-                const idParam = filter.albumId || filter.playlistId;
-                if (!idParam) { setSongs([]); setIsLoading(false); return; }
-
-                const data = await subsonicFetch(endpoint, credentials, { id: idParam });
-                const songContainer = data.album || data.directory;
-                if (songContainer && songContainer.song) {
-                    songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
-                }
-            } 
-            else {
-                 setSongs([]);
-            }
-            setSongs(Array.isArray(songList) ? songList : [songList].filter(Boolean));
-        } catch (e) {
-            console.error("Failed to fetch songs:", e);
-            setError(e.message || "Failed to fetch songs.");
-            setSongs([]);
-        } finally {
-            setIsLoading(false);
-        }
-    }, [credentials, filter, searchTerm, isPlaylistView]);
+    const PAGE_SIZE = 10;
 
     useEffect(() => {
-        const debounceFetch = setTimeout(() => {
-             fetchSongs();
-        }, 300);
-        return () => clearTimeout(debounceFetch);
-    }, [fetchSongs, searchTerm, refreshKey]);
+        setSongs([]);
+        setAllSongs([]);
+        setHasMore(true);
+    }, [searchTerm, filter, refreshKey]);
+
+    const loadMoreSongs = useCallback(() => {
+        if (isLoading || !hasMore) return;
+        setIsLoading(true);
+        setError('');
+
+        const fetcher = async () => {
+            try {
+                if (searchTerm.length >= 3) {
+                    const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, songCount: PAGE_SIZE, songOffset: songs.length });
+                    const songList = data.searchResult2?.song || [];
+                    const newSongs = Array.isArray(songList) ? songList : [songList].filter(Boolean);
+                    setSongs(prev => [...prev, ...newSongs]);
+                    setHasMore(newSongs.length === PAGE_SIZE);
+                    return;
+                }
+
+                let baseList = allSongs;
+                if (baseList.length === 0 && !searchTerm) {
+                    let songList = [];
+                    if (filter?.preloadedSongs) songList = filter.preloadedSongs;
+                    else if (filter?.similarToSongId) {
+                        const data = await subsonicFetch('getSimilarSongs.view', credentials, { id: filter.similarToSongId, count: PAGE_SIZE });
+                        songList = data.directory?.song || [];
+                    } else if (filter) {
+                        const endpoint = filter.albumId ? 'getAlbum.view' : 'getPlaylist.view';
+                        const idParam = filter.albumId || filter.playlistId;
+                        if (idParam) {
+                            const data = await subsonicFetch(endpoint, credentials, { id: idParam });
+                            const songContainer = data.album || data.directory;
+                            if (songContainer?.song) songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
+                        }
+                    }
+                    baseList = Array.isArray(songList) ? songList : [songList].filter(Boolean);
+                    setAllSongs(baseList);
+                }
+
+                const currentCount = songs.length;
+                const newCount = currentCount + PAGE_SIZE;
+                setSongs(baseList.slice(0, newCount));
+                setHasMore(newCount < baseList.length);
+
+            } catch (e) {
+                console.error("Failed to fetch songs:", e);
+                setError(e.message || "Failed to fetch songs.");
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetcher();
+    }, [credentials, filter, searchTerm, songs.length, allSongs, isLoading, hasMore]);
+
+    useEffect(() => {
+        if (songs.length === 0 && hasMore && (searchTerm.length >= 3 || filter)) {
+            const timer = setTimeout(() => loadMoreSongs(), 300);
+            return () => clearTimeout(timer);
+        }
+    }, [songs.length, hasMore, loadMoreSongs, searchTerm, filter]);
+
+    const observer = useRef();
+    const lastSongElementRef = useCallback(node => {
+        if (isLoading) return;
+        if (observer.current) observer.current.disconnect();
+        observer.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting && hasMore) {
+                loadMoreSongs();
+            }
+        });
+        if (node) observer.current.observe(node);
+    }, [isLoading, hasMore, loadMoreSongs]);
 
     const handlePlayAlbum = () => {
-        if (songs.length > 0) {
-            onPlay(songs[0], songs);
-        }
+        const listToPlay = allSongs.length > 0 ? allSongs : songs;
+        if (listToPlay.length > 0) onPlay(listToPlay[0], listToPlay);
     };
 
     const handleDeleteSong = async (songIdToRemove) => {
         if (!isPlaylistView) return;
-
-        const currentSongIds = songs.map(s => s.id);
-        const newSongIds = currentSongIds.filter(id => id !== songIdToRemove);
-        
         try {
-            await subsonicFetch('updatePlaylist.view', credentials, {
-                playlistId: filter.playlistId,
-                songId: newSongIds
-            });
-            setRefreshKey(k => k + 1); // Trigger a refetch
+            const newSongIds = allSongs.filter(s => s.id !== songIdToRemove).map(s => s.id);
+            await subsonicFetch('updatePlaylist.view', credentials, { playlistId: filter.playlistId, songId: newSongIds });
+            setRefreshKey(k => k + 1);
         } catch (err) {
             setError(err.message || 'Failed to delete song.');
         }
@@ -180,30 +201,24 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
     
     const handleMoveSong = async (index, direction) => {
         if (!isPlaylistView) return;
-
-        const newSongs = [...songs];
+        const newSongs = [...allSongs];
         const [movedSong] = newSongs.splice(index, 1);
         const newIndex = direction === 'up' ? index - 1 : index + 1;
-
         if (newIndex < 0 || newIndex > newSongs.length) return;
-
         newSongs.splice(newIndex, 0, movedSong);
-        const newSongIds = newSongs.map(s => s.id);
-
-        const originalSongs = songs;
-        setSongs(newSongs); // Optimistic update
+        
+        setAllSongs(newSongs); // Optimistic update
+        const currentVisibleSongs = newSongs.slice(0, songs.length);
+        setSongs(currentVisibleSongs);
 
         try {
-            await subsonicFetch('updatePlaylist.view', credentials, {
-                playlistId: filter.playlistId,
-                songId: newSongIds
-            });
+            await subsonicFetch('updatePlaylist.view', credentials, { playlistId: filter.playlistId, songId: newSongs.map(s => s.id) });
         } catch (err) {
             setError(err.message || 'Failed to move song.');
-            setSongs(originalSongs); // Revert on failure
+            setAllSongs(allSongs); // Revert on failure
+            setSongs(songs);
         }
     };
-
 
     return (
         <div>
@@ -218,10 +233,9 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                 />
             </div>
 
-            {(songs.length > 0 && !searchTerm && (filter?.albumId || filter?.playlistId)) && (
+            {( (songs.length > 0 || allSongs.length > 0) && !searchTerm && (filter?.albumId || filter?.playlistId)) && (
                 <button onClick={handlePlayAlbum} className="mb-4 bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Play All</button>
             )}
-            {isLoading && <p className="text-center text-gray-400">Loading...</p>}
             
             {!isLoading && songs.length === 0 && (searchTerm || filter) && <p className="text-center text-gray-500">No songs found.</p>}
 
@@ -248,9 +262,9 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                 const isPlaying = currentSong && currentSong.id === song.id;
                                 const isInQueue = playQueue.some(s => s.id === song.id);
                                 return (
-                                    <tr key={song.id} className={`border-b border-gray-700 transition-colors ${isPlaying ? 'bg-teal-900/50' : 'bg-gray-800 hover:bg-gray-600'}`}>
+                                    <tr ref={index === songs.length - 1 ? lastSongElementRef : null} key={`${song.id}-${index}`} className={`border-b border-gray-700 transition-colors ${isPlaying ? 'bg-teal-900/50' : 'bg-gray-800 hover:bg-gray-600'}`}>
                                         <td className="px-4 py-4">
-                                            <button onClick={() => onPlay(song, songs)} title="Play song">
+                                            <button onClick={() => onPlay(song, allSongs.length > 0 ? allSongs : songs)} title="Play song">
                                                 {isPlaying ? (
                                                     <svg className="w-6 h-6 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg>
                                                 ) : (
@@ -264,8 +278,8 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                         </td>
                                         <td className="px-4 py-4 hidden sm:table-cell">{song.artist}</td>
                                         <td className="px-4 py-4 hidden md:table-cell">{song.album}</td>
-                                        <td className="px-4 py-4 hidden xl:table-cell text-center">{song.playCount > 0 ? song.playCount : ''}</td>
-                                        <td className="px-4 py-4 hidden lg:table-cell">{formatDate(song.lastPlayed)}</td>
+                                        <td className="px-4 py-3 hidden xl:table-cell text-center">{song.playCount > 0 ? song.playCount : ''}</td>
+                                        <td className="px-4 py-3 hidden lg:table-cell">{formatDate(song.lastPlayed)}</td>
                                         <td className="px-4 py-4">
                                             <div className="flex items-center justify-end space-x-2">
                                                  {isPlaylistView && (
@@ -274,7 +288,7 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                                             <button onClick={() => handleMoveSong(index, 'up')} disabled={index === 0} className="p-1 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed" title="Move up">
                                                                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd"></path></svg>
                                                             </button>
-                                                            <button onClick={() => handleMoveSong(index, 'down')} disabled={index === songs.length - 1} className="p-1 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed" title="Move down">
+                                                            <button onClick={() => handleMoveSong(index, 'down')} disabled={index === allSongs.length - 1} className="p-1 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed" title="Move down">
                                                                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"></path></svg>
                                                             </button>
                                                         </div>
@@ -311,6 +325,8 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                             })}
                         </tbody>
                     </table>
+                    {isLoading && <p className="text-center text-gray-400 mt-4">Loading more songs...</p>}
+                    {!hasMore && songs.length > 0 && <p className="text-center text-gray-500 mt-4">End of list.</p>}
                 </div>
             )}
         </div>
@@ -334,48 +350,114 @@ const ArtistPlaceholder = () => (
 
 const ImageWithFallback = ({ src, placeholder, alt }) => {
     const [hasError, setHasError] = useState(false);
+    const [isVisible, setIsVisible] = useState(false);
+    const ref = useRef(null);
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting) {
+                    setIsVisible(true);
+                    observer.unobserve(entry.target);
+                }
+            },
+            { rootMargin: '200px' }
+        );
+
+        const currentRef = ref.current;
+        if (currentRef) {
+            observer.observe(currentRef);
+        }
+
+        return () => {
+            if (currentRef) {
+                observer.unobserve(currentRef);
+            }
+        };
+    }, []);
+    
     useEffect(() => { setHasError(false); }, [src]);
+
     return (
-        hasError || !src ? placeholder : <img src={src} alt={alt} onError={() => setHasError(true)} className="w-full h-full object-cover" />
+        <div ref={ref} className="w-full h-full">
+            {isVisible && src && !hasError ? (
+                <img src={src} alt={alt} onError={() => setHasError(true)} className="w-full h-full object-cover" />
+            ) : (
+                placeholder
+            )}
+        </div>
     );
 };
+
 
 export function Albums({ credentials, filter, onNavigate }) {
     const [albums, setAlbums] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-
+    const [isLoading, setIsLoading] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
+    const PAGE_SIZE = 10;
+    
     useEffect(() => {
-        if (filter) {
-            setSearchTerm(filter);
-        }
+        setAlbums([]);
+        setHasMore(true);
+        if(filter) setSearchTerm(filter);
     }, [filter]);
-
+    
     useEffect(() => {
-        const fetchAlbums = async () => {
+        setAlbums([]);
+        setHasMore(true);
+    }, [searchTerm])
+
+
+    const loadMoreAlbums = useCallback(() => {
+        if (isLoading || !hasMore) return;
+        setIsLoading(true);
+
+        const fetcher = async () => {
             try {
                 let albumList = [];
                 const query = searchTerm || filter;
 
                 if (query) {
-                    const data = await subsonicFetch('search2.view', credentials, { query: query, albumCount: 100, artistCount: 0, songCount: 0 });
+                    const data = await subsonicFetch('search2.view', credentials, { query, albumCount: PAGE_SIZE, albumOffset: albums.length });
                     albumList = data.searchResult2?.album || [];
                 } else {
-                    const data = await subsonicFetch('getAlbumList2.view', credentials, { type: 'alphabeticalByName' });
-                     albumList = data.albumList2?.album || [];
+                    const data = await subsonicFetch('getAlbumList2.view', credentials, { type: 'alphabeticalByName', size: PAGE_SIZE, offset: albums.length });
+                    albumList = data.albumList2?.album || [];
                 }
-                setAlbums(Array.isArray(albumList) ? albumList : [albumList].filter(Boolean));
+                const newAlbums = Array.isArray(albumList) ? albumList : [albumList].filter(Boolean);
+                setAlbums(prev => [...prev, ...newAlbums]);
+                setHasMore(newAlbums.length === PAGE_SIZE);
+
             } catch (e) {
                 console.error("Failed to fetch albums:", e);
-                setAlbums([]);
+            } finally {
+                setIsLoading(false);
             }
         };
+        
+        fetcher();
+    }, [credentials, filter, searchTerm, albums.length, isLoading, hasMore]);
+    
+    useEffect(() => {
+        if (albums.length === 0 && hasMore) {
+            const timer = setTimeout(() => loadMoreAlbums(), 300);
+            return () => clearTimeout(timer);
+        }
+    }, [albums.length, hasMore, loadMoreAlbums]);
 
-        const debounceFetch = setTimeout(() => {
-            fetchAlbums();
-        }, 300);
 
-        return () => clearTimeout(debounceFetch);
-    }, [credentials, filter, searchTerm]);
+    const observer = useRef();
+    const lastAlbumElementRef = useCallback(node => {
+        if (isLoading) return;
+        if (observer.current) observer.current.disconnect();
+        observer.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting && hasMore) {
+                loadMoreAlbums();
+            }
+        });
+        if (node) observer.current.observe(node);
+    }, [isLoading, hasMore, loadMoreAlbums]);
 
     return (
         <div>
@@ -388,12 +470,16 @@ export function Albums({ credentials, filter, onNavigate }) {
                     className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
                 />
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
-                {albums.map((album) => (
-                    <button key={album.id} onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })} className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                {albums.map((album, index) => (
+                    <button 
+                        ref={index === albums.length - 1 ? lastAlbumElementRef : null}
+                        key={`${album.id}-${index}`} 
+                        onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })} 
+                        className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
                         <div className="w-full bg-gray-700 rounded aspect-square flex items-center justify-center mb-2 overflow-hidden">
                              <ImageWithFallback
-                                src={album.coverArt ? `/rest/getCoverArt.view?id=${encodeURIComponent(album.coverArt)}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI` : ''}
+                                src={album.coverArt ? `/rest/getCoverArt.view?id=${encodeURIComponent(album.coverArt)}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI&size=512` : ''}
                                 placeholder={<AlbumPlaceholder name={album.name} />}
                                 alt={album.name}
                             />
@@ -403,42 +489,84 @@ export function Albums({ credentials, filter, onNavigate }) {
                     </button>
                 ))}
             </div>
+            {isLoading && <p className="text-center text-gray-400 mt-4">Loading more albums...</p>}
+            {!hasMore && albums.length > 0 && <p className="text-center text-gray-500 mt-4">End of list.</p>}
         </div>
     );
 }
 
 export function Artists({ credentials, onNavigate }) {
     const [artists, setArtists] = useState([]);
+    const [allArtists, setAllArtists] = useState([]); // For client-side pagination
     const [searchTerm, setSearchTerm] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
+    const PAGE_SIZE = 10;
 
     useEffect(() => {
-        const fetchArtists = async () => {
+        setArtists([]);
+        setHasMore(true);
+        if (searchTerm.length === 0) setAllArtists([]);
+    }, [searchTerm]);
+
+    const loadMoreArtists = useCallback(() => {
+        if (isLoading || !hasMore) return;
+        setIsLoading(true);
+
+        const fetcher = async () => {
             try {
-                let artistList = [];
                 if (searchTerm.length >= 2) {
-                    const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, artistCount: 50 });
-                    artistList = data.searchResult2?.artist || [];
-                } else if (searchTerm.length === 0) {
-                    const data = await subsonicFetch('getArtists.view', credentials);
-                    const indexData = data.artists?.index || [];
-					const indices = Array.isArray(indexData) ? indexData : [indexData].filter(Boolean);
-                    artistList = indices.flatMap(i => i.artist || []);
+                    const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, artistCount: PAGE_SIZE, artistOffset: artists.length });
+                    const artistList = data.searchResult2?.artist || [];
+                    const newArtists = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
+                    setArtists(prev => [...prev, ...newArtists]);
+                    setHasMore(newArtists.length === PAGE_SIZE);
+                } 
+                else if (searchTerm.length === 0) { 
+                    let baseList = allArtists;
+                    if (baseList.length === 0) {
+                        const data = await subsonicFetch('getArtists.view', credentials);
+                        const indexData = data.artists?.index || [];
+                        const indices = Array.isArray(indexData) ? indexData : [indexData].filter(Boolean);
+                        baseList = indices.flatMap(i => i.artist || []);
+                        setAllArtists(baseList);
+                    }
+                    const currentCount = artists.length;
+                    const newCount = currentCount + PAGE_SIZE;
+                    setArtists(baseList.slice(0, newCount));
+                    setHasMore(newCount < baseList.length);
                 } else {
-                    setArtists([]);
+                    setHasMore(false);
                 }
-                 setArtists(Array.isArray(artistList) ? artistList : [artistList].filter(Boolean));
             } catch (e) {
                 console.error("Failed to fetch artists:", e);
-                setArtists([]);
+            } finally {
+                setIsLoading(false);
             }
         };
 
-        const debounceFetch = setTimeout(() => {
-            fetchArtists();
-        }, 300);
+        fetcher();
+    }, [credentials, searchTerm, artists.length, allArtists, isLoading, hasMore]);
+    
+    useEffect(() => {
+        if (artists.length === 0 && hasMore) {
+            const timer = setTimeout(() => loadMoreArtists(), 300);
+            return () => clearTimeout(timer);
+        }
+    }, [artists.length, hasMore, loadMoreArtists]);
 
-        return () => clearTimeout(debounceFetch);
-    }, [credentials, searchTerm]);
+
+    const observer = useRef();
+    const lastArtistElementRef = useCallback(node => {
+        if (isLoading) return;
+        if (observer.current) observer.current.disconnect();
+        observer.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting && hasMore) {
+                loadMoreArtists();
+            }
+        });
+        if (node) observer.current.observe(node);
+    }, [isLoading, hasMore, loadMoreArtists]);
 
     return (
         <div>
@@ -451,12 +579,16 @@ export function Artists({ credentials, onNavigate }) {
                     className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
                 />
             </div>
-             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
-                {artists.map((artist) => (
-                    <button key={artist.id} onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: artist.name })} className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors flex flex-col items-center">
-                        <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-gray-700 flex items-center justify-center mb-2 overflow-hidden flex-shrink-0">
+             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                {artists.map((artist, index) => (
+                    <button 
+                        ref={index === artists.length - 1 ? lastArtistElementRef : null}
+                        key={`${artist.id}-${index}`} 
+                        onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: artist.name })} 
+                        className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors flex flex-col items-center">
+                        <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full bg-gray-700 flex items-center justify-center mb-2 overflow-hidden flex-shrink-0">
                              <ImageWithFallback
-                                src={artist.coverArt ? `/rest/getCoverArt.view?id=${encodeURIComponent(artist.coverArt)}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI` : ''}
+                                src={artist.artistImageUrl ? `/rest/getCoverArt.view?id=${encodeURIComponent(artist.artistImageUrl)}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI&size=512` : ''}
                                 placeholder={<ArtistPlaceholder />}
                                 alt={artist.name}
                             />
@@ -465,6 +597,9 @@ export function Artists({ credentials, onNavigate }) {
                     </button>
                 ))}
             </div>
+            {isLoading && <p className="text-center text-gray-400 mt-4">Loading more artists...</p>}
+            {!hasMore && artists.length > 0 && <p className="text-center text-gray-500 mt-4">End of list.</p>}
         </div>
     );
 }
+

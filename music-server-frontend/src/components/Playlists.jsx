@@ -1,5 +1,5 @@
 // Suggested path: music-server-frontend/src/components/Playlists.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 const Modal = ({ children, onClose }) => (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
@@ -49,8 +49,11 @@ const ConfirmationModal = ({ onClose, onConfirm, title, message }) => (
 
 
 function Playlists({ credentials, onNavigate }) {
+    const [allPlaylists, setAllPlaylists] = useState([]);
     const [playlists, setPlaylists] = useState([]);
     const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
     const [isCreating, setIsCreating] = useState(false);
     const [successMessage, setSuccessMessage] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
@@ -70,18 +73,42 @@ function Playlists({ credentials, onNavigate }) {
     }, [credentials]);
 
     const fetchPlaylists = useCallback(async () => {
+        setIsLoading(true);
         try {
             const data = await subsonicFetch('getPlaylists.view');
             const playlistData = data.playlists?.playlist || [];
-            setPlaylists(Array.isArray(playlistData) ? playlistData : [playlistData]);
+            const fullList = Array.isArray(playlistData) ? playlistData : [playlistData];
+            setAllPlaylists(fullList);
+            setPlaylists(fullList.slice(0, 50));
+            setHasMore(fullList.length > 50);
         } catch (err) {
             setError(err.message);
+        } finally {
+            setIsLoading(false);
         }
     }, [subsonicFetch]);
 
     useEffect(() => {
         fetchPlaylists();
     }, [fetchPlaylists]);
+
+    const loadMore = useCallback(() => {
+        if (!hasMore) return;
+        const newVisibleCount = playlists.length + 50;
+        setPlaylists(allPlaylists.slice(0, newVisibleCount));
+        setHasMore(newVisibleCount < allPlaylists.length);
+    }, [hasMore, playlists.length, allPlaylists]);
+
+    const observer = useRef();
+    const lastPlaylistElementRef = useCallback(node => {
+        if (observer.current) observer.current.disconnect();
+        observer.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting && hasMore) {
+                loadMore();
+            }
+        });
+        if (node) observer.current.observe(node);
+    }, [hasMore, loadMore]);
 
     const handleCreatePlaylist = async (name) => {
         setError('');
@@ -117,7 +144,6 @@ function Playlists({ credentials, onNavigate }) {
         setSuccessMessage('Generating Sonic Fingerprint...');
         setIsGenerating(true);
         try {
-            // 1. Get the fingerprint songs
             const fingerprintData = await subsonicFetch('getSonicFingerprint.view');
             const songs = fingerprintData.directory?.song ? (Array.isArray(fingerprintData.directory.song) ? fingerprintData.directory.song : [fingerprintData.directory.song]) : [];
 
@@ -127,27 +153,22 @@ function Playlists({ credentials, onNavigate }) {
                 return;
             }
 
-            // 2. Create a new playlist with a unique name
             const playlistName = `Sonic Fingerprint ${new Date().toLocaleDateString()}`;
             await subsonicFetch('createPlaylist.view', { name: playlistName });
             
-            // 3. Find the newly created playlist to get its ID
             const playlistsData = await subsonicFetch('getPlaylists.view');
-            const allPlaylists = playlistsData.playlists?.playlist || [];
-            const newPlaylist = (Array.isArray(allPlaylists) ? allPlaylists : [allPlaylists]).find(p => p.name === playlistName);
+            const allPlaylistsData = playlistsData.playlists?.playlist || [];
+            const newPlaylist = (Array.isArray(allPlaylistsData) ? allPlaylistsData : [allPlaylistsData]).find(p => p.name === playlistName);
 
-            if (!newPlaylist) {
-                throw new Error("Could not find the newly created playlist to add songs to it.");
-            }
+            if (!newPlaylist) throw new Error("Could not find the newly created playlist.");
 
-            // 4. Add songs to the new playlist
             setSuccessMessage(`Created playlist "${playlistName}". Now adding ${songs.length} songs...`);
             for (const song of songs) {
                 await subsonicFetch('updatePlaylist.view', { playlistId: newPlaylist.id, songIdToAdd: song.id });
             }
 
             setSuccessMessage(`Successfully created "${playlistName}" with ${songs.length} songs!`);
-            fetchPlaylists(); // Refresh the list
+            fetchPlaylists();
 
         } catch (err) {
             setError(err.message || 'Failed to create Sonic Fingerprint playlist.');
@@ -187,8 +208,12 @@ function Playlists({ credentials, onNavigate }) {
             )}
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {playlists.map(p => (
-                    <div key={p.id} className="bg-gray-800 rounded-lg p-4 flex flex-col justify-between">
+                {playlists.map((p, index) => (
+                    <div 
+                        ref={index === playlists.length - 1 ? lastPlaylistElementRef : null}
+                        key={p.id} 
+                        className="bg-gray-800 rounded-lg p-4 flex flex-col justify-between"
+                    >
                         <div>
                             <h3 className="font-bold text-lg truncate hover:text-teal-400 cursor-pointer" onClick={() => onNavigate({ page: 'songs', title: p.name, filter: { playlistId: p.id } })}>
                                 {p.name}
@@ -203,9 +228,10 @@ function Playlists({ credentials, onNavigate }) {
                     </div>
                 ))}
             </div>
+            {isLoading && allPlaylists.length === 0 && <p className="text-center text-gray-400 mt-4">Loading playlists...</p>}
+            {!hasMore && playlists.length > 0 && <p className="text-center text-gray-500 mt-4">End of list.</p>}
         </div>
     );
 }
 
 export default Playlists;
-

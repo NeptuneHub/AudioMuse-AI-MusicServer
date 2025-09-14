@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/disintegration/imaging"
 	"github.com/dhowden/tag"
 	"github.com/gin-gonic/gin"
 )
@@ -302,20 +304,27 @@ func subsonicGetCoverArt(c *gin.Context) {
 		return
 	}
 
+	sizeStr := c.DefaultQuery("size", "512")
+	size, err := strconv.Atoi(sizeStr)
+	if err != nil {
+		size = 512 // Default on parse error
+	}
+
 	if _, err := strconv.Atoi(id); err == nil {
-		handleAlbumArt(c, id)
+		handleAlbumArt(c, id, size)
 	} else {
-		handleArtistArt(c, id)
+		handleArtistArt(c, id, size)
 	}
 }
 
-func handleAlbumArt(c *gin.Context, songID string) {
+func handleAlbumArt(c *gin.Context, songID string, size int) {
 	var path string
 	err := db.QueryRow("SELECT path FROM songs WHERE id = ?", songID).Scan(&path)
 	if err != nil {
 		c.Status(http.StatusNotFound)
 		return
 	}
+	log.Printf("[COVER ART] Found path for song ID %s: %s", songID, path)
 
 	file, err := os.Open(path)
 	if err != nil {
@@ -327,24 +336,28 @@ func handleAlbumArt(c *gin.Context, songID string) {
 	meta, err := tag.ReadFrom(file)
 	if err == nil && meta.Picture() != nil {
 		pic := meta.Picture()
-		c.Data(http.StatusOK, pic.MIMEType, pic.Data)
+		log.Printf("[COVER ART] Found embedded picture in %s", path)
+		resizeAndServeImage(c, bytes.NewReader(pic.Data), pic.MIMEType, size)
 		return
 	}
 
 	albumDir := filepath.Dir(path)
 	if imagePath, ok := findLocalImage(albumDir); ok {
-		c.File(imagePath)
-		return
+		log.Printf("[COVER ART] Found local image file: %s", imagePath)
+		localFile, err := os.Open(imagePath)
+		if err == nil {
+			defer localFile.Close()
+			resizeAndServeImage(c, localFile, http.DetectContentType(nil), size)
+			return
+		}
 	}
 
+	log.Printf("[COVER ART] No cover art found for song ID %s", songID)
 	c.Status(http.StatusNotFound)
 }
 
-func handleArtistArt(c *gin.Context, artistName string) {
-	log.Printf("[ARTIST ART] Handling request for artist: '%s'", artistName)
-
-	log.Printf("[ARTIST ART] Attempting to fetch image from MusicBrainz for '%s'", artistName)
-	if imageUrl, err := fetchArtistImageFromMusicBrainz(artistName); err == nil && imageUrl != "" {
+func handleArtistArt(c *gin.Context, artistName string, size int) {
+	if imageUrl, err := fetchArtistImageFromMusicBrainz(artistName, size); err == nil && imageUrl != "" {
 		log.Printf("[ARTIST ART] Found image on MusicBrainz for '%s'. Proxying URL: %s", artistName, imageUrl)
 		proxyImage(c, imageUrl)
 		return
@@ -354,20 +367,18 @@ func handleArtistArt(c *gin.Context, artistName string) {
 		log.Printf("[ARTIST ART] No image found on MusicBrainz for '%s'", artistName)
 	}
 
-	log.Printf("[ARTIST ART] MusicBrainz failed. Falling back to local file search for '%s'", artistName)
 	var songPath string
 	err := db.QueryRow("SELECT path FROM songs WHERE artist = ? LIMIT 1", artistName).Scan(&songPath)
 	if err == nil {
 		artistDir := filepath.Dir(songPath)
-		log.Printf("[ARTIST ART] Found song path, artist directory for '%s' is '%s'", artistName, artistDir)
 		if imagePath, ok := findLocalImage(artistDir); ok {
-			log.Printf("[ARTIST ART] Found local image for '%s' at: %s", artistName, imagePath)
-			c.File(imagePath)
-			return
+			localFile, err := os.Open(imagePath)
+			if err == nil {
+				defer localFile.Close()
+				resizeAndServeImage(c, localFile, http.DetectContentType(nil), size)
+				return
+			}
 		}
-		log.Printf("[ARTIST ART] No local image file found in '%s'", artistDir)
-	} else {
-		log.Printf("[ARTIST ART] Could not find any song path for artist '%s' to locate local art. DB error: %v", artistName, err)
 	}
 
 	log.Printf("[ARTIST ART] All methods failed for '%s'. Returning 404.", artistName)
@@ -385,7 +396,40 @@ func findLocalImage(dir string) (string, bool) {
 	return "", false
 }
 
-func fetchArtistImageFromMusicBrainz(artistName string) (string, error) {
+func resizeAndServeImage(c *gin.Context, reader io.Reader, contentType string, size int) {
+	img, err := imaging.Decode(reader)
+	if err != nil {
+		log.Printf("[RESIZE] Failed to decode image: %v", err)
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+
+	resizedImg := imaging.Fit(img, size, size, imaging.Lanczos)
+
+	var format imaging.Format
+	switch contentType {
+	case "image/jpeg":
+		format = imaging.JPEG
+	case "image/png":
+		format = imaging.PNG
+	case "image/gif":
+		format = imaging.GIF
+	case "image/tiff":
+		format = imaging.TIFF
+	case "image/bmp":
+		format = imaging.BMP
+	default:
+		format = imaging.JPEG // Default to JPEG
+	}
+
+	c.Header("Content-Type", contentType)
+	err = imaging.Encode(c.Writer, resizedImg, format)
+	if err != nil {
+		log.Printf("[RESIZE] Failed to encode resized image: %v", err)
+	}
+}
+
+func fetchArtistImageFromMusicBrainz(artistName string, size int) (string, error) {
 	searchURL := fmt.Sprintf("https://musicbrainz.org/ws/2/artist/?query=artist:%s&fmt=json", url.QueryEscape(artistName))
 	log.Printf("[MBrainz] Constructed search URL: %s", searchURL)
 
@@ -462,7 +506,7 @@ func fetchArtistImageFromMusicBrainz(artistName string) (string, error) {
 			imageUrl := rel.URL.Resource
 			if strings.Contains(imageUrl, "commons.wikimedia.org/wiki/File:") {
 				fileName := filepath.Base(imageUrl)
-				finalUrl := fmt.Sprintf("https://commons.wikimedia.org/w/index.php?title=Special:Redirect/file/%s&width=300", url.QueryEscape(fileName))
+				finalUrl := fmt.Sprintf("https://commons.wikimedia.org/w/index.php?title=Special:Redirect/file/%s&width=%d", url.QueryEscape(fileName), size)
 				log.Printf("[MBrainz] Found wikimedia image, transforming to direct link: %s", finalUrl)
 				return finalUrl, nil
 			}
