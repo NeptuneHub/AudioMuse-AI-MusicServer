@@ -9,8 +9,7 @@ FROM golang:1.24-bullseye AS backend-builder
 WORKDIR /src
 COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer/music-server-backend ./music-server-backend
 WORKDIR /src/music-server-backend
-# Use existing go.mod and go.sum files
-RUN go mod download
+# Directly build the Go application
 RUN CGO_ENABLED=1 go build -o /app/music-server .
 
 # STAGE 3: Install React Frontend Dependencies
