@@ -93,9 +93,8 @@ export POSTGRES_HOST="127.0.0.1"
 cd /app/audiomuse-core
 
 echo "Starting RQ workers..."
-rq worker -u redis://12.0.0.1:6379/0 &
+rq worker -u redis://127.0.0.1:6379/0 &
 rq worker -u redis://127.0.0.1:6379/0 &
 
 echo "Starting Flask server..."
 exec python3 app.py
-
