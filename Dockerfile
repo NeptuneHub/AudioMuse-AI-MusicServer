@@ -5,12 +5,12 @@ WORKDIR /src
 RUN git clone https://github.com/NeptuneHub/AudioMuse-AI-MusicServer.git
 
 # STAGE 2: Build Go Backend for Music Server
-FROM golang:1.21-bullseye AS backend-builder
+FROM golang:1.24-bullseye AS backend-builder
 WORKDIR /src
 COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer/music-server-backend ./music-server-backend
 WORKDIR /src/music-server-backend
-RUN if [ ! -f go.mod ]; then go mod init audiomuse-server; fi
-RUN go mod tidy
+# Use existing go.mod and go.sum files
+RUN go mod download
 RUN CGO_ENABLED=1 go build -o /app/music-server .
 
 # STAGE 3: Install React Frontend Dependencies
