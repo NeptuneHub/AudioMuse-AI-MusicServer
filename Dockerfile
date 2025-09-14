@@ -7,34 +7,33 @@ WORKDIR /src
 COPY . ./AudioMuse-AI-MusicServer
 
 # STAGE 2: Build Go Backend for Music Server
-FROM golang:1.24-alpine AS backend-builder
-# Install build dependencies for Alpine
-RUN apk add --no-cache gcc musl-dev sqlite-dev
+FROM golang:1.24-bullseye AS backend-builder
 WORKDIR /src
 COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer .
 WORKDIR /src/music-server-backend
 RUN go mod init music-server-backend || true
 RUN go mod tidy
-# Build static binary for Alpine
-RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o music-server .
+RUN CGO_ENABLED=1 go build -o music-server .
 
 # STAGE 3: Build React Frontend for Music Server
-FROM node:18-bullseye AS frontend-builder
+FROM node:20-bullseye AS frontend-builder
 WORKDIR /src
 COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer .
 WORKDIR /src/music-server-frontend
 RUN npm install
 
 # STAGE 4: Final runtime image
-FROM node:20-alpine
+FROM node:20-bullseye
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
-RUN apk update && apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
-    sqlite \
+    sqlite3 \
     curl \
     bash \
-    && rm -rf /var/cache/apk/*
+    && rm -rf /var/lib/apt/lists/*
 
 # Create application directory
 WORKDIR /app
