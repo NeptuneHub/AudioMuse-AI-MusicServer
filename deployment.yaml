@@ -1,15 +1,15 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: audiomuse-all-in-one
+  name: audiomuse-ai-all-in-one
 
 ---
 
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: audiomuse-config-pvc
-  namespace: audiomuse-all-in-one
+  name: audiomuse-ai-config-pvc
+  namespace: audiomuse-ai-all-in-one
 spec:
   accessModes:
     - ReadWriteOnce
@@ -23,8 +23,8 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: audiomuse-music-pvc
-  namespace: audiomuse-all-in-one
+  name: audiomuse-ai-music-pvc
+  namespace: audiomuse-ai-all-in-one
 spec:
   accessModes:
     - ReadWriteOnce
@@ -38,24 +38,28 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: audiomuse-all-in-one-deployment
-  namespace: audiomuse-all-in-one
+  name: audiomuse-ai-all-in-one-deployment
+  namespace: audiomuse-ai-all-in-one
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: audiomuse-all-in-one
+      app: audiomuse-ai-all-in-one
   template:
     metadata:
       labels:
-        app: audiomuse-all-in-one
+        app: audiomuse-ai-all-in-one
     spec:
       containers:
-      - name: audiomuse-all-in-one
+      - name: audiomuse-ai-all-in-one
         image: ghcr.io/neptunehub/audiomuse-ai-musicserver:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 8080  # Music Server Backend
         - containerPort: 3000  # Music Server Frontend
+        env:
+        - name: DATABASE_PATH
+          value: "/config/music.db"
         volumeMounts:
         - name: config-storage
           mountPath: /config  # ALL DATABASES GO HERE
@@ -64,10 +68,10 @@ spec:
       volumes:
       - name: config-storage
         persistentVolumeClaim:
-          claimName: audiomuse-config-pvc
+          claimName: audiomuse-ai-config-pvc
       - name: music-storage
         persistentVolumeClaim:
-          claimName: audiomuse-music-pvc
+          claimName: audiomuse-ai-music-pvc
 
 ---
 
@@ -75,12 +79,12 @@ apiVersion: v1
 kind: Service
 metadata:
   name: audiomuse-service
-  namespace: audiomuse
+  namespace: audiomuse-ai-all-in-one
 spec:
   selector:
-    app: audiomuse
+    app: audiomuse-ai-all-in-one
   type: LoadBalancer
-  loadBalancerIP: 192.168.3.77  # Optional: specify a static IP if your environment supports it, or comment it
+  #loadBalancerIP: 192.168.3.77  # Optional: specify a static IP if your environment supports it, or comment it
   ports:
     - name: frontend
       protocol: TCP
