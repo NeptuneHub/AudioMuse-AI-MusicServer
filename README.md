@@ -20,9 +20,6 @@ After deploying AudioMsue-AI-Music server it could be reached at this two url:
 * Frontend for web access: http://localhost:3000/ 
 * Backend to be reached from Open Subsonic APP: http://localhost:8080/ 
 
-# Developer
-This is instruction to run both backend and frontned on your developing envirorment
-
 ## Music server configuration
 
 The first login can be don with:
@@ -38,6 +35,9 @@ After both of this point done, you can start the Sonic Analysis diectly from the
 * Sonic Path
 
 **IMPORTANT:** This is a Open Subsonic API compliant server (or it should be), so you need to configure AudioMuse-AI with the **navidrome** deployment, setting url, user and password correctly.
+
+# Developer
+This is instruction to run both backend and frontned on your developing envirorment
 
 ## Compile and run backend
 Going in /music-server-backend/
