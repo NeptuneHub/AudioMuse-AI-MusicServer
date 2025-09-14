@@ -1,25 +1,19 @@
-# STAGE 1: Fetch all source code for a more robust build
-FROM ubuntu:22.04 AS source-fetcher
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
-WORKDIR /src
-RUN git clone https://github.com/NeptuneHub/AudioMuse-AI-MusicServer.git
-
-# STAGE 2: Build Go Backend for Music Server
+# STAGE 1: Build Go Backend for Music Server (using local files)
 FROM golang:1.24-bullseye AS backend-builder
-WORKDIR /src
-COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer/music-server-backend ./music-server-backend
 WORKDIR /src/music-server-backend
-# Directly build the Go application
+# Copy the local backend files directly
+COPY music-server-backend/ .
+# Build the Go application
 RUN CGO_ENABLED=1 go build -o /app/music-server .
 
-# STAGE 3: Install React Frontend Dependencies
+# STAGE 2: Install React Frontend Dependencies
 FROM node:20-alpine AS frontend-builder
-WORKDIR /src
-COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer .
 WORKDIR /src/music-server-frontend
+# Copy the local frontend files directly
+COPY music-server-frontend/ .
 RUN npm install
 
-# STAGE 4: Final Assembled Image
+# STAGE 3: Final Assembled Image
 FROM ghcr.io/neptunehub/audiomuse-ai:latest
 
 ENV DEBIAN_FRONTEND=noninteractive
