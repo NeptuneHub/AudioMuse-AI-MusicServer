@@ -7,10 +7,6 @@ on:
   
   # Manual trigger
   workflow_dispatch:
-  
-  # Trigger on push to main branch (optional)
-  push:
-    branches: [ main ]
 
 env:
   REGISTRY: ghcr.io
