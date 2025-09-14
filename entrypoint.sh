@@ -4,8 +4,6 @@ set -e
 CONFIG_DIR="/config/postgres-data"
 
 # --- 1. ALWAYS ensure correct ownership and permissions ---
-# This is the critical fix. These commands must run every time to prevent
-# permission errors on subsequent container starts with a persistent volume.
 echo "Ensuring correct permissions for PostgreSQL data directory..."
 mkdir -p "$CONFIG_DIR"
 chown -R postgres:postgres "$CONFIG_DIR"
@@ -14,16 +12,13 @@ chmod 700 "$CONFIG_DIR"
 # --- 2. Perform one-time DB initialization if needed ---
 if [ ! -f "$CONFIG_DIR/PG_VERSION" ]; then
     echo "PostgreSQL data directory not found. Initializing new database..."
-    # The directory and permissions are already set, we just need to init.
     su postgres -c "/usr/lib/postgresql/14/bin/initdb --username=postgres --no-locale -D '$CONFIG_DIR'"
     
-    # Temporarily start postgres to create user, db, and seed initial config
     su postgres -c "/usr/lib/postgresql/14/bin/pg_ctl -D '$CONFIG_DIR' -w start"
     
     su postgres -c "psql --command \"CREATE USER audiomuse WITH SUPERUSER PASSWORD 'audiomusepassword';\""
     su postgres -c "psql --command \"CREATE DATABASE audiomusedb OWNER audiomuse;\""
     
-    # Seed the database with the required configuration for the music server.
     echo "Seeding initial configuration for music server..."
     su postgres -c "psql audiomusedb --command \"CREATE TABLE IF NOT EXISTS configuration (key TEXT PRIMARY KEY, value TEXT);\""
     su postgres -c "psql audiomusedb --command \"INSERT INTO configuration (key, value) VALUES ('audiomuse_ai_core_url', 'http://localhost:8000') ON CONFLICT (key) DO NOTHING;\""
@@ -60,14 +55,26 @@ until curl -s -f -o /dev/null "http://localhost:8080/rest/ping.view"; do
 done
 echo "Music Server is up."
 
-# --- 5. Get API Token with Retry Logic ---
+# --- 5. Get API Token with Robust Retry Logic ---
 echo "All services are up. Requesting API token..."
 API_TOKEN=""
+# Loop until the API endpoint returns a 200 OK AND we get a valid token.
 until [ -n "$API_TOKEN" ] && [ "$API_TOKEN" != "null" ]; do
     echo "Attempting to fetch API token..."
-    API_TOKEN=$(curl -s "http://localhost:8080/rest/getApiKey.view?u=admin&p=admin&f=json" | jq -r '."subsonic-response".apiKey.key // ""') || true
+    
+    # First, check if the endpoint is even ready by looking for a 200 status code.
+    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8080/rest/getApiKey.view?u=admin&p=admin&f=json")
+    
+    if [ "$HTTP_STATUS" -eq 200 ]; then
+        # If the endpoint is ready, then try to get and parse the token.
+        API_TOKEN=$(curl -s "http://localhost:8080/rest/getApiKey.view?u=admin&p=admin&f=json" | jq -r '."subsonic-response".apiKey.key // ""') || true
+    else
+        echo "API endpoint returned status $HTTP_STATUS. Waiting for it to become ready..."
+        API_TOKEN="" # Ensure token is empty to force a retry
+    fi
+    
     if [ -z "$API_TOKEN" ] || [ "$API_TOKEN" == "null" ]; then
-        echo "Failed to get API token, retrying in 5 seconds..."
+        echo "Failed to get a valid API token, retrying in 5 seconds..."
         sleep 5
     fi
 done
@@ -76,23 +83,19 @@ echo "Successfully retrieved API token."
 # --- 6. Start the AI Core (Flask App and RQ Workers) ---
 echo "Starting AudioMuse-AI Core services..."
 
-# Set environment variables for the following processes
 export NAVIDROME_PASSWORD="$API_TOKEN"
 export NAVIDROME_USER="admin"
 export MEDIASERVER_TYPE="navidrome"
-export NAVIDROME_URL="http://localhost:8000"
+export NAVIDROME_URL="http://localhost:8080"
 export SERVICE_TYPE="flask"
 export POSTGRES_HOST="127.0.0.1"
 
-# Change to the correct directory
 cd /app/audiomuse-core
 
-# Start RQ workers in the background
 echo "Starting RQ workers..."
-rq worker -u redis://127.0.0.1:6379/0 &
+rq worker -u redis://12.0.0.1:6379/0 &
 rq worker -u redis://127.0.0.1:6379/0 &
 
-# Start the main Flask app in the foreground using exec
 echo "Starting Flask server..."
 exec python3 app.py
 
