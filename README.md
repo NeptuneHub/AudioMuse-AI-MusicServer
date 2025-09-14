@@ -23,6 +23,22 @@ After deploying AudioMsue-AI-Music server it could be reached at this two url:
 # Developer
 This is instruction to run both backend and frontned on your developing envirorment
 
+## Music server configuration
+
+The first login can be don with:
+* User: admin
+* passwoord: admin
+
+The configuration needed is go in the admin tab and:
+* add the path of the song, and start the scanning, depending from the size of the library could takes several minutes. This is just to add the  song to the mediaserver
+* configure the path of `AudioMuse-AI` (the core contianer)
+
+After both of this point done, you can start the Sonic Analysis diectly from the Music Server, after the analysis is completed you can run the integrated Sonic Analysis function that now are:
+* Instnat Mix
+* Sonic Path
+
+**IMPORTANT:** This is a Open Subsonic API compliant server (or it should be), so you need to configure AudioMuse-AI with the **navidrome** deployment, setting url, user and password correctly.
+
 ## Compile and run backend
 Going in /music-server-backend/
 
