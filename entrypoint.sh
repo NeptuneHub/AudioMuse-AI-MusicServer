@@ -205,7 +205,6 @@ echo "Testing music server API capabilities..."
 PING_RESULT=$(curl -s "http://localhost:8080/rest/ping.view?u=admin&p=admin&f=json" 2>/dev/null || echo "FAILED")
 echo "Basic ping test result: $PING_RESULT"
 
-# Keep using admin password for now
 echo "✓ Using NAVIDROME_PASSWORD='admin'"
 
 echo "=== STEP 10: Creating AudioMuse-AI Environment File ==="
@@ -228,102 +227,256 @@ EOF
 
 echo "✓ Environment file created with NAVIDROME_PASSWORD=${NAVIDROME_PASSWORD}"
 
-echo "=== STEP 11: Starting AudioMuse-AI Core with ALL LOGS IN CONTAINER ==="
+echo "=== STEP 11: Starting AudioMuse-AI Core with MAXIMUM JOB DEBUGGING ==="
 
 cd /app/audiomuse-core
 
-# Create named pipes for log streaming
-mkfifo /tmp/flask_log /tmp/worker1_log /tmp/worker2_log
+# Create a Redis monitor to watch ALL Redis activity
+redis-cli monitor > /tmp/redis_monitor.log &
+REDIS_MONITOR_PID=$!
 
-# Function to start log forwarders that prefix output
+# Create enhanced startup scripts with comprehensive job tracking
+cat > start_flask.sh << 'EOF'
+#!/bin/bash
+source /etc/profile.d/audiomuse-system.sh
+
+echo "=== AUDIOMUSE-AI FLASK STARTING ==="
+echo "Time: $(date)"
+echo "Working Directory: $(pwd)"
+echo "Environment Variables:"
+printenv | grep -E "(NAVIDROME|POSTGRES|REDIS|SERVICE)" | sort
+
+# Test all connections
+echo "Testing connections..."
+python3 -c "
+import os, sys
+import psycopg2
+import redis
+import requests
+from rq import Queue
+
+try:
+    # Test Redis
+    r = redis.from_url(os.environ['REDIS_URL'])
+    r.ping()
+    print('✓ Redis connection successful')
+    
+    # Test Queue
+    q = Queue(connection=r)
+    print(f'✓ Queue created, current length: {len(q)}')
+    
+    # Test Database
+    conn = psycopg2.connect(
+        host=os.environ['POSTGRES_HOST'],
+        port=os.environ['POSTGRES_PORT'],
+        database=os.environ['POSTGRES_DB'],
+        user=os.environ['POSTGRES_USER'],
+        password=os.environ['POSTGRES_PASSWORD']
+    )
+    print('✓ Database connection successful')
+    conn.close()
+    
+    # Test Music Server
+    resp = requests.get(f\"{os.environ['NAVIDROME_URL']}/rest/ping.view?u={os.environ['NAVIDROME_USER']}&p={os.environ['NAVIDROME_PASSWORD']}&f=json\", timeout=5)
+    if resp.status_code == 200:
+        print('✓ Music server connection successful')
+        print(f'   Response: {resp.text[:100]}')
+    else:
+        print(f'⚠ Music server responded with status {resp.status_code}')
+        
+except Exception as e:
+    print(f'✗ Connection test failed: {e}')
+    import traceback
+    traceback.print_exc()
+"
+
+echo "=== FLASK LOGS ==="
+
+# Start Flask with ALL debugging enabled
+export FLASK_DEBUG=1
+export FLASK_ENV=development
+export PYTHONUNBUFFERED=1
+python3 app.py 2>&1
+EOF
+chmod +x start_flask.sh
+
+cat > start_worker.sh << 'EOF'
+#!/bin/bash
+source /etc/profile.d/audiomuse-system.sh
+
+echo "=== AUDIOMUSE-AI WORKER STARTING ==="
+echo "Time: $(date)"
+echo "Working Directory: $(pwd)"
+echo "Environment Variables:"
+printenv | grep -E "(NAVIDROME|POSTGRES|REDIS|SERVICE)" | sort
+
+# Test connections with detailed output
+echo "Testing worker connections..."
+python3 -c "
+import os, sys
+import redis
+import psycopg2
+from rq import Queue, Worker
+from rq.job import Job
+import logging
+
+# Enable detailed logging
+logging.basicConfig(level=logging.DEBUG)
+
+try:
+    # Test Redis
+    r = redis.from_url(os.environ['REDIS_URL'])
+    r.ping()
+    print('✓ Redis connection successful')
+    
+    # Test Queue and show all jobs
+    q = Queue(connection=r)
+    print(f'✓ Queue created, current length: {len(q)}')
+    print(f'✓ Queue jobs: {q.job_ids}')
+    
+    # Show queue registry
+    from rq.registry import StartedJobRegistry, FinishedJobRegistry, FailedJobRegistry
+    started_registry = StartedJobRegistry(connection=r)
+    finished_registry = FinishedJobRegistry(connection=r)
+    failed_registry = FailedJobRegistry(connection=r)
+    
+    print(f'✓ Started jobs: {len(started_registry)}')
+    print(f'✓ Finished jobs: {len(finished_registry)}')
+    print(f'✓ Failed jobs: {len(failed_registry)}')
+    
+    if len(failed_registry) > 0:
+        print('Failed jobs details:')
+        for job_id in failed_registry.get_job_ids():
+            try:
+                job = Job.fetch(job_id, connection=r)
+                print(f'  - {job_id}: {job.exc_info}')
+            except Exception as e:
+                print(f'  - {job_id}: Could not fetch job details: {e}')
+    
+    # Test Database
+    conn = psycopg2.connect(
+        host=os.environ['POSTGRES_HOST'],
+        port=os.environ['POSTGRES_PORT'],
+        database=os.environ['POSTGRES_DB'],
+        user=os.environ['POSTGRES_USER'],
+        password=os.environ['POSTGRES_PASSWORD']
+    )
+    print('✓ Database connection successful')
+    conn.close()
+    
+except Exception as e:
+    print(f'✗ Worker connection test failed: {e}')
+    import traceback
+    traceback.print_exc()
+"
+
+echo "=== WORKER LOGS ==="
+
+# Start RQ worker with MAXIMUM debugging
+export PYTHONUNBUFFERED=1
+export RQ_WORKER_LOG_LEVEL=DEBUG
+export PYTHONPATH=/app/audiomuse-core:$PYTHONPATH
+
+# Start worker with job failure logging
+rq worker -u redis://127.0.0.1:6379/0 --verbose --with-scheduler --exception-handler rq.handlers.move_to_failed_queue 2>&1
+EOF
+chmod +x start_worker.sh
+
+# Create a queue monitor script
+cat > monitor_queue.sh << 'EOF'
+#!/bin/bash
+source /etc/profile.d/audiomuse-system.sh
+
+echo "=== QUEUE MONITOR STARTING ==="
+while true; do
+    echo "[QUEUE-MONITOR $(date '+%H:%M:%S')] Checking queue status..."
+    python3 -c "
+import redis
+from rq import Queue
+from rq.registry import StartedJobRegistry, FinishedJobRegistry, FailedJobRegistry
+import os
+
+try:
+    r = redis.from_url(os.environ['REDIS_URL'])
+    q = Queue(connection=r)
+    
+    started_registry = StartedJobRegistry(connection=r)
+    finished_registry = FinishedJobRegistry(connection=r)
+    failed_registry = FailedJobRegistry(connection=r)
+    
+    print(f'Queue: {len(q)} jobs | Started: {len(started_registry)} | Finished: {len(finished_registry)} | Failed: {len(failed_registry)}')
+    
+    if len(q) > 0:
+        print('Pending jobs:')
+        for job_id in q.job_ids[:5]:  # Show first 5
+            try:
+                from rq.job import Job
+                job = Job.fetch(job_id, connection=r)
+                print(f'  - {job_id}: {job.func_name} | Status: {job.get_status()}')
+            except Exception as e:
+                print(f'  - {job_id}: Error fetching job: {e}')
+    
+    if len(failed_registry) > 0:
+        print('Recent failed jobs:')
+        for job_id in failed_registry.get_job_ids()[:3]:  # Show first 3
+            try:
+                from rq.job import Job
+                job = Job.fetch(job_id, connection=r)
+                print(f'  - {job_id}: {job.exc_info}')
+            except Exception as e:
+                print(f'  - {job_id}: Error fetching failed job: {e}')
+                
+except Exception as e:
+    print(f'Queue monitor error: {e}')
+"
+    sleep 30
+done
+EOF
+chmod +x monitor_queue.sh
+
+# Create named pipes for log streaming
+mkfifo /tmp/flask_log /tmp/worker_log /tmp/queue_log /tmp/redis_log 2>/dev/null || true
+
+# Function to start log forwarders with timestamps
 start_log_forwarder() {
     local pipe_name="$1"
     local prefix="$2"
     
     while IFS= read -r line; do
-        echo "[$prefix] $line"
+        echo "[$prefix $(date '+%H:%M:%S')] $line"
     done < "$pipe_name" &
 }
 
 # Start log forwarders
 start_log_forwarder /tmp/flask_log "FLASK"
-start_log_forwarder /tmp/worker1_log "WORKER-1"
-start_log_forwarder /tmp/worker2_log "WORKER-2"
+start_log_forwarder /tmp/worker_log "WORKER"
+start_log_forwarder /tmp/queue_log "QUEUE"
+start_log_forwarder /tmp/redis_monitor.log "REDIS"
 
-# Create startup scripts that output to named pipes
-cat > start_flask.sh << 'EOF'
-#!/bin/bash
-source /etc/profile.d/audiomuse-system.sh
+# Monitor Redis activity
+echo "[CONTAINER] Starting Redis monitor..."
+tail -f /tmp/redis_monitor.log > /tmp/redis_log &
 
-{
-    echo "=== AUDIOMUSE-AI FLASK STARTING ==="
-    echo "Time: $(date)"
-    echo "Working Directory: $(pwd)"
-    echo "Environment Variables:"
-    printenv | grep -E "(NAVIDROME|POSTGRES|REDIS|SERVICE)" | sort
-    echo "=== FLASK LOGS ==="
-    
-    # Start Flask with all output
-    FLASK_DEBUG=1 python3 app.py 2>&1
-} > /tmp/flask_log
-EOF
-chmod +x start_flask.sh
+# Start Queue Monitor
+echo "[CONTAINER] Starting Queue Monitor..."
+./monitor_queue.sh > /tmp/queue_log 2>&1 &
+QUEUE_MONITOR_PID=$!
 
-cat > start_worker1.sh << 'EOF'
-#!/bin/bash
-source /etc/profile.d/audiomuse-system.sh
-
-{
-    echo "=== AUDIOMUSE-AI WORKER-1 STARTING ==="
-    echo "Time: $(date)"
-    echo "Working Directory: $(pwd)"
-    echo "Environment Variables:"
-    printenv | grep -E "(NAVIDROME|POSTGRES|REDIS|SERVICE)" | sort
-    echo "=== WORKER-1 LOGS ==="
-    
-    # Start RQ worker with all output
-    rq worker -u redis://127.0.0.1:6379/0 --verbose 2>&1
-} > /tmp/worker1_log
-EOF
-chmod +x start_worker1.sh
-
-cat > start_worker2.sh << 'EOF'
-#!/bin/bash
-source /etc/profile.d/audiomuse-system.sh
-
-{
-    echo "=== AUDIOMUSE-AI WORKER-2 STARTING ==="
-    echo "Time: $(date)"
-    echo "Working Directory: $(pwd)"
-    echo "Environment Variables:"
-    printenv | grep -E "(NAVIDROME|POSTGRES|REDIS|SERVICE)" | sort
-    echo "=== WORKER-2 LOGS ==="
-    
-    # Start RQ worker with all output
-    rq worker -u redis://127.0.0.1:6379/0 --verbose 2>&1
-} > /tmp/worker2_log
-EOF
-chmod +x start_worker2.sh
-
-# Start all AudioMuse-AI services
-echo "=== STARTING AUDIOMUSE-AI SERVICES ==="
-
-echo "[CONTAINER] Starting RQ Worker 1..."
-./start_worker1.sh &
-RQ_WORKER_1_PID=$!
-
-echo "[CONTAINER] Starting RQ Worker 2..."
-./start_worker2.sh &
-RQ_WORKER_2_PID=$!
-
+# Start Flask server
 echo "[CONTAINER] Starting Flask Server..."
-./start_flask.sh &
+./start_flask.sh > /tmp/flask_log 2>&1 &
 FLASK_PID=$!
 
-echo "✓ All AudioMuse-AI services started:"
+# Start ONLY ONE RQ worker
+echo "[CONTAINER] Starting RQ Worker..."
+./start_worker.sh > /tmp/worker_log 2>&1 &
+RQ_WORKER_PID=$!
+
+echo "✓ AudioMuse-AI services started:"
 echo "  - Flask PID: $FLASK_PID"
-echo "  - Worker 1 PID: $RQ_WORKER_1_PID"
-echo "  - Worker 2 PID: $RQ_WORKER_2_PID"
+echo "  - Worker PID: $RQ_WORKER_PID"
+echo "  - Queue Monitor PID: $QUEUE_MONITOR_PID"
+echo "  - Redis Monitor PID: $REDIS_MONITOR_PID"
 
 # Wait for Flask to be ready
 echo "[CONTAINER] Waiting for AudioMuse-AI Core to start..."
@@ -334,8 +487,6 @@ for i in {1..60}; do
     fi
     if [ $i -eq 60 ]; then
         echo "[CONTAINER] ⚠ AudioMuse-AI Core not responding after 60 attempts"
-        echo "[CONTAINER] Process status:"
-        ps aux | grep -E "(python|rq)" | grep -v grep
     fi
     sleep 2
 done
@@ -348,65 +499,52 @@ echo "📍 Services available at:"
 echo "   🎮 AudioMuse-AI Core:    http://localhost:8000"
 echo "   🎵 Music Server Backend: http://localhost:8080"
 echo "   🌐 Music Server Frontend: http://localhost:3000"
-echo "   🗄️  PostgreSQL Database:  localhost:5432"
 echo ""
 echo "🔧 Credentials:"
 echo "   Music Server - Username: ${NAVIDROME_USER}, Password: ${NAVIDROME_PASSWORD}"
-echo "   Database - Host: ${POSTGRES_HOST}:${POSTGRES_PORT}, DB: ${POSTGRES_DB}"
 echo ""
-echo "📋 Log Prefixes in Container Output:"
+echo "📋 Enhanced Log Prefixes:"
 echo "   [FLASK] - AudioMuse-AI Flask server logs"
-echo "   [WORKER-1] - RQ Worker 1 logs"
-echo "   [WORKER-2] - RQ Worker 2 logs"
+echo "   [WORKER] - RQ Worker logs with job processing details"
+echo "   [QUEUE] - Queue status monitoring every 30 seconds"
+echo "   [REDIS] - Redis command monitoring"
 echo "   [CONTAINER] - Container management logs"
 echo ""
+echo "🚀 Now start an analysis and watch for detailed job processing logs!"
 
-# Health monitoring with visible status
+# Simplified health monitoring
 while true; do
     sleep 60
     
-    # Check services and log to container output
+    # Check and restart services if needed
     if ! check_postgres; then
-        echo "[CONTAINER] ⚠ $(date): PostgreSQL is down, restarting..."
+        echo "[CONTAINER] ⚠ PostgreSQL down, restarting..."
         su postgres -c "/usr/lib/postgresql/14/bin/postgres -D /config/postgres-data -p 5432" &
         POSTGRES_PID=$!
     fi
     
     if ! check_service "redis" "redis-server"; then
-        echo "[CONTAINER] ⚠ $(date): Redis is down, restarting..."
+        echo "[CONTAINER] ⚠ Redis down, restarting..."
         /usr/bin/redis-server --daemonize yes --loglevel warning
-    fi
-    
-    if ! kill -0 $MUSIC_SERVER_PID 2>/dev/null; then
-        echo "[CONTAINER] ⚠ $(date): Music Server is down, restarting..."
-        cd /app/audiomuse-server && ./music-server &
-        MUSIC_SERVER_PID=$!
-    fi
-    
-    if ! kill -0 $FRONTEND_PID 2>/dev/null; then
-        echo "[CONTAINER] ⚠ $(date): Frontend is down, restarting..."
-        cd /app/audiomuse-server/music-server-frontend && npm start &
-        FRONTEND_PID=$!
+        redis-cli monitor > /tmp/redis_monitor.log &
+        REDIS_MONITOR_PID=$!
     fi
     
     if ! kill -0 $FLASK_PID 2>/dev/null; then
-        echo "[CONTAINER] ⚠ $(date): Flask server is down, restarting..."
-        cd /app/audiomuse-core && ./start_flask.sh &
+        echo "[CONTAINER] ⚠ Flask down, restarting..."
+        cd /app/audiomuse-core && ./start_flask.sh > /tmp/flask_log 2>&1 &
         FLASK_PID=$!
     fi
     
-    if ! kill -0 $RQ_WORKER_1_PID 2>/dev/null; then
-        echo "[CONTAINER] ⚠ $(date): RQ Worker 1 is down, restarting..."
-        cd /app/audiomuse-core && ./start_worker1.sh &
-        RQ_WORKER_1_PID=$!
+    if ! kill -0 $RQ_WORKER_PID 2>/dev/null; then
+        echo "[CONTAINER] ⚠ Worker down, restarting..."
+        cd /app/audiomuse-core && ./start_worker.sh > /tmp/worker_log 2>&1 &
+        RQ_WORKER_PID=$!
     fi
     
-    if ! kill -0 $RQ_WORKER_2_PID 2>/dev/null; then
-        echo "[CONTAINER] ⚠ $(date): RQ Worker 2 is down, restarting..."
-        cd /app/audiomuse-core && ./start_worker2.sh &
-        RQ_WORKER_2_PID=$!
+    if ! kill -0 $QUEUE_MONITOR_PID 2>/dev/null; then
+        echo "[CONTAINER] ⚠ Queue monitor down, restarting..."
+        cd /app/audiomuse-core && ./monitor_queue.sh > /tmp/queue_log 2>&1 &
+        QUEUE_MONITOR_PID=$!
     fi
-    
-    # Periodic status check
-    echo "[CONTAINER] $(date): Health check - All services running"
 done
