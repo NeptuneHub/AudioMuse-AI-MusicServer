@@ -52,7 +52,7 @@ spec:
     spec:
       containers:
       - name: audiomuse-all-in-one
-        image: 192.168.3.99:5000/audiomuse-ai-server:local
+        image: ghcr.io/neptunehub/audiomuse-ai-musicserver:latest
         ports:
         - containerPort: 8080  # Music Server Backend
         - containerPort: 3000  # Music Server Frontend
@@ -80,7 +80,7 @@ spec:
   selector:
     app: audiomuse
   type: LoadBalancer
-  #loadBalancerIP: 192.168.3.77
+  loadBalancerIP: 192.168.3.77  # Optional: specify a static IP if your environment supports it, or comment it
   ports:
     - name: frontend
       protocol: TCP
