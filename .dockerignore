@@ -60,6 +60,8 @@ yarn-error.log*
 
 # Dependency directories
 node_modules/
+*/node_modules/
+**/node_modules/
 
 # Optional cache directories
 .npm
@@ -73,3 +75,38 @@ config/music.db
 config/music.db-shm
 config/music.db-wal
 config/music-server
+
+# Git repository
+.git/
+.gitignore
+
+# NPM/Yarn files
+.npm/
+.yarn/
+yarn.lock
+package-lock.json
+
+# Build outputs
+build/
+dist/
+*/build/
+*/dist/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/

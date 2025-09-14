@@ -8,7 +8,7 @@ metadata:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: audiomuse-ai-config-pvc
+  name: audiomuse-config-pvc
   namespace: audiomuse-all-in-one
 spec:
   accessModes:
@@ -17,6 +17,22 @@ spec:
   resources:
     requests:
       storage: 5Gi
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: audiomuse-music-pvc
+  namespace: audiomuse-all-in-one
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 50Gi
+
 ---
 
 apiVersion: apps/v1
@@ -34,64 +50,44 @@ spec:
       labels:
         app: audiomuse-all-in-one
     spec:
-      securityContext:
-        runAsUser: 0
-        runAsGroup: 0
-        fsGroup: 0
       containers:
       - name: audiomuse-all-in-one
         image: 192.168.3.99:5000/audiomuse-ai-server:local
-        imagePullPolicy: Always
         ports:
-        - containerPort: 3000
-        - containerPort: 8080
-        - containerPort: 8000
+        - containerPort: 8080  # Music Server Backend
+        - containerPort: 3000  # Music Server Frontend
         volumeMounts:
         - name: config-storage
-          mountPath: /config
-        - name: media-usb
-          mountPath: /media-usb
-        - name: nfs1
-          mountPath: /media-NFS1
-        - name: nfs2
-          mountPath: /media-NFS2
+          mountPath: /config  # ALL DATABASES GO HERE
+        - name: music-storage
+          mountPath: /music   # MUSIC FILES GO HERE
       volumes:
       - name: config-storage
         persistentVolumeClaim:
-          claimName: audiomuse-ai-config-pvc
-      - name: media-usb
+          claimName: audiomuse-config-pvc
+      - name: music-storage
         persistentVolumeClaim:
-          claimName: servarr-pvc-usb
-      - name: nfs1
-        persistentVolumeClaim:
-          claimName: nfs1-pvc
-      - name: nfs2
-        persistentVolumeClaim:
-          claimName: nfs2-pvc
+          claimName: audiomuse-music-pvc
 
 ---
 
 apiVersion: v1
 kind: Service
 metadata:
-  name: audiomuse-all-in-one-service
-  namespace: audiomuse-all-in-one
+  name: audiomuse-service
+  namespace: audiomuse
 spec:
   selector:
-    app: audiomuse-all-in-one
+    app: audiomuse
   type: LoadBalancer
   loadBalancerIP: 192.168.3.77
   ports:
-    - name: react-frontend
+    - name: frontend
       protocol: TCP
       port: 3000
       targetPort: 3000
-    - name: go-backend
+    - name: backend
       protocol: TCP
       port: 8080
       targetPort: 8080
-    - name: python-core
-      protocol: TCP
-      port: 8000
-      targetPort: 8000
 
