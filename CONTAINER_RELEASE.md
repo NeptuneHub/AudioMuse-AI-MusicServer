@@ -4,7 +4,7 @@ This repository includes an automated GitHub Actions workflow that builds and pu
 
 ## Features
 
-- **Automated Nightly Builds**: Runs every midnight UTC
+- **Automated Nightly Builds**: Runs every Sunday on midnight UTC
 - **Manual Trigger**: Can be triggered manually from GitHub Actions tab
 - **Auto-incrementing Versions**: Each build increments the version number (1, 2, 3, etc.)
 - **Multiple Tags**: Each build creates both a versioned tag and updates the `latest` tag
