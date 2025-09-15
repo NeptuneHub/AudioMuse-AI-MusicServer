@@ -3,7 +3,7 @@ name: Build and Publish Container
 on:
   # Scheduled run every midnight UTC
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 0 * * 0'
   
   # Manual trigger
   workflow_dispatch:
