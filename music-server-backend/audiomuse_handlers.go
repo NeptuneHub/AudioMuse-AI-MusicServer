@@ -196,11 +196,8 @@ func subsonicGetSongPath(c *gin.Context) {
 }
 
 func subsonicGetSonicFingerprint(c *gin.Context) {
-	user := c.MustGet("user").(User)
-	if !user.IsAdmin {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
-		return
-	}
+	// Allow authenticated users to request sonic fingerprinting (heavy ops like clustering remain admin-only).
+	_ = c.MustGet("user").(User)
 
 	var coreURL string
 	err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL)
