@@ -131,9 +131,15 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                     <h2 className="text-xl font-bold text-white">Up Next</h2>
                     <div className="flex items-center space-x-2">
                          <button 
-                            onClick={handleCreatePath}
-                            disabled={!isPathCreationReady}
-                            className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1 px-3 rounded disabled:bg-gray-500 disabled:cursor-not-allowed"
+                            onClick={() => {
+                                if (!isPathCreationReady) {
+                                    alert('Select a start and end song to create a path.');
+                                    return;
+                                }
+                                // Minimal check: onCreateSongPath may depend on server config; call and let backend handle errors
+                                handleCreatePath();
+                            }}
+                            className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1 px-3 rounded"
                          >
                             Create Song Path
                         </button>

@@ -121,7 +121,7 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
             try {
                 if (searchTerm.length >= 3) {
                     const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, songCount: PAGE_SIZE, songOffset: songs.length });
-                    const songList = data.searchResult2?.song || [];
+                    const songList = data.searchResult2?.song || data.searchResult3?.song || [];
                     const newSongs = Array.isArray(songList) ? songList : [songList].filter(Boolean);
                     setSongs(prev => [...prev, ...newSongs]);
                     setHasMore(newSongs.length === PAGE_SIZE);
@@ -298,11 +298,17 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                                         <div className="border-l border-gray-600 h-6 mx-1"></div>
                                                     </>
                                                 )}
-                                                <button 
-                                                    onClick={() => onInstantMix(song)} 
-                                                    title="Instant Mix" 
-                                                    disabled={!audioMuseUrl}
-                                                    className={`p-1 rounded-full transition-colors ${audioMuseUrl ? 'text-teal-400 hover:bg-gray-700' : 'text-gray-600 cursor-not-allowed'}`}
+                                                <button
+                                                    onClick={() => {
+                                                        if (!audioMuseUrl) {
+                                                            // Minimal error handler when AudioMuse isn't configured
+                                                            alert('Instant Mix is not configured on the server. Ask an admin to enable AudioMuse.');
+                                                            return;
+                                                        }
+                                                        onInstantMix(song);
+                                                    }}
+                                                    title="Instant Mix"
+                                                    className="p-1 rounded-full transition-colors text-teal-400 hover:bg-gray-700"
                                                 >
                                                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                                                 </button>
@@ -420,7 +426,7 @@ export function Albums({ credentials, filter, onNavigate }) {
 
                 if (query) {
                     const data = await subsonicFetch('search2.view', credentials, { query, albumCount: PAGE_SIZE, albumOffset: albums.length });
-                    albumList = data.searchResult2?.album || [];
+                    albumList = data.searchResult2?.album || data.searchResult3?.album || [];
                 } else {
                     const data = await subsonicFetch('getAlbumList2.view', credentials, { type: 'alphabeticalByName', size: PAGE_SIZE, offset: albums.length });
                     albumList = data.albumList2?.album || [];
@@ -517,7 +523,7 @@ export function Artists({ credentials, onNavigate }) {
             try {
                 if (searchTerm.length >= 2) {
                     const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, artistCount: PAGE_SIZE, artistOffset: artists.length });
-                    const artistList = data.searchResult2?.artist || [];
+                    const artistList = data.searchResult2?.artist || data.searchResult3?.artist || [];
                     const newArtists = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
                     setArtists(prev => [...prev, ...newArtists]);
                     setHasMore(newArtists.length === PAGE_SIZE);

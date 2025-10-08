@@ -20,7 +20,7 @@ type SubsonicSearchResult2 struct {
 // subsonicSearch2 handles the search2 and search3 API endpoints.
 func subsonicSearch2(c *gin.Context) {
 	_ = c.MustGet("user") // Auth is handled by middleware
-	
+
 	query := c.Query("query")
 	if query == "" {
 		// Return empty result instead of error for empty query
@@ -114,12 +114,12 @@ func subsonicSearch2(c *gin.Context) {
 				var lastPlayed sql.NullString
 				if err := songRows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, &songFromDb.Path, &songFromDb.PlayCount, &lastPlayed); err == nil {
 					song := SubsonicSong{
-						ID:         strconv.Itoa(songFromDb.ID),
-						CoverArt:   strconv.Itoa(songFromDb.ID),
-						Title:      songFromDb.Title,
-						Artist:     songFromDb.Artist,
-						Album:      songFromDb.Album,
-						PlayCount:  songFromDb.PlayCount,
+						ID:        strconv.Itoa(songFromDb.ID),
+						CoverArt:  strconv.Itoa(songFromDb.ID),
+						Title:     songFromDb.Title,
+						Artist:    songFromDb.Artist,
+						Album:     songFromDb.Album,
+						PlayCount: songFromDb.PlayCount,
 					}
 					if lastPlayed.Valid {
 						song.LastPlayed = lastPlayed.String
@@ -128,6 +128,17 @@ func subsonicSearch2(c *gin.Context) {
 				}
 			}
 		}
+	}
+
+	// Ensure slices are non-nil so JSON response includes empty arrays (not omitted/null).
+	if result.Artists == nil {
+		result.Artists = []SubsonicArtist{}
+	}
+	if result.Albums == nil {
+		result.Albums = []SubsonicAlbum{}
+	}
+	if result.Songs == nil {
+		result.Songs = []SubsonicSong{}
 	}
 
 	response := newSubsonicResponse(&result)
