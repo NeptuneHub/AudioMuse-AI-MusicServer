@@ -36,12 +36,11 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     const currentSong = useMemo(() => playQueue.length > 0 ? playQueue[currentTrackIndex] : null, [playQueue, currentTrackIndex]);
 
     const fetchConfig = useCallback(async () => {
-        if (!isAdmin) return;
         try {
             const token = localStorage.getItem('token');
-            const response = await fetch(`/rest/getConfiguration.view?f=json`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const headers = {};
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            const response = await fetch(`/rest/getConfiguration.view?f=json`, { headers });
             const data = await response.json();
             const subsonicResponse = data["subsonic-response"];
             if (subsonicResponse.status === 'ok') {
