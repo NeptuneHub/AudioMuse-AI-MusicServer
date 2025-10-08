@@ -61,11 +61,8 @@ func getSongsByIDs(ids []string) ([]SubsonicSong, error) {
 }
 
 func subsonicGetSimilarSongs(c *gin.Context) {
-	user := c.MustGet("user").(User)
-	if !user.IsAdmin {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
-		return
-	}
+	// Allow all authenticated users to request similar songs (Instant Mix).
+	_ = c.MustGet("user").(User)
 
 	songId := c.Query("id")
 	count := c.DefaultQuery("count", "20")
@@ -131,11 +128,8 @@ func subsonicGetSimilarSongs(c *gin.Context) {
 }
 
 func subsonicGetSongPath(c *gin.Context) {
-	user := c.MustGet("user").(User)
-	if !user.IsAdmin {
-		subsonicRespond(c, newSubsonicErrorResponse(40, "Admin rights required for this operation."))
-		return
-	}
+	// Allow all authenticated users to request a song path.
+	_ = c.MustGet("user").(User)
 
 	startId := c.Query("startId")
 	endId := c.Query("endId")
