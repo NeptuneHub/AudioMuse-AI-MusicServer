@@ -249,7 +249,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 					{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onInstantMix={handleInstantMix} onAddToPlaylist={setSelectedSongForPlaylist} />}
 					{currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
 					{currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
-					{currentView.page === 'playlists' && <Playlists credentials={credentials} onNavigate={handleNavigate} />}
+                    {currentView.page === 'playlists' && <Playlists credentials={credentials} isAdmin={isAdmin} onNavigate={handleNavigate} />}
 					{currentView.page === 'admin' && isAdmin && <AdminPanel onConfigChange={fetchConfig} />}
 				</main>
 			</div>

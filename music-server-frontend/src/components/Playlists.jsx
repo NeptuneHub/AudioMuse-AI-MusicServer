@@ -48,7 +48,7 @@ const ConfirmationModal = ({ onClose, onConfirm, title, message }) => (
 );
 
 
-function Playlists({ credentials, onNavigate }) {
+function Playlists({ credentials, isAdmin, onNavigate }) {
     const [allPlaylists, setAllPlaylists] = useState([]);
     const [playlists, setPlaylists] = useState([]);
     const [error, setError] = useState('');
@@ -220,11 +220,20 @@ function Playlists({ credentials, onNavigate }) {
                             </h3>
                             <p className="text-sm text-gray-400">{p.songCount} songs</p>
                         </div>
-                        <div className="mt-4 flex justify-end space-x-2">
-                             <button onClick={() => setPlaylistToDelete({ id: p.id, name: p.name })} className="text-xs font-medium text-red-500 hover:underline">
-                                Delete
-                            </button>
-                        </div>
+                                <div className="mt-4 flex justify-end space-x-2">
+                                    {/**
+                                     * Delete button should only be visible when:
+                                     * - The current user is the playlist owner (credentials.username === p.owner)
+                                     * - OR the playlist was created by an admin (p.public === true) and the current user is an admin
+                                     *
+                                     * Backend sets `owner` to the creator username and marks admin-created playlists as public=true.
+                                     */}
+                                    {((p.owner && credentials.username === p.owner) || (p.public && isAdmin)) && (
+                                        <button onClick={() => setPlaylistToDelete({ id: p.id, name: p.name })} className="text-xs font-medium text-red-500 hover:underline">
+                                            Delete
+                                        </button>
+                                    )}
+                                </div>
                     </div>
                 ))}
             </div>

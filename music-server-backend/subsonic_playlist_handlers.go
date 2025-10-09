@@ -13,13 +13,15 @@ import (
 func subsonicGetPlaylists(c *gin.Context) {
 	user := c.MustGet("user").(User)
 	_ = user // Auth is handled by middleware
-	
+
+	// Return playlists owned by the user and also playlists created by admin users (visible to all)
 	query := `
-		SELECT p.id, p.name, COUNT(ps.song_id)
+		SELECT p.id, p.name, COUNT(ps.song_id), u.username, u.is_admin
 		FROM playlists p
 		LEFT JOIN playlist_songs ps ON p.id = ps.playlist_id
-		WHERE p.user_id = ?
-		GROUP BY p.id, p.name
+		JOIN users u ON u.id = p.user_id
+		WHERE p.user_id = ? OR u.is_admin = 1
+		GROUP BY p.id, p.name, u.username, u.is_admin
 		ORDER BY p.name
 	`
 	rows, err := db.Query(query, user.ID)
@@ -32,12 +34,15 @@ func subsonicGetPlaylists(c *gin.Context) {
 	var playlists []SubsonicPlaylist
 	for rows.Next() {
 		var p SubsonicPlaylist
-		if err := rows.Scan(&p.ID, &p.Name, &p.SongCount); err != nil {
+		var ownerUsername string
+		var ownerIsAdminInt int
+		if err := rows.Scan(&p.ID, &p.Name, &p.SongCount, &ownerUsername, &ownerIsAdminInt); err != nil {
 			log.Printf("Error scanning playlist row: %v", err)
 			continue
 		}
-		p.Owner = user.Username
-		p.Public = false
+		p.Owner = ownerUsername
+		// Mark playlists created by admin users as public/visible
+		p.Public = ownerIsAdminInt == 1
 		playlists = append(playlists, p)
 	}
 
@@ -47,15 +52,21 @@ func subsonicGetPlaylists(c *gin.Context) {
 func subsonicGetPlaylist(c *gin.Context) {
 	user := c.MustGet("user").(User)
 	_ = user // Auth is handled by middleware
-	
+
 	playlistID := c.Query("id")
 	if playlistID == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'id'"))
 		return
 	}
 
+	// Allow viewing the playlist if the requester is the owner OR the playlist was created by an admin
 	var playlistName string
-	err := db.QueryRow("SELECT name FROM playlists WHERE id = ? AND user_id = ?", playlistID, user.ID).Scan(&playlistName)
+	var ownerUsername string
+	var ownerIsAdminInt int
+	err := db.QueryRow(
+		"SELECT p.name, u.username, u.is_admin FROM playlists p JOIN users u ON p.user_id = u.id WHERE p.id = ? AND (p.user_id = ? OR u.is_admin = 1)",
+		playlistID, user.ID,
+	).Scan(&playlistName, &ownerUsername, &ownerIsAdminInt)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found."))
 		return
@@ -104,7 +115,7 @@ func subsonicGetPlaylist(c *gin.Context) {
 func subsonicCreatePlaylist(c *gin.Context) {
 	user := c.MustGet("user").(User)
 	_ = user // Auth is handled by middleware
-	
+
 	playlistName := c.Query("name")
 	if playlistName == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'name'"))
@@ -166,7 +177,7 @@ func subsonicCreatePlaylist(c *gin.Context) {
 func subsonicUpdatePlaylist(c *gin.Context) {
 	user := c.MustGet("user").(User)
 	_ = user // Auth is handled by middleware
-	
+
 	playlistID := c.Query("playlistId")
 	newName := c.Query("name")
 	songIdsToAdd := c.QueryArray("songIdToAdd")
@@ -184,11 +195,25 @@ func subsonicUpdatePlaylist(c *gin.Context) {
 		return
 	}
 
+	// Fetch owner and whether the owner is an admin
 	var ownerId int
-	err := db.QueryRow("SELECT user_id FROM playlists WHERE id = ?", playlistID).Scan(&ownerId)
-	if err != nil || ownerId != user.ID {
+	var ownerIsAdminInt int
+	err := db.QueryRow("SELECT p.user_id, u.is_admin FROM playlists p JOIN users u ON p.user_id = u.id WHERE p.id = ?", playlistID).Scan(&ownerId, &ownerIsAdminInt)
+	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or permission denied."))
 		return
+	}
+
+	// Permission rules:
+	// - The playlist owner can update their own playlists.
+	// - If the playlist owner is an admin, only other admins may edit/delete it.
+	if ownerId != user.ID {
+		if ownerIsAdminInt == 1 && user.IsAdmin {
+			// allow: admin editing another admin's playlist
+		} else {
+			subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or permission denied."))
+			return
+		}
 	}
 
 	tx, err := db.Begin()
@@ -301,7 +326,7 @@ func subsonicUpdatePlaylist(c *gin.Context) {
 func subsonicDeletePlaylist(c *gin.Context) {
 	user := c.MustGet("user").(User)
 	_ = user // Auth is handled by middleware
-	
+
 	playlistID := c.Query("id")
 	if playlistID == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Missing required parameter 'id'"))
@@ -309,7 +334,26 @@ func subsonicDeletePlaylist(c *gin.Context) {
 	}
 
 	// ON DELETE CASCADE in the schema handles deleting from playlist_songs
-	res, err := db.Exec("DELETE FROM playlists WHERE id = ? AND user_id = ?", playlistID, user.ID)
+	// Check owner and admin status to decide if deletion is allowed
+	var ownerId int
+	var ownerIsAdminInt int
+	err := db.QueryRow("SELECT p.user_id, u.is_admin FROM playlists p JOIN users u ON p.user_id = u.id WHERE p.id = ?", playlistID).Scan(&ownerId, &ownerIsAdminInt)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or permission denied."))
+		return
+	}
+
+	if ownerId != user.ID {
+		// If the playlist was created by an admin, only admins can delete it
+		if ownerIsAdminInt == 1 && user.IsAdmin {
+			// allowed
+		} else {
+			subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or permission denied."))
+			return
+		}
+	}
+
+	res, err := db.Exec("DELETE FROM playlists WHERE id = ?", playlistID)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Error deleting playlist."))
 		return
