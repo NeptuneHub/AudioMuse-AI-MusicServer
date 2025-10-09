@@ -54,7 +54,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
         } catch (e) {
             console.error("Failed to fetch AudioMuse URL config", e);
         }
-    }, [isAdmin]);
+    }, []);
 
     useEffect(() => {
         fetchConfig();
