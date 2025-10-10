@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { API_BASE } from '../../api';
 
 function SonicAnalysisPanel() {
     const [status, setStatus] = useState(null);
@@ -9,15 +10,16 @@ function SonicAnalysisPanel() {
     const fetchStatus = useCallback(async () => {
         const token = localStorage.getItem('token');
         try {
-            // Use the new Subsonic endpoint
-            const response = await fetch('/rest/getSonicAnalysisStatus.view?f=json', {
+            // Use the Subsonic endpoint with absolute URL for production
+            const response = await fetch(`${API_BASE}/rest/getSonicAnalysisStatus.view?f=json`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!response.ok) {
-                const errData = await response.json().catch(() => ({ error: `Server error: ${response.status}` }));
+                const errData = await response.json().catch(() => ({ error: `Server error: ${response.status}` }));        
                 throw new Error(errData.error || `Server error: ${response.status}`);
             }
             const data = await response.json();
+            console.log('DEBUG: Status response from getSonicAnalysisStatus:', data);
             setStatus(data);
             setError('');
         } catch (err) {
@@ -39,8 +41,8 @@ function SonicAnalysisPanel() {
         setIsStarting(true);
         const token = localStorage.getItem('token');
         try {
-            // Use the new Subsonic endpoint and add f=json
-            const response = await fetch(`${endpoint}?f=json`, {
+            // Use the Subsonic endpoint with absolute URL and original working format
+            const response = await fetch(`${API_BASE}${endpoint}?f=json`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -61,8 +63,8 @@ function SonicAnalysisPanel() {
             setIsStarting(false);
         }
     };
-    
-    // Point to the new Subsonic endpoints
+
+    // Point to the Subsonic endpoints
     const handleStartClustering = () => startTask('/rest/startSonicClustering.view', 'Clustering');
     const handleStart = () => startTask('/rest/startSonicAnalysis.view', 'Analysis');
 
@@ -74,8 +76,8 @@ function SonicAnalysisPanel() {
         setError('');
         const token = localStorage.getItem('token');
         try {
-            // Use the new Subsonic endpoint with taskId as a query parameter
-            const response = await fetch(`/rest/cancelSonicAnalysis.view?f=json&taskId=${status.task_id}`, {
+            // Use the Subsonic endpoint with original working format
+            const response = await fetch(`${API_BASE}/rest/cancelSonicAnalysis.view?f=json&taskId=${status.task_id}`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -149,9 +151,26 @@ function SonicAnalysisPanel() {
                     <div className="pt-2">
                         <h4 className="font-semibold text-gray-400 mb-1">Logs:</h4>
                         <div className="bg-gray-900 p-3 rounded-md h-40 overflow-y-auto font-mono text-xs text-gray-300">
-                           {(status.details?.log && status.details.log.length > 0) ? status.details.log.map((line, index) => (
-                               <p key={index}>{line}</p>
-                           )) : <p>No logs yet.</p>}
+                           {(() => {
+                               // Debug what's actually in the status object
+                               console.log('DEBUG: Full status object for logs:', status);
+                               console.log('DEBUG: status.details:', status.details);
+                               console.log('DEBUG: status.logs:', status.logs);
+                               console.log('DEBUG: status.log:', status.log);
+                               
+                               // Try multiple possible log locations
+                               const logs = status.details?.log || status.logs || status.log || status.details?.logs;
+                               
+                               if (logs && Array.isArray(logs) && logs.length > 0) {
+                                   return logs.map((line, index) => (
+                                       <p key={index}>{line}</p>
+                                   ));
+                               } else if (logs && typeof logs === 'string') {
+                                   return <p>{logs}</p>;
+                               } else {
+                                   return <p>No logs available. Status: {status.status}, Task: {status.task_type || 'unknown'}</p>;
+                               }
+                           })()}
                         </div>
                     </div>
                 </div>

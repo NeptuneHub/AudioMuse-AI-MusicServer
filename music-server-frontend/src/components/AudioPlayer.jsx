@@ -1,13 +1,6 @@
 // Suggested path: music-server-frontend/src/components/AudioPlayer.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-
-const subsonicFetch = async (endpoint, creds, params = {}) => {
-    const allParams = new URLSearchParams({
-        u: creds.username, p: creds.password, v: '1.16.1', c: 'AudioMuse-AI', ...params
-    });
-    const response = await fetch(`/rest/${endpoint}?${allParams.toString()}`);
-    return response;
-};
+import { API_BASE, apiFetch } from '../api';
 
 function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevious, hasQueue, onToggleQueueView }) {
     const [audioSrc, setAudioSrc] = useState(null);
@@ -33,15 +26,16 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                 // Scrobble the song play
                 if (credentials) {
                     try {
-                        // Fire and forget, no need to handle response
-                        subsonicFetch('scrobble.view', credentials, { id: song.id });
+                        // Fire-and-forget scrobble using apiFetch which includes Authorization header
+                        apiFetch(`/rest/scrobble.view?id=${encodeURIComponent(song.id)}`).catch(() => {});
                     } catch (e) {
                         console.error("Failed to scrobble song:", e);
                     }
                 }
 
-                // Fetch audio stream
-                const response = await subsonicFetch('stream.view', credentials, { id: song.id });
+                // Fetch audio stream directly (returns binary)
+                const streamUrl = `${API_BASE}/rest/stream.view?id=${encodeURIComponent(song.id)}&v=1.16.1&c=AudioMuse-AI`;
+                const response = await apiFetch(streamUrl);
                 if (!response.ok) {
                     throw new Error(`Failed to fetch song: ${response.statusText}`);
                 }
@@ -70,17 +64,16 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
 
     const setupMediaSession = useCallback(() => {
         if (song && 'mediaSession' in navigator) {
+            const artworkUrl = (() => {
+                const params = new URLSearchParams({ id: song.coverArt, v: '1.16.1', c: 'AudioMuse-AI' });
+                return `${API_BASE}/rest/getCoverArt.view?${params.toString()}`;
+                // Note: mediaSession artwork can't use auth headers, backend should allow public access or JWT via cookie
+            })();
             navigator.mediaSession.metadata = new window.MediaMetadata({
                 title: song.title,
                 artist: song.artist,
                 album: song.album,
-                artwork: [
-                    { 
-                        src: `/rest/getCoverArt.view?id=${encodeURIComponent(song.coverArt)}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI`, 
-                        sizes: '300x300', 
-                        type: 'image/jpeg' 
-                    },
-                ]
+                artwork: [ { src: artworkUrl, sizes: '300x300', type: 'image/jpeg' } ]
             });
 
             navigator.mediaSession.setActionHandler('play', () => audioRef.current?.play());

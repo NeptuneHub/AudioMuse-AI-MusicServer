@@ -1,5 +1,6 @@
 // Suggested path: music-server-frontend/src/components/Playlists.jsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { subsonicFetch } from '../api';
 
 const Modal = ({ children, onClose }) => (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
@@ -59,18 +60,7 @@ function Playlists({ credentials, isAdmin, onNavigate }) {
     const [isGenerating, setIsGenerating] = useState(false);
     const [playlistToDelete, setPlaylistToDelete] = useState(null);
     
-    const subsonicFetch = useCallback(async (endpoint, params = {}) => {
-        const allParams = new URLSearchParams({
-            u: credentials.username, p: credentials.password, v: '1.16.1', c: 'AudioMuse-AI', f: 'json', ...params
-        });
-        const response = await fetch(`/rest/${endpoint}?${allParams.toString()}`);
-        const data = await response.json();
-        const subsonicResponse = data['subsonic-response'];
-        if (subsonicResponse.status === 'failed') {
-            throw new Error(subsonicResponse.error.message);
-        }
-        return subsonicResponse;
-    }, [credentials]);
+    // use the shared subsonicFetch helper imported from ../api
 
     const fetchPlaylists = useCallback(async () => {
         setIsLoading(true);

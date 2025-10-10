@@ -30,6 +30,9 @@ func scanSingleLibrary(pathId int) {
 	log.Printf("Background scan started for single path: %s", path)
 	isScanCancelled.Store(false)
 
+	// Initialize the scan counter for single path scan
+	db.Exec("UPDATE scan_status SET songs_added = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+
 	songsAdded := processPath(path)
 	updateSongCountForPath(path, pathId)
 	db.Exec("UPDATE library_paths SET last_scan_ended = ? WHERE id = ?", time.Now().Format(time.RFC3339), pathId)
@@ -69,14 +72,16 @@ func scanAllLibraries() {
 		pathsToScan = append(pathsToScan, p)
 	}
 
+	// Initialize the scan counter for "Scan All"
+	db.Exec("UPDATE scan_status SET songs_added = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+
 	var totalSongsAdded int64
 	for _, p := range pathsToScan {
 		if isScanCancelled.Load() {
 			log.Println("Scan All was cancelled, stopping further processing.")
 			break
 		}
-		songsAdded := processPath(p.Path)
-		totalSongsAdded += songsAdded
+		processPathWithRunningTotal(p.Path, &totalSongsAdded)
 		updateSongCountForPath(p.Path, p.ID)
 		db.Exec("UPDATE library_paths SET last_scan_ended = ? WHERE id = ?", time.Now().Format(time.RFC3339), p.ID)
 	}
@@ -127,6 +132,9 @@ func processPath(scanPath string) int64 {
 				rowsAffected, _ := res.RowsAffected()
 				if rowsAffected > 0 {
 					songsAdded++
+					// Update scan status in real-time every time a new song is added
+					db.Exec("UPDATE scan_status SET songs_added = ?, last_update_time = ? WHERE id = 1",
+						songsAdded, time.Now().Format(time.RFC3339))
 				}
 			}
 		}
@@ -137,6 +145,61 @@ func processPath(scanPath string) int64 {
 		log.Printf("Stopped walking path %s due to error: %v", scanPath, walkErr)
 	}
 	return songsAdded
+}
+
+func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
+	log.Printf("Processing path: %s", scanPath)
+
+	walkErr := filepath.WalkDir(scanPath, func(path string, d os.DirEntry, err error) error {
+		if isScanCancelled.Load() {
+			return errors.New("scan cancelled by user")
+		}
+		if err != nil {
+			log.Printf("Error accessing path %q: %v\n", path, err)
+			return nil
+		}
+
+		if !d.IsDir() {
+			ext := strings.ToLower(filepath.Ext(path))
+			supportedExts := map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".ogg": true}
+
+			if supportedExts[ext] {
+				file, err := os.Open(path)
+				if err != nil {
+					log.Printf("Error opening file %s: %v", path, err)
+					return nil
+				}
+				defer file.Close()
+
+				meta, err := tag.ReadFrom(file)
+				if err != nil {
+					log.Printf("Error reading tags from %s: %v", path, err)
+					return nil
+				}
+
+				currentTime := time.Now().Format(time.RFC3339)
+				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path, date_added, date_updated) VALUES (?, ?, ?, ?, ?, ?)",
+					meta.Title(), meta.Artist(), meta.Album(), path, currentTime, currentTime)
+				if err != nil {
+					log.Printf("Error inserting song from %s into DB: %v", path, err)
+					return nil
+				}
+
+				rowsAffected, _ := res.RowsAffected()
+				if rowsAffected > 0 {
+					*totalSongsAdded++
+					// Update scan status in real-time with the cumulative total
+					db.Exec("UPDATE scan_status SET songs_added = ?, last_update_time = ? WHERE id = 1",
+						*totalSongsAdded, time.Now().Format(time.RFC3339))
+				}
+			}
+		}
+		return nil
+	})
+
+	if walkErr != nil {
+		log.Printf("Stopped walking path %s due to error: %v", scanPath, walkErr)
+	}
 }
 
 func updateSongCountForPath(path string, pathId int) {
@@ -186,4 +249,3 @@ func cancelAdminScan(c *gin.Context) {
 	isScanCancelled.Store(true)
 	c.JSON(http.StatusOK, gin.H{"message": "Scan cancellation signal sent."})
 }
-

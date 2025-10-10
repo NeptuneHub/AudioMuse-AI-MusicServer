@@ -61,3 +61,25 @@ func checkPasswordHash(password, hash string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 	return err == nil
 }
+
+// userInfo returns information about the currently authenticated user based on the JWT.
+// It requires the AuthMiddleware to have already validated the token and set context values.
+func userInfo(c *gin.Context) {
+	usernameI, _ := c.Get("username")
+	isAdminI, _ := c.Get("isAdmin")
+
+	username := ""
+	isAdmin := false
+	if usernameI != nil {
+		if s, ok := usernameI.(string); ok {
+			username = s
+		}
+	}
+	if isAdminI != nil {
+		if b, ok := isAdminI.(bool); ok {
+			isAdmin = b
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"username": username, "is_admin": isAdmin})
+}

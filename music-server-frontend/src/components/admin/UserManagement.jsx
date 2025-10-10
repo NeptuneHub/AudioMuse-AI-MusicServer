@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Modal from '../Modal';
+import { subsonicFetch } from '../../api';
 
 const UserFormModal = ({ onClose, onSubmit, title }) => {
     const [username, setUsername] = useState('');
@@ -73,21 +74,7 @@ function UserManagement() {
     const [successMessage, setSuccessMessage] = useState('');
 
     const subsonicApiRequest = useCallback(async (endpoint, params = {}) => {
-        const token = localStorage.getItem('token');
-        const query = new URLSearchParams(params);
-        query.append('f', 'json');
-
-        const response = await fetch(`/rest/${endpoint}?${query.toString()}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        const subsonicResponse = data["subsonic-response"];
-
-        if (!response.ok || subsonicResponse.status === 'failed') {
-            const error = subsonicResponse?.error;
-            throw new Error(error?.message || `Server error: ${response.status}`);
-        }
-        return subsonicResponse;
+        return await subsonicFetch(endpoint, params);
     }, []);
 
 	const fetchUsers = useCallback(async () => {

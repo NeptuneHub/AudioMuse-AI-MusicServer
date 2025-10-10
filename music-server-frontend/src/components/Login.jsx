@@ -1,11 +1,5 @@
 import React, { useState } from 'react';
-
-const subsonicFetch = async (endpoint, creds, params = {}) => {
-    const allParams = new URLSearchParams({
-        u: creds.username, p: creds.password, v: '1.16.1', c: 'AudioMuse-AI', f: 'json', ...params
-    });
-    return fetch(`/rest/${endpoint}?${allParams.toString()}`);
-};
+import { apiFetch, subsonicFetch } from '../api';
 
 function Login({ onLogin }) {
 	const [username, setUsername] = useState('');
@@ -16,35 +10,21 @@ function Login({ onLogin }) {
 		e.preventDefault();
 		setError('');
 		try {
-			const response = await subsonicFetch('getLicense.view', { username, password });
+			// JWT-ONLY login - no legacy fallback
+			const jwtResponse = await apiFetch('/api/v1/user/login', {
+				method: 'POST',
+				body: JSON.stringify({ username, password })
+			});
 
-			if (!response.ok) {
-				const data = await response.json();
-				const subsonicResponse = data['subsonic-response'];
-				setError(subsonicResponse?.error?.message || 'Login failed: Invalid credentials');
+			if (jwtResponse.ok) {
+				const jwtData = await jwtResponse.json();
+				localStorage.setItem('username', username);
+				localStorage.setItem('token', jwtData.token);
+				onLogin({ username, password: null }, jwtData.is_admin, jwtData.token);
 				return;
-			}
-
-			const data = await response.json();
-			const subsonicResponse = data['subsonic-response'];
-
-			if (subsonicResponse.status === 'ok') {
-                // After successful Subsonic auth, get a JWT for the admin panel
-                // and the user's actual admin status.
-                const jwtResponse = await fetch('/api/v1/user/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
-
-                if (!jwtResponse.ok) {
-                    throw new Error('Failed to get JWT for admin panel');
-                }
-
-                const jwtData = await jwtResponse.json();
-				onLogin({ username, password }, jwtData.is_admin, jwtData.token);
 			} else {
-				setError(subsonicResponse?.error?.message || 'Login failed');
+				const errorData = await jwtResponse.json().catch(() => ({}));
+				setError(errorData.error || 'Login failed: Invalid credentials');
 			}
 		} catch (err) {
 			setError('Network error. Could not connect to server.');

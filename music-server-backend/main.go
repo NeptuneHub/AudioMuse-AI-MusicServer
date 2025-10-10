@@ -69,6 +69,7 @@ func main() {
 
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(corsMiddleware())
 	r.Use(loggingMiddleware())
 
 	// Public Subsonic routes (no auth required)
@@ -129,6 +130,8 @@ func main() {
 		userRoutes := v1.Group("/user")
 		{
 			userRoutes.POST("/login", loginUser)
+			// Return info about the logged-in user (JWT required)
+			userRoutes.GET("/me", AuthMiddleware(), userInfo)
 		}
 		adminRoutes := v1.Group("/admin")
 		adminRoutes.Use(AuthMiddleware(), adminOnly())
@@ -148,6 +151,26 @@ func adminOnly() gin.HandlerFunc {
 		if !exists || !isAdmin.(bool) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Admin access required"})
 			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// corsMiddleware sets permissive CORS headers so browser-based frontends
+// can call both the /rest (Subsonic) endpoints and the JSON /api/v1 endpoints.
+// For production you may want to restrict the allowed origin via an env var.
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Allow all origins by default. For stricter security set ALLOWED_ORIGIN env var.
+		allowed := getEnv("ALLOWED_ORIGIN", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Origin", allowed)
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, Cache-Control, Pragma")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
 			return
 		}
 		c.Next()

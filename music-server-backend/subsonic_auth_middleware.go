@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"log"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,10 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 		password := c.Query("p")
 		token := c.Query("t")
 		salt := c.Query("s")
+		authHeader := c.GetHeader("Authorization")
+
+		log.Printf("DEBUG: Subsonic auth attempt - URL: %s, apiKey: %t, username: %s, password: %t, token: %t, salt: %t, authHeader: %s",
+			c.Request.URL.Path, apiKey != "", username, password != "", token != "", salt != "", authHeader)
 
 		authMethods := 0
 		if apiKey != "" {
@@ -30,7 +35,6 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 		if username != "" && (password != "" || token != "") {
 			authMethods++
 		}
-		authHeader := c.GetHeader("Authorization")
 		if strings.HasPrefix(authHeader, "Bearer ") {
 			authMethods++
 		}
@@ -70,6 +74,12 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 				c.Set("user", user)
 				c.Next()
 				return
+			} else {
+				tokenPreview := tokenString
+				if len(tokenString) > 20 {
+					tokenPreview = tokenString[:20] + "..."
+				}
+				log.Printf("ERROR: JWT parsing failed for token: %s, error: %v", tokenPreview, err)
 			}
 		}
 

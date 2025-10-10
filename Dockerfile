@@ -20,20 +20,26 @@ FROM node:20-bullseye AS frontend-builder
 WORKDIR /src
 COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer .
 WORKDIR /src/music-server-frontend
+ARG REACT_APP_API_URL
+ENV REACT_APP_API_URL=${REACT_APP_API_URL}
 RUN npm install
+RUN npm run build
 
 # STAGE 4: Final runtime image
 FROM node:20-bullseye
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies
+# Install system dependencies and a lightweight static server for the frontend
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
     sqlite3 \
     curl \
     bash \
     && rm -rf /var/lib/apt/lists/*
+
+# Install 'serve' globally to serve the built frontend
+RUN npm install -g serve@14.1.2
 
 # Create application directory
 WORKDIR /app
@@ -43,7 +49,8 @@ COPY --from=backend-builder /src/music-server-backend/music-server ./music-serve
 RUN chmod +x ./music-server
 
 # Copy React frontend source and dependencies
-COPY --from=frontend-builder /src/music-server-frontend ./music-server-frontend
+# Copy only the built frontend (static files)
+COPY --from=frontend-builder /src/music-server-frontend/build ./music-server-frontend/build
 
 # Copy configurations and startup script
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf

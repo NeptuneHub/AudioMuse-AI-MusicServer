@@ -1,19 +1,6 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-
-const subsonicFetch = async (endpoint, creds, params = {}) => {
-    const allParams = new URLSearchParams({
-        u: creds.username, p: creds.password, v: '1.16.1', c: 'AudioMuse-AI', f: 'json', ...params
-    });
-    const response = await fetch(`/rest/${endpoint}?${allParams.toString()}`);
-    if (!response.ok) {
-        const data = await response.json();
-        const subsonicResponse = data['subsonic-response'];
-        throw new Error(subsonicResponse?.error?.message || `Server error: ${response.status}`);
-    }
-    const data = await response.json();
-    return data['subsonic-response'];
-};
+import { API_BASE, subsonicFetch } from '../api';
 
 const formatDate = (isoString) => {
     if (!isoString) return 'Never';
@@ -35,7 +22,7 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
         const fetchPlaylists = async () => {
             try {
                 // The getPlaylists.view endpoint doesn't support pagination, so we fetch all.
-                const data = await subsonicFetch('getPlaylists.view', credentials);
+                const data = await subsonicFetch('getPlaylists.view');
                 const playlistData = data.playlists?.playlist || [];
                 setPlaylists(Array.isArray(playlistData) ? playlistData : [playlistData]);
                 if (playlistData.length > 0) {
@@ -57,7 +44,7 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
         setError('');
         setSuccess('');
         try {
-            await subsonicFetch('updatePlaylist.view', credentials, {
+            await subsonicFetch('updatePlaylist.view', {
                 playlistId: selectedPlaylist,
                 songIdToAdd: song.id,
             });
@@ -120,7 +107,7 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
         const fetcher = async () => {
             try {
                 if (searchTerm.length >= 3) {
-                    const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, songCount: PAGE_SIZE, songOffset: songs.length });
+                    const data = await subsonicFetch('search2.view', { query: searchTerm, songCount: PAGE_SIZE, songOffset: songs.length });
                     const songList = data.searchResult2?.song || data.searchResult3?.song || [];
                     const newSongs = Array.isArray(songList) ? songList : [songList].filter(Boolean);
                     setSongs(prev => [...prev, ...newSongs]);
@@ -133,13 +120,13 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                     let songList = [];
                     if (filter?.preloadedSongs) songList = filter.preloadedSongs;
                     else if (filter?.similarToSongId) {
-                        const data = await subsonicFetch('getSimilarSongs.view', credentials, { id: filter.similarToSongId, count: PAGE_SIZE });
+                        const data = await subsonicFetch('getSimilarSongs.view', { id: filter.similarToSongId, count: PAGE_SIZE });
                         songList = data.directory?.song || [];
                     } else if (filter) {
                         const endpoint = filter.albumId ? 'getAlbum.view' : 'getPlaylist.view';
                         const idParam = filter.albumId || filter.playlistId;
                         if (idParam) {
-                            const data = await subsonicFetch(endpoint, credentials, { id: idParam });
+                            const data = await subsonicFetch(endpoint, { id: idParam });
                             const songContainer = data.album || data.directory;
                             if (songContainer?.song) songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
                         }
@@ -192,7 +179,7 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
         if (!isPlaylistView) return;
         try {
             const newSongIds = allSongs.filter(s => s.id !== songIdToRemove).map(s => s.id);
-            await subsonicFetch('updatePlaylist.view', credentials, { playlistId: filter.playlistId, songId: newSongIds });
+            await subsonicFetch('updatePlaylist.view', { playlistId: filter.playlistId, songId: newSongIds });
             setRefreshKey(k => k + 1);
         } catch (err) {
             setError(err.message || 'Failed to delete song.');
@@ -212,7 +199,7 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
         setSongs(currentVisibleSongs);
 
         try {
-            await subsonicFetch('updatePlaylist.view', credentials, { playlistId: filter.playlistId, songId: newSongs.map(s => s.id) });
+            await subsonicFetch('updatePlaylist.view', { playlistId: filter.playlistId, songId: newSongs.map(s => s.id) });
         } catch (err) {
             setError(err.message || 'Failed to move song.');
             setAllSongs(allSongs); // Revert on failure
@@ -357,6 +344,7 @@ const ArtistPlaceholder = () => (
 const ImageWithFallback = ({ src, placeholder, alt }) => {
     const [hasError, setHasError] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
+    const [objectUrl, setObjectUrl] = useState(null);
     const ref = useRef(null);
 
     useEffect(() => {
@@ -381,13 +369,40 @@ const ImageWithFallback = ({ src, placeholder, alt }) => {
             }
         };
     }, []);
-    
-    useEffect(() => { setHasError(false); }, [src]);
+
+    useEffect(() => {
+        setHasError(false);
+        // Clean up previous objectUrl
+        if (objectUrl) {
+            URL.revokeObjectURL(objectUrl);
+            setObjectUrl(null);
+        }
+        // If src is an object with useAuthFetch=true and a token exists, fetch the image via fetch with Authorization
+        const doFetch = async () => {
+            try {
+                if (!src || typeof src === 'string') return;
+                const token = localStorage.getItem('token');
+                if (src.useAuthFetch && token && src.url) {
+                    const res = await fetch(src.url, { headers: { 'Authorization': `Bearer ${token}` } });
+                    if (!res.ok) throw new Error('Failed to load image');
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    setObjectUrl(url);
+                }
+            } catch (e) {
+                console.error('Image fetch failed', e);
+                setHasError(true);
+            }
+        };
+        doFetch();
+    }, [src]);
 
     return (
         <div ref={ref} className="w-full h-full">
-            {isVisible && src && !hasError ? (
-                <img src={src} alt={alt} onError={() => setHasError(true)} className="w-full h-full object-cover" />
+            {isVisible && !hasError ? (
+                (objectUrl && <img src={objectUrl} alt={alt} onError={() => setHasError(true)} className="w-full h-full object-cover" />)
+                || (typeof src === 'string' && <img src={src} alt={alt} onError={() => setHasError(true)} className="w-full h-full object-cover" />)
+                || placeholder
             ) : (
                 placeholder
             )}
@@ -425,10 +440,10 @@ export function Albums({ credentials, filter, onNavigate }) {
                 const query = searchTerm || filter;
 
                 if (query) {
-                    const data = await subsonicFetch('search2.view', credentials, { query, albumCount: PAGE_SIZE, albumOffset: albums.length });
+                    const data = await subsonicFetch('search2.view', { query, albumCount: PAGE_SIZE, albumOffset: albums.length });
                     albumList = data.searchResult2?.album || data.searchResult3?.album || [];
                 } else {
-                    const data = await subsonicFetch('getAlbumList2.view', credentials, { type: 'alphabeticalByName', size: PAGE_SIZE, offset: albums.length });
+                    const data = await subsonicFetch('getAlbumList2.view', { type: 'alphabeticalByName', size: PAGE_SIZE, offset: albums.length });
                     albumList = data.albumList2?.album || [];
                 }
                 const newAlbums = Array.isArray(albumList) ? albumList : [albumList].filter(Boolean);
@@ -485,7 +500,11 @@ export function Albums({ credentials, filter, onNavigate }) {
                         className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
                         <div className="w-full bg-gray-700 rounded aspect-square flex items-center justify-center mb-2 overflow-hidden">
                              <ImageWithFallback
-                                src={album.coverArt ? `/rest/getCoverArt.view?id=${encodeURIComponent(album.coverArt)}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI&size=512` : ''}
+                                src={album.coverArt ? (() => {
+                                    const params = new URLSearchParams({ id: album.coverArt, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
+                                    const url = `${API_BASE}/rest/getCoverArt.view?${params.toString()}`;
+                                    return { url, useAuthFetch: true };
+                                })() : ''}
                                 placeholder={<AlbumPlaceholder name={album.name} />}
                                 alt={album.name}
                             />
@@ -522,7 +541,7 @@ export function Artists({ credentials, onNavigate }) {
         const fetcher = async () => {
             try {
                 if (searchTerm.length >= 2) {
-                    const data = await subsonicFetch('search2.view', credentials, { query: searchTerm, artistCount: PAGE_SIZE, artistOffset: artists.length });
+                    const data = await subsonicFetch('search2.view', { query: searchTerm, artistCount: PAGE_SIZE, artistOffset: artists.length });
                     const artistList = data.searchResult2?.artist || data.searchResult3?.artist || [];
                     const newArtists = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
                     setArtists(prev => [...prev, ...newArtists]);
@@ -531,7 +550,7 @@ export function Artists({ credentials, onNavigate }) {
                 else if (searchTerm.length === 0) { 
                     let baseList = allArtists;
                     if (baseList.length === 0) {
-                        const data = await subsonicFetch('getArtists.view', credentials);
+                        const data = await subsonicFetch('getArtists.view');
                         const indexData = data.artists?.index || [];
                         const indices = Array.isArray(indexData) ? indexData : [indexData].filter(Boolean);
                         baseList = indices.flatMap(i => i.artist || []);
@@ -594,7 +613,11 @@ export function Artists({ credentials, onNavigate }) {
                         className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors flex flex-col items-center">
                         <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full bg-gray-700 flex items-center justify-center mb-2 overflow-hidden flex-shrink-0">
                              <ImageWithFallback
-                                src={artist.artistImageUrl ? `/rest/getCoverArt.view?id=${encodeURIComponent(artist.artistImageUrl)}&u=${credentials.username}&p=${credentials.password}&v=1.16.1&c=AudioMuse-AI&size=512` : ''}
+                                src={artist.artistImageUrl ? (() => {
+                                    const params = new URLSearchParams({ id: artist.artistImageUrl, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
+                                    const url = `${API_BASE}/rest/getCoverArt.view?${params.toString()}`;
+                                    return { url, useAuthFetch: true };
+                                })() : ''}
                                 placeholder={<ArtistPlaceholder />}
                                 alt={artist.name}
                             />

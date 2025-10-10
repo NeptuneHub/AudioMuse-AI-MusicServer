@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { API_BASE, subsonicFetch, apiFetch } from '../../api';
 import Modal from '../Modal';
 import FileBrowser from './FileBrowser';
 
@@ -50,29 +51,23 @@ function LibraryManagement({ onConfigChange }) {
     });
 
     const subsonicApiRequest = useCallback(async (method, endpoint, body = null) => {
-        const token = localStorage.getItem('token');
-        const options = {
-            method,
-            headers: { 'Authorization': `Bearer ${token}` }
-        };
-         const url = new URL(`/rest/${endpoint}`, window.location.origin);
-        url.searchParams.append('f', 'json');
-
-        if (method === 'GET' && body) {
-            Object.entries(body).forEach(([key, value]) => url.searchParams.append(key, value));
-        } else if (body) {
-            options.headers['Content-Type'] = 'application/json';
+        // Use shared subsonicFetch helper for GET requests; for POST use apiFetch to call JSON admin endpoints
+        if (method === 'GET') {
+            return await subsonicFetch(endpoint, body || {});
+        }
+        // For POST/other methods we call the REST endpoint via apiFetch and include JSON body
+        const options = { method };
+        if (body) {
+            options.headers = { 'Content-Type': 'application/json' };
             options.body = JSON.stringify(body);
         }
-        
-        const response = await fetch(url, options);
-        const data = await response.json();
-
-        if (!response.ok || data?.["subsonic-response"]?.status === 'failed') {
+        const url = `/rest/${endpoint}?f=json`;
+        const res = await apiFetch(url, options);
+        const data = await res.json();
+        if (!res.ok || data?.["subsonic-response"]?.status === 'failed') {
             const error = data?.["subsonic-response"]?.error;
-            throw new Error(error?.message || `Server error: ${response.status}`);
+            throw new Error(error?.message || `Server error: ${res.status}`);
         }
-        
         return data["subsonic-response"];
     }, []);
 
@@ -162,10 +157,8 @@ function LibraryManagement({ onConfigChange }) {
     const handleCancelScan = async () => {
         setMessage('Cancelling scan...');
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch('/api/v1/admin/scan/cancel', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
+            const response = await apiFetch('/api/v1/admin/scan/cancel', {
+                method: 'POST'
             });
             if (!response.ok) {
                 const data = await response.json();
@@ -176,6 +169,8 @@ function LibraryManagement({ onConfigChange }) {
             setMessage(e.message);
         }
     };
+
+
 
     const formatDate = (isoString) => {
         if (!isoString) return 'Never';
@@ -190,8 +185,8 @@ function LibraryManagement({ onConfigChange }) {
         <div className="bg-gray-800 p-4 sm:p-6 rounded-lg">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 space-y-2 sm:space-y-0">
                 <h3 className="text-xl font-bold">Library Management</h3>
-                <div>
-                     <button onClick={() => handleStartScan(null)} disabled={scanStatus.scanning} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-green-400 disabled:cursor-not-allowed mr-2">
+                <div className="flex flex-wrap gap-2">
+                     <button onClick={() => handleStartScan(null)} disabled={scanStatus.scanning} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-green-400 disabled:cursor-not-allowed">
                         Scan All
                     </button>
                     <button onClick={() => setIsAddingPath(true)} disabled={scanStatus.scanning} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded disabled:bg-indigo-400 disabled:cursor-not-allowed">

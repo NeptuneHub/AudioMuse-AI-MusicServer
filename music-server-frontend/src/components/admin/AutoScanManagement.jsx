@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { subsonicFetch } from '../../api';
 
 function AutoScanManagement({ onConfigChange }) {
     const [schedule, setSchedule] = useState('');
@@ -7,21 +8,7 @@ function AutoScanManagement({ onConfigChange }) {
     const [error, setError] = useState('');
 
     const subsonicApiRequest = useCallback(async (endpoint, params = {}) => {
-        const token = localStorage.getItem('token');
-        const query = new URLSearchParams(params);
-        query.append('f', 'json');
-
-        const response = await fetch(`/rest/${endpoint}?${query.toString()}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        const subsonicResponse = data["subsonic-response"];
-
-        if (!response.ok || subsonicResponse.status === 'failed') {
-            const error = subsonicResponse?.error;
-            throw new Error(error?.message || `Server error: ${response.status}`);
-        }
-        return subsonicResponse;
+        return await subsonicFetch(endpoint, params);
     }, []);
 
     const fetchConfig = useCallback(async () => {

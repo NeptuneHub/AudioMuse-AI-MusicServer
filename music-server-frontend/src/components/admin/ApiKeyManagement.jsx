@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { subsonicFetch } from '../../api';
 
 function ApiKeyManagement() {
     const [apiKey, setApiKey] = useState('');
@@ -7,27 +8,22 @@ function ApiKeyManagement() {
     const [copySuccess, setCopySuccess] = useState('');
 
     const subsonicApiRequest = useCallback(async (endpoint, options = {}) => {
-        const token = localStorage.getItem('token');
-        const defaultOptions = {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`
+        if (options.method === 'POST') {
+            // For POST requests, we need to use apiFetch instead
+            const { apiFetch } = await import('../../api');
+            const response = await apiFetch(`/rest/${endpoint}?f=json`, { method: 'POST' });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                const subsonicResponse = data["subsonic-response"];
+                const error = subsonicResponse?.error;
+                throw new Error(error?.message || `Server error: ${response.status}`);
             }
-        };
-        const finalOptions = { ...defaultOptions, ...options };
-        
-        const url = new URL(`/rest/${endpoint}`, window.location.origin);
-        url.searchParams.append('f', 'json');
-
-        const response = await fetch(url, finalOptions);
-        const data = await response.json();
-        const subsonicResponse = data["subsonic-response"];
-
-        if (!response.ok || subsonicResponse.status === 'failed') {
-            const error = subsonicResponse?.error;
-            throw new Error(error?.message || `Server error: ${response.status}`);
+            const data = await response.json();
+            return data["subsonic-response"];
+        } else {
+            // For GET requests, use subsonicFetch
+            return await subsonicFetch(endpoint, { f: 'json' });
         }
-        return subsonicResponse;
     }, []);
 
     const fetchApiKey = useCallback(async () => {

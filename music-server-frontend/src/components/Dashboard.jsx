@@ -5,21 +5,9 @@ import Playlists from './Playlists.jsx';
 import AdminPanel from './AdminPanel.jsx';
 import CustomAudioPlayer from './AudioPlayer.jsx';
 import PlayQueueView from './PlayQueueView.jsx';
+import { subsonicFetch } from '../api';
 
-// This needs to be defined once, preferably in a separate api.js file, but here for simplicity.
-const subsonicFetch = async (endpoint, creds, params = {}) => {
-    const allParams = new URLSearchParams({
-        u: creds.username, p: creds.password, v: '1.16.1', c: 'AudioMuse-AI', f: 'json', ...params
-    });
-    const response = await fetch(`/rest/${endpoint}?${allParams.toString()}`);
-    if (!response.ok) {
-        const data = await response.json();
-        const subsonicResponse = data['subsonic-response'];
-        throw new Error(subsonicResponse?.error?.message || `Server error: ${response.status}`);
-    }
-    const data = await response.json();
-    return data['subsonic-response'];
-};
+// Use centralized subsonicFetch from api.js
 
 
 function Dashboard({ onLogout, isAdmin, credentials }) {
@@ -37,15 +25,10 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 
     const fetchConfig = useCallback(async () => {
         try {
-            const token = localStorage.getItem('token');
-            const headers = {};
-            if (token) headers['Authorization'] = `Bearer ${token}`;
-            const response = await fetch(`/rest/getConfiguration.view?f=json`, { headers });
-            const data = await response.json();
-            const subsonicResponse = data["subsonic-response"];
-            if (subsonicResponse.status === 'ok') {
-                const configList = subsonicResponse?.configurations?.configuration || [];
-                 const urlConfig = Array.isArray(configList) 
+            const dataResponse = await subsonicFetch('getConfiguration.view', { f: 'json' });
+            if (dataResponse && dataResponse.status === 'ok') {
+                const configList = dataResponse?.configurations?.configuration || [];
+                const urlConfig = Array.isArray(configList) 
                     ? configList.find(c => c.name === 'audiomuse_ai_core_url')
                     : (configList.name === 'audiomuse_ai_core_url' ? configList : null);
 
@@ -150,7 +133,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
         setMixMessage(`Generating Instant Mix for "${song.title}"...`);
         setQueueViewOpen(false); // Close queue if it's open
         try {
-            const data = await subsonicFetch('getSimilarSongs.view', credentials, { id: song.id, count: 20 });
+            const data = await subsonicFetch('getSimilarSongs.view', { id: song.id, count: 20 });
             let similarSongs = data.directory?.song || [];
             similarSongs = Array.isArray(similarSongs) ? similarSongs : [similarSongs].filter(Boolean);
 
@@ -175,7 +158,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
         setMixMessage(`Creating Song Path...`);
         setQueueViewOpen(false);
         try {
-            const data = await subsonicFetch('getSongPath.view', credentials, { startId, endId });
+            const data = await subsonicFetch('getSongPath.view', { startId, endId });
             let pathSongs = data.directory?.song || [];
             pathSongs = Array.isArray(pathSongs) ? pathSongs : [pathSongs].filter(Boolean);
 

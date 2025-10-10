@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Modal from '../Modal';
+import { apiFetch } from '../../api';
 
 function FileBrowser({ onSelect, onClose }) {
     const [currentPath, setCurrentPath] = useState('/');
@@ -10,9 +11,7 @@ function FileBrowser({ onSelect, onClose }) {
         setError('');
         const token = localStorage.getItem('token');
         try {
-            const response = await fetch(`/api/v1/admin/browse?path=${encodeURIComponent(path)}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+                const response = await apiFetch(`/api/v1/admin/browse?path=${encodeURIComponent(path)}`);
             if (!response.ok) {
                 const data = await response.json();
                 throw new Error(data.error || `Server error: ${response.status}`);
