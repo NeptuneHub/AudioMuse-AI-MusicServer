@@ -27,10 +27,9 @@ For detailed container usage instructions, deployment options, and release infor
 
 The containers include both the backend API server and frontend web interface, with automatic nightly builds and easy version management.
 
-After deploying AudioMsue-AI-Music server it could be reached at this two url:
+After deploying AudioMsue-AI-Music server it could be reached BOTH from this url:
 
-* Frontend for web access: http://localhost:3000/ 
-* Backend to be reached from Open Subsonic APP: http://localhost:8080/ 
+* http://localhost:8080/
 
 ## Music server configuration
 
@@ -151,7 +150,7 @@ API actually exposed:
 ```
 
 ## Compile and run frontend
-Goin ing /music-server-frontend/
+Goining /music-server-frontend/
 
 ```
 npm install
@@ -159,3 +158,5 @@ npm start
 ```
 
 Frontend will be reacheable on http://localhost:3000/ you can do the first login with admin/admin
+
+**IMPORTANT** as you can see, running the code OUT of the container, you had the front-end on the different port 3000
