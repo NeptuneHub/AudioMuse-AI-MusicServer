@@ -69,6 +69,7 @@ function App() {
 		localStorage.removeItem('token'); // For admin panel
 		localStorage.removeItem('username');
 		localStorage.removeItem('isAdmin');
+		localStorage.removeItem('currentNavigation'); // Clear saved navigation state
 		setCredentials(null);
 		setIsAdmin(false);
 	};

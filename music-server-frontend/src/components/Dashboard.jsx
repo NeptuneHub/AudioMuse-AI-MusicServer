@@ -11,7 +11,28 @@ import { subsonicFetch } from '../api';
 
 
 function Dashboard({ onLogout, isAdmin, credentials }) {
-    const [navigation, setNavigation] = useState([{ page: 'artists', title: 'Artists' }]);
+    // Initialize navigation from localStorage or default to artists
+    const [navigation, setNavigation] = useState(() => {
+        try {
+            const savedNavigation = localStorage.getItem('currentNavigation');
+            if (savedNavigation) {
+                const parsed = JSON.parse(savedNavigation);
+                // Validate the parsed navigation structure
+                if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].page && parsed[0].title) {
+                    // Check if user has access to admin page if that's where they were
+                    const hasAdminPage = parsed.some(nav => nav.page === 'admin');
+                    if (hasAdminPage && !isAdmin) {
+                        // User was on admin page but is no longer admin, reset to artists
+                        return [{ page: 'artists', title: 'Artists' }];
+                    }
+                    return parsed;
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to restore navigation from localStorage:', error);
+        }
+        return [{ page: 'artists', title: 'Artists' }];
+    });
     const [playQueue, setPlayQueue] = useState([]);
     const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -42,6 +63,15 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     useEffect(() => {
         fetchConfig();
     }, [fetchConfig]);
+
+    // Save navigation state to localStorage whenever it changes
+    useEffect(() => {
+        try {
+            localStorage.setItem('currentNavigation', JSON.stringify(navigation));
+        } catch (error) {
+            console.warn('Failed to save navigation to localStorage:', error);
+        }
+    }, [navigation]);
 
     const handleNavigate = (newView) => {
         setNavigation(prev => [...prev, newView]);

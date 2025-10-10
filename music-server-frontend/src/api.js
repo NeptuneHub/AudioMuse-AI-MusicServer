@@ -1,8 +1,7 @@
-// Minimal API helper: attach JWT from localStorage to requests when available
-// Use an explicit API base URL in production. Set REACT_APP_API_URL at build time
-// to override the default which assumes the backend is on the same host port 8080.
-const DEFAULT_API_PORT = 8080;
-const API_BASE = (process.env.REACT_APP_API_URL && process.env.REACT_APP_API_URL.replace(/"/g, '')) || `${window.location.protocol}//${window.location.hostname}:${DEFAULT_API_PORT}`;
+// Simple relative URL approach - works like the original working version
+// Frontend and backend should be served from the same origin (via reverse proxy)
+const API_BASE = ''; // Use relative URLs - no protocol/host/port needed
+
 export { API_BASE };
 
 export async function apiFetch(path, options = {}) {

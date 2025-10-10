@@ -1,4 +1,120 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { subsonicFetch } from '../api';
+
+const SaveAsPlaylistModal = ({ isOpen, onClose, queue, onSuccess }) => {
+    const [playlistName, setPlaylistName] = useState('');
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
+    const [isCreating, setIsCreating] = useState(false);
+
+    useEffect(() => {
+        if (isOpen) {
+            // Generate a default name based on current time
+            const now = new Date();
+            setPlaylistName(`Queue - ${now.toLocaleDateString()} ${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`);
+            setError('');
+            setSuccess('');
+            setIsCreating(false);
+        }
+    }, [isOpen]);
+
+    const handleCreatePlaylist = async () => {
+        if (!playlistName.trim()) {
+            setError('Please enter a playlist name.');
+            return;
+        }
+
+        if (queue.length === 0) {
+            setError('Queue is empty.');
+            return;
+        }
+
+        setError('');
+        setSuccess('');
+        setIsCreating(true);
+
+        try {
+            // Step 1: Create the playlist
+            await subsonicFetch('createPlaylist.view', { name: playlistName.trim() });
+            
+            // Step 2: Get the newly created playlist
+            const playlistsData = await subsonicFetch('getPlaylists.view');
+            const allPlaylists = playlistsData.playlists?.playlist || [];
+            const playlists = Array.isArray(allPlaylists) ? allPlaylists : [allPlaylists];
+            const newPlaylist = playlists.find(p => p.name === playlistName.trim());
+
+            if (!newPlaylist) {
+                throw new Error("Could not find the newly created playlist.");
+            }
+
+            // Step 3: Add all queue songs to the playlist
+            for (const song of queue) {
+                await subsonicFetch('updatePlaylist.view', {
+                    playlistId: newPlaylist.id,
+                    songIdToAdd: song.id
+                });
+            }
+
+            setSuccess(`Successfully created "${playlistName}" with ${queue.length} songs!`);
+            onSuccess?.(playlistName, queue.length);
+            
+            // Close modal after a short delay
+            setTimeout(() => {
+                onClose();
+            }, 1500);
+
+        } catch (err) {
+            setError(err.message || 'Failed to create playlist.');
+        } finally {
+            setIsCreating(false);
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[70] p-4">
+            <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-full sm:w-11/12 md:max-w-md">
+                <h3 className="text-xl font-bold mb-4 text-teal-400">Save Queue as Playlist</h3>
+                <p className="text-gray-300 mb-4">Save {queue.length} songs from the queue as a new playlist.</p>
+                
+                {error && <p className="text-red-500 mb-2">{error}</p>}
+                {success && <p className="text-green-400 mb-2">{success}</p>}
+                
+                <input
+                    type="text"
+                    value={playlistName}
+                    onChange={(e) => setPlaylistName(e.target.value)}
+                    placeholder="Enter playlist name..."
+                    className="w-full p-3 bg-gray-700 rounded mb-4 text-white placeholder-gray-400"
+                    disabled={isCreating}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            handleCreatePlaylist();
+                        }
+                    }}
+                />
+                
+                <div className="flex justify-end space-x-4">
+                    <button 
+                        onClick={onClose} 
+                        disabled={isCreating}
+                        className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500"
+                    >
+                        Cancel
+                    </button>
+                    <button 
+                        onClick={handleCreatePlaylist}
+                        disabled={isCreating || !playlistName.trim()}
+                        className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500"
+                    >
+                        {isCreating ? 'Creating...' : 'Create Playlist'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, onClose, onSetStart, onSetEnd, positionStyle }) => {
     const menuRef = useRef(null);
@@ -47,6 +163,7 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
     const [startSongId, setStartSongId] = useState(null);
     const [endSongId, setEndSongId] = useState(null);
     const [visibleCount, setVisibleCount] = useState(50);
+    const [showSaveAsPlaylist, setShowSaveAsPlaylist] = useState(false);
     const queueListRef = useRef(null);
 
     useEffect(() => {
@@ -129,7 +246,15 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
             >
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
                     <h2 className="text-xl font-bold text-white">Up Next</h2>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center flex-wrap gap-2">
+                        <button 
+                            onClick={() => setShowSaveAsPlaylist(true)}
+                            disabled={queue.length === 0}
+                            className="text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded disabled:bg-gray-500 disabled:cursor-not-allowed"
+                            title="Save all songs in queue as a new playlist"
+                        >
+                            Save as Playlist
+                        </button>
                          <button 
                             onClick={() => {
                                 if (!isPathCreationReady) {
@@ -217,6 +342,16 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                         <li className="p-4 text-center text-gray-500">The queue is empty.</li>
                     )}
                 </ul>
+                
+                <SaveAsPlaylistModal
+                    isOpen={showSaveAsPlaylist}
+                    onClose={() => setShowSaveAsPlaylist(false)}
+                    queue={queue}
+                    onSuccess={(playlistName, songCount) => {
+                        // Optional: You could add a toast notification here
+                        console.log(`Created playlist "${playlistName}" with ${songCount} songs`);
+                    }}
+                />
             </div>
         </div>
     );
