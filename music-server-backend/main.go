@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -140,6 +141,21 @@ func main() {
 			adminRoutes.POST("/scan/cancel", cancelAdminScan)
 		}
 	}
+
+	// Serve static files from React build
+	r.Static("/static", "/app/music-server-frontend/build/static")
+	r.StaticFile("/favicon.ico", "/app/music-server-frontend/build/favicon.ico")
+	r.StaticFile("/manifest.json", "/app/music-server-frontend/build/manifest.json")
+
+	// Serve React app for all non-API routes
+	r.NoRoute(func(c *gin.Context) {
+		// Don't serve index.html for API routes
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") || strings.HasPrefix(c.Request.URL.Path, "/rest/") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
+			return
+		}
+		c.File("/app/music-server-frontend/build/index.html")
+	})
 
 	log.Println("[GIN-debug] Listening and serving HTTP on :8080")
 	r.Run(":8080")

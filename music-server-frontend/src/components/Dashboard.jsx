@@ -7,8 +7,6 @@ import CustomAudioPlayer from './AudioPlayer.jsx';
 import PlayQueueView from './PlayQueueView.jsx';
 import { subsonicFetch } from '../api';
 
-// Use centralized subsonicFetch from api.js
-
 
 function Dashboard({ onLogout, isAdmin, credentials }) {
     // Initialize navigation from localStorage or default to artists

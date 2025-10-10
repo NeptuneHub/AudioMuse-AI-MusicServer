@@ -19,9 +19,13 @@ function App() {
 			
 			if (token && username) {
 				try {
-					// Validate token by making a test API call
-					const { apiFetch } = await import('./api');
-					const response = await apiFetch('/api/v1/user/me');
+					// Validate token by making a test API call - direct fetch like working commit
+					const response = await fetch('/api/v1/user/me', {
+						headers: { 
+							'Authorization': `Bearer ${token}`,
+							'Content-Type': 'application/json'
+						}
+					});
 					
 					if (response.ok) {
 						// Token is valid, restore session

@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { apiFetch, subsonicFetch } from '../api';
 
 function Login({ onLogin }) {
 	const [username, setUsername] = useState('');
@@ -10,9 +9,10 @@ function Login({ onLogin }) {
 		e.preventDefault();
 		setError('');
 		try {
-			// JWT-ONLY login - no legacy fallback
-			const jwtResponse = await apiFetch('/api/v1/user/login', {
+			// REVERT TO WORKING COMMIT APPROACH - Direct fetch like fa38d3de9
+			const jwtResponse = await fetch('/api/v1/user/login', {
 				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ username, password })
 			});
 

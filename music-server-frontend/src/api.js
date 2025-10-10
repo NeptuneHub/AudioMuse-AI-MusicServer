@@ -1,6 +1,9 @@
-// Simple relative URL approach - works like the original working version
-// Frontend and backend should be served from the same origin (via reverse proxy)
-const API_BASE = ''; // Use relative URLs - no protocol/host/port needed
+// REVERT TO WORKING APPROACH FROM fa38d3de9 COMMIT
+// Both frontend and backend are in same container
+// Use relative URLs - no explicit API_BASE needed
+// Container internal routing handles the rest
+
+const API_BASE = ''; // Empty = relative URLs like the working version
 
 export { API_BASE };
 

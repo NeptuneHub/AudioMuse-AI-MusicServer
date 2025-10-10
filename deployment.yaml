@@ -86,12 +86,13 @@ spec:
   type: LoadBalancer
   #loadBalancerIP: 192.168.3.77  # Optional: specify a static IP if your environment supports it, or comment it
   ports:
-    - name: frontend
-      protocol: TCP
-      port: 3000
-      targetPort: 3000
-    - name: backend
+    - name: web
       protocol: TCP
       port: 8080
       targetPort: 8080
+    # Legacy frontend port (no longer used since Go serves static files)
+    # - name: frontend  
+    #   protocol: TCP
+    #   port: 3000
+    #   targetPort: 3000
 
