@@ -1,6 +1,6 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { API_BASE, subsonicFetch } from '../api';
+import { API_BASE, subsonicFetch, starSong, unstarSong, getStarredSongs, getGenres } from '../api';
 
 const formatDate = (isoString) => {
     if (!isoString) return 'Never';
@@ -89,15 +89,66 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
     const [error, setError] = useState('');
     const [hasMore, setHasMore] = useState(true);
     const [refreshKey, setRefreshKey] = useState(0);
+    const [genres, setGenres] = useState([]);
+    const [selectedGenre, setSelectedGenre] = useState('');
 
     const isPlaylistView = !!filter?.playlistId;
     const PAGE_SIZE = 10;
+
+    // Load genres on component mount
+    useEffect(() => {
+        const loadGenres = async () => {
+            try {
+                const data = await getGenres();
+                const genreList = data.genres?.genre || [];
+                const allGenres = Array.isArray(genreList) ? genreList : [genreList].filter(Boolean);
+                
+                // Split semicolon-separated genres and remove duplicates
+                const individualGenres = [];
+                allGenres.forEach(genre => {
+                    if (genre.name) {
+                        const splitGenres = genre.name.split(';').map(g => g.trim()).filter(g => g);
+                        splitGenres.forEach(g => {
+                            if (!individualGenres.find(existing => existing.name === g)) {
+                                individualGenres.push({ name: g });
+                            }
+                        });
+                    }
+                });
+                
+                setGenres(individualGenres.sort((a, b) => a.name.localeCompare(b.name)));
+            } catch (err) {
+                console.error('Failed to load genres:', err);
+            }
+        };
+        loadGenres();
+    }, []);
+
+    // Handle star/unstar
+    const handleStarToggle = async (song) => {
+        try {
+            if (song.starred) {
+                await unstarSong(song.id);
+            } else {
+                await starSong(song.id);
+            }
+            
+            // Update song in state
+            const updateSongStar = (songList) => 
+                songList.map(s => s.id === song.id ? {...s, starred: !s.starred} : s);
+            
+            setSongs(updateSongStar);
+            setAllSongs(updateSongStar);
+        } catch (err) {
+            setError('Failed to update star status: ' + err.message);
+        }
+    };
 
     useEffect(() => {
         setSongs([]);
         setAllSongs([]);
         setHasMore(true);
-    }, [searchTerm, filter, refreshKey]);
+    }, [searchTerm, filter, refreshKey, selectedGenre]);
 
     const loadMoreSongs = useCallback(() => {
         if (isLoading || !hasMore) return;
@@ -109,7 +160,21 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                 if (searchTerm.length >= 3) {
                     const data = await subsonicFetch('search2.view', { query: searchTerm, songCount: PAGE_SIZE, songOffset: songs.length });
                     const songList = data.searchResult2?.song || data.searchResult3?.song || [];
-                    const newSongs = Array.isArray(songList) ? songList : [songList].filter(Boolean);
+                    let newSongs = Array.isArray(songList) ? songList : [songList].filter(Boolean);
+                    
+                    // Client-side genre filtering for search results
+                    if (selectedGenre) {
+                        newSongs = newSongs.filter(song => {
+                            if (!song.genre) return false;
+                            // Handle multiple genres separated by semicolons
+                            const genres = song.genre.split(';').map(g => g.trim());
+                            
+                            // Check for exact match first, then case-insensitive
+                            return genres.includes(selectedGenre) || 
+                                   genres.some(g => g.toLowerCase() === selectedGenre.toLowerCase());
+                        });
+                    }
+                    
                     setSongs(prev => [...prev, ...newSongs]);
                     setHasMore(newSongs.length === PAGE_SIZE);
                     return;
@@ -130,8 +195,33 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                             const songContainer = data.album || data.directory;
                             if (songContainer?.song) songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
                         }
+                    } else if (selectedGenre && !filter) {
+                        // Load songs by genre using the dedicated endpoint with pagination
+                        const data = await subsonicFetch('getSongsByGenre.view', { 
+                            genre: selectedGenre, 
+                            size: PAGE_SIZE, 
+                            offset: songs.length 
+                        });
+                        const newSongs = data.songsByGenre?.song || [];
+                        
+                        // For genre filtering, append new songs (like search pagination)
+                        setSongs(prev => [...prev, ...newSongs]);
+                        setHasMore(newSongs.length === PAGE_SIZE);
+                        return;
                     }
+                    
                     baseList = Array.isArray(songList) ? songList : [songList].filter(Boolean);
+                    
+                    // Apply genre filtering for other cases (albums, playlists, etc.)
+                    if (selectedGenre && (filter?.albumId || filter?.playlistId || filter?.preloadedSongs)) {
+                        baseList = baseList.filter(song => {
+                            if (!song.genre) return false;
+                            const genres = song.genre.split(';').map(g => g.trim());
+                            return genres.includes(selectedGenre) || 
+                                   genres.some(g => g.toLowerCase() === selectedGenre.toLowerCase());
+                        });
+                    }
+                    
                     setAllSongs(baseList);
                 }
 
@@ -149,14 +239,14 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
         };
 
         fetcher();
-    }, [credentials, filter, searchTerm, songs.length, allSongs, isLoading, hasMore]);
+    }, [credentials, filter, searchTerm, songs.length, allSongs, isLoading, hasMore, selectedGenre]);
 
     useEffect(() => {
-        if (songs.length === 0 && hasMore && (searchTerm.length >= 3 || filter)) {
+        if (songs.length === 0 && hasMore && (searchTerm.length >= 3 || filter || selectedGenre)) {
             const timer = setTimeout(() => loadMoreSongs(), 300);
             return () => clearTimeout(timer);
         }
-    }, [songs.length, hasMore, loadMoreSongs, searchTerm, filter]);
+    }, [songs.length, hasMore, loadMoreSongs, searchTerm, filter, selectedGenre]);
 
     const observer = useRef();
     const lastSongElementRef = useCallback(node => {
@@ -210,19 +300,62 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
     return (
         <div>
             {error && <p className="text-red-500 mb-4 p-3 bg-red-900/50 rounded">{error}</p>}
-            <div className="mb-4">
+            <div className="mb-4 flex flex-col sm:flex-row gap-4">
                 <input
                     type="text"
                     placeholder="Search for a song or artist..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
+                    className="flex-1 p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
                 />
+                <select
+                    value={selectedGenre}
+                    onChange={(e) => setSelectedGenre(e.target.value)}
+                    className="p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500 min-w-[120px]"
+                >
+                    <option value="">All Genres</option>
+                    {genres.map(genre => (
+                        <option key={genre.name} value={genre.name}>{genre.name}</option>
+                    ))}
+                </select>
             </div>
 
-            {( (songs.length > 0 || allSongs.length > 0) && !searchTerm && (filter?.albumId || filter?.playlistId)) && (
-                <button onClick={handlePlayAlbum} className="mb-4 bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Play All</button>
-            )}
+            <div className="mb-4 flex flex-wrap gap-2">
+                {( (songs.length > 0 || allSongs.length > 0) && !searchTerm && (filter?.albumId || filter?.playlistId)) && (
+                    <button onClick={handlePlayAlbum} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Play All</button>
+                )}
+                <button 
+                    onClick={async () => {
+                        try {
+                            // Clear all state first to ensure clean reset
+                            setSongs([]);
+                            setAllSongs([]);
+                            setIsLoading(true);
+                            setError('');
+                            setSearchTerm('');
+                            setSelectedGenre('');
+                            setHasMore(false);
+                            
+                            // Force refresh by incrementing refreshKey
+                            setRefreshKey(prev => prev + 1);
+                            
+                            const data = await getStarredSongs();
+                            const starredSongs = data.starred?.song || [];
+                            const songList = Array.isArray(starredSongs) ? starredSongs : [starredSongs].filter(Boolean);
+                            setAllSongs(songList);
+                            setSongs(songList.slice(0, PAGE_SIZE));
+                            setHasMore(songList.length > PAGE_SIZE);
+                        } catch (err) {
+                            setError('Failed to load starred songs: ' + err.message);
+                        } finally {
+                            setIsLoading(false);
+                        }
+                    }}
+                    className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded"
+                >
+                    ⭐ Starred Songs
+                </button>
+            </div>
             
             {!isLoading && songs.length === 0 && (searchTerm || filter) && <p className="text-center text-gray-500">No songs found.</p>}
 
@@ -236,9 +369,11 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                         <thead className="text-xs text-gray-300 uppercase bg-gray-700">
                             <tr>
                                 <th className="px-4 py-3 w-12"></th>
+                                <th className="px-4 py-3 w-12 text-center">⭐</th>
                                 <th className="px-4 py-3">Title</th>
                                 <th className="px-4 py-3 hidden sm:table-cell">Artist</th>
                                 <th className="px-4 py-3 hidden md:table-cell">Album</th>
+                                <th className="px-4 py-3 hidden lg:table-cell">Genre</th>
                                 <th className="px-4 py-3 hidden xl:table-cell text-center">Plays</th>
                                 <th className="px-4 py-3 hidden lg:table-cell">Last Played</th>
                                 <th className="px-4 py-3 w-48 text-right">Actions</th>
@@ -259,12 +394,24 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                                 )}
                                             </button>
                                         </td>
+                                        <td className="px-4 py-4 text-center">
+                                            <button
+                                                onClick={() => handleStarToggle(song)}
+                                                className={`text-2xl hover:scale-110 transition-transform ${
+                                                    song.starred ? 'text-yellow-400' : 'text-gray-600'
+                                                }`}
+                                                title={song.starred ? 'Remove from favorites' : 'Add to favorites'}
+                                            >
+                                                {song.starred ? '⭐' : '☆'}
+                                            </button>
+                                        </td>
                                         <td className={`px-4 py-4 font-medium ${isPlaying ? 'text-green-400' : 'text-white'}`}>
                                             <div>{song.title}</div>
                                             <div className="sm:hidden text-xs text-gray-400">{song.artist}</div>
                                         </td>
                                         <td className="px-4 py-4 hidden sm:table-cell">{song.artist}</td>
                                         <td className="px-4 py-4 hidden md:table-cell">{song.album}</td>
+                                        <td className="px-4 py-4 hidden lg:table-cell text-gray-400">{song.genre || 'Unknown'}</td>
                                         <td className="px-4 py-3 hidden xl:table-cell text-center">{song.playCount > 0 ? song.playCount : ''}</td>
                                         <td className="px-4 py-3 hidden lg:table-cell">{formatDate(song.lastPlayed)}</td>
                                         <td className="px-4 py-4">
@@ -416,7 +563,38 @@ export function Albums({ credentials, filter, onNavigate }) {
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [hasMore, setHasMore] = useState(true);
+    const [genres, setGenres] = useState([]);
+    const [selectedGenre, setSelectedGenre] = useState('');
     const PAGE_SIZE = 10;
+    
+    // Load genres on component mount
+    useEffect(() => {
+        const loadGenres = async () => {
+            try {
+                const data = await getGenres();
+                const genreList = data.genres?.genre || [];
+                const allGenres = Array.isArray(genreList) ? genreList : [genreList].filter(Boolean);
+                
+                // Split semicolon-separated genres and remove duplicates
+                const individualGenres = [];
+                allGenres.forEach(genre => {
+                    if (genre.name) {
+                        const splitGenres = genre.name.split(';').map(g => g.trim()).filter(g => g);
+                        splitGenres.forEach(g => {
+                            if (!individualGenres.find(existing => existing.name === g)) {
+                                individualGenres.push({ name: g });
+                            }
+                        });
+                    }
+                });
+                
+                setGenres(individualGenres.sort((a, b) => a.name.localeCompare(b.name)));
+            } catch (err) {
+                console.error('Failed to load genres:', err);
+            }
+        };
+        loadGenres();
+    }, []);
     
     useEffect(() => {
         setAlbums([]);
@@ -427,7 +605,7 @@ export function Albums({ credentials, filter, onNavigate }) {
     useEffect(() => {
         setAlbums([]);
         setHasMore(true);
-    }, [searchTerm])
+    }, [searchTerm, selectedGenre])
 
 
     const loadMoreAlbums = useCallback(() => {
@@ -443,7 +621,9 @@ export function Albums({ credentials, filter, onNavigate }) {
                     const data = await subsonicFetch('search2.view', { query, albumCount: PAGE_SIZE, albumOffset: albums.length });
                     albumList = data.searchResult2?.album || data.searchResult3?.album || [];
                 } else {
-                    const data = await subsonicFetch('getAlbumList2.view', { type: 'alphabeticalByName', size: PAGE_SIZE, offset: albums.length });
+                    const params = { type: 'alphabeticalByName', size: PAGE_SIZE, offset: albums.length };
+                    if (selectedGenre) params.genre = selectedGenre;
+                    const data = await subsonicFetch('getAlbumList2.view', params);
                     albumList = data.albumList2?.album || [];
                 }
                 const newAlbums = Array.isArray(albumList) ? albumList : [albumList].filter(Boolean);
@@ -458,7 +638,7 @@ export function Albums({ credentials, filter, onNavigate }) {
         };
         
         fetcher();
-    }, [credentials, filter, searchTerm, albums.length, isLoading, hasMore]);
+    }, [credentials, filter, searchTerm, albums.length, isLoading, hasMore, selectedGenre]);
     
     useEffect(() => {
         if (albums.length === 0 && hasMore) {
@@ -482,14 +662,24 @@ export function Albums({ credentials, filter, onNavigate }) {
 
     return (
         <div>
-            <div className="mb-4">
+            <div className="mb-4 flex flex-col sm:flex-row gap-4">
                 <input
                     type="text"
                     placeholder="Search for an album or artist..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
+                    className="flex-1 p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
                 />
+                <select
+                    value={selectedGenre}
+                    onChange={(e) => setSelectedGenre(e.target.value)}
+                    className="p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500 min-w-[120px]"
+                >
+                    <option value="">All Genres</option>
+                    {genres.map(genre => (
+                        <option key={genre.name} value={genre.name}>{genre.name}</option>
+                    ))}
+                </select>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
                 {albums.map((album, index) => (

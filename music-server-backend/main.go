@@ -96,6 +96,7 @@ func main() {
 		subsonic.GET("/search3.view", subsonicSearch2)
 		subsonic.GET("/getSong.view", subsonicGetSong)
 		subsonic.GET("/getRandomSongs.view", subsonicGetRandomSongs)
+		subsonic.GET("/getSongsByGenre.view", subsonicGetSongsByGenre)
 		subsonic.GET("/getCoverArt.view", subsonicGetCoverArt)
 		subsonic.Any("/startScan.view", subsonicStartScan)
 		subsonic.GET("/getScanStatus.view", subsonicGetScanStatus)
@@ -113,6 +114,12 @@ func main() {
 		subsonic.GET("/getSimilarSongs.view", subsonicGetSimilarSongs)
 		subsonic.GET("/getSongPath.view", subsonicGetSongPath)
 		subsonic.GET("/getSonicFingerprint.view", subsonicGetSonicFingerprint)
+
+		// Star/Unstar functionality
+		subsonic.GET("/star.view", subsonicStar)
+		subsonic.GET("/unstar.view", subsonicUnstar)
+		subsonic.GET("/getStarred.view", subsonicGetStarred)
+		subsonic.GET("/getGenres.view", subsonicGetGenres)
 
 		// API Key Management
 		subsonic.GET("/getApiKey.view", subsonicGetApiKey)
@@ -139,6 +146,7 @@ func main() {
 		{
 			adminRoutes.GET("/browse", browseFiles)
 			adminRoutes.POST("/scan/cancel", cancelAdminScan)
+			adminRoutes.POST("/scan/rescan", rescanAllLibraries)
 		}
 	}
 
@@ -234,6 +242,31 @@ func initDB() {
 	);`)
 	if err != nil {
 		log.Fatalf("Failed to create songs table: %v", err)
+	}
+
+	// Add starred column if it doesn't exist (backward compatibility)
+	_, err = db.Exec(`ALTER TABLE songs ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		log.Printf("Note: Could not add starred column (may already exist): %v", err)
+	}
+
+	// Add genre column if it doesn't exist (backward compatibility)
+	_, err = db.Exec(`ALTER TABLE songs ADD COLUMN genre TEXT DEFAULT '';`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		log.Printf("Note: Could not add genre column (may already exist): %v", err)
+	}
+
+	// Create starred_songs table for user-specific stars
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS starred_songs (
+		user_id INTEGER NOT NULL,
+		song_id INTEGER NOT NULL,
+		starred_at TEXT NOT NULL,
+		PRIMARY KEY (user_id, song_id),
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+		FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE
+	);`)
+	if err != nil {
+		log.Fatalf("Failed to create starred_songs table: %v", err)
 	}
 
 	// Playlists table

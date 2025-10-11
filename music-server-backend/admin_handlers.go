@@ -122,8 +122,12 @@ func processPath(scanPath string) int64 {
 				}
 
 				currentTime := time.Now().Format(time.RFC3339)
-				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path, date_added, date_updated) VALUES (?, ?, ?, ?, ?, ?)",
-					meta.Title(), meta.Artist(), meta.Album(), path, currentTime, currentTime)
+				genre := meta.Genre()
+				if genre == "" {
+					genre = "Unknown"
+				}
+				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path, genre, date_added, date_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+					meta.Title(), meta.Artist(), meta.Album(), path, genre, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error inserting song from %s into DB: %v", path, err)
 					return nil
@@ -178,8 +182,12 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 				}
 
 				currentTime := time.Now().Format(time.RFC3339)
-				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path, date_added, date_updated) VALUES (?, ?, ?, ?, ?, ?)",
-					meta.Title(), meta.Artist(), meta.Album(), path, currentTime, currentTime)
+				genre := meta.Genre()
+				if genre == "" {
+					genre = "Unknown"
+				}
+				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path, genre, date_added, date_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+					meta.Title(), meta.Artist(), meta.Album(), path, genre, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error inserting song from %s into DB: %v", path, err)
 					return nil
@@ -204,7 +212,14 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 
 func updateSongCountForPath(path string, pathId int) {
 	var count int
-	likePath := filepath.Join(path, "%")
+	// Ensure path ends with / for proper pattern matching
+	searchPath := path
+	if !strings.HasSuffix(searchPath, "/") {
+		searchPath += "/"
+	}
+	likePath := searchPath + "%"
+	
+	log.Printf("DEBUG: Counting songs for path '%s' using pattern '%s'", path, likePath)
 	err := db.QueryRow("SELECT COUNT(*) FROM songs WHERE path LIKE ?", likePath).Scan(&count)
 	if err != nil {
 		log.Printf("Error counting songs for path %s: %v", path, err)
@@ -215,7 +230,7 @@ func updateSongCountForPath(path string, pathId int) {
 	if err != nil {
 		log.Printf("Error updating song count for path ID %d: %v", pathId, err)
 	} else {
-		log.Printf("Updated song count for path '%s' to %d", path, count)
+		log.Printf("Updated song count for path '%s' (ID: %d) to %d using pattern '%s'", path, pathId, count, likePath)
 	}
 }
 
@@ -248,4 +263,61 @@ func cancelAdminScan(c *gin.Context) {
 	log.Println("Received request to cancel library scan.")
 	isScanCancelled.Store(true)
 	c.JSON(http.StatusOK, gin.H{"message": "Scan cancellation signal sent."})
+}
+
+func rescanAllLibraries(c *gin.Context) {
+	// Check if scan is already running
+	var isScanning bool
+	err := db.QueryRow("SELECT is_scanning FROM scan_status WHERE id = 1").Scan(&isScanning)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error checking scan status"})
+		return
+	}
+
+	if isScanning {
+		c.JSON(http.StatusConflict, gin.H{"error": "A scan is already running"})
+		return
+	}
+
+	// Clear the database first
+	log.Println("Starting full library rescan - clearing existing data...")
+
+	// Delete all songs and related data
+	_, err = db.Exec("DELETE FROM playlist_songs")
+	if err != nil {
+		log.Printf("Warning: Could not clear playlist_songs: %v", err)
+	}
+
+	_, err = db.Exec("DELETE FROM starred_songs")
+	if err != nil {
+		log.Printf("Warning: Could not clear starred_songs: %v", err)
+	}
+
+	_, err = db.Exec("DELETE FROM songs")
+	if err != nil {
+		log.Printf("Error clearing songs table: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear songs database"})
+		return
+	}
+
+	// Reset library path song counts
+	_, err = db.Exec("UPDATE library_paths SET song_count = 0, last_scan_ended = NULL")
+	if err != nil {
+		log.Printf("Warning: Could not reset library_paths: %v", err)
+	}
+
+	log.Println("Database cleared. Starting fresh scan...")
+
+	// Mark scan as started
+	_, err = db.Exec("UPDATE scan_status SET is_scanning = 1, songs_added = 0, last_update_time = ? WHERE id = 1",
+		time.Now().Format(time.RFC3339))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update scan status"})
+		return
+	}
+
+	// Start the scan in background
+	go scanAllLibraries()
+
+	c.JSON(http.StatusOK, gin.H{"message": "Full library rescan started successfully"})
 }

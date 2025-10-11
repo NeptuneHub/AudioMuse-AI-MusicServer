@@ -26,11 +26,14 @@ type Song struct {
 	LastPlayed  string `json:"lastPlayed"`
 	DateAdded   string `json:"dateAdded"`
 	DateUpdated string `json:"dateUpdated"`
+	Starred     bool   `json:"starred"`
+	Genre       string `json:"genre"`
 }
 
 type Album struct {
 	Name   string `json:"name"`
 	Artist string `json:"artist"`
+	Genre  string `json:"genre"`
 }
 
 type Playlist struct {
@@ -103,6 +106,8 @@ type SubsonicSong struct {
 	Path       string   `xml:"path,attr,omitempty" json:"path,omitempty"`
 	PlayCount  int      `xml:"playCount,attr,omitempty" json:"playCount,omitempty"`
 	LastPlayed string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
+	Starred    bool     `xml:"starred,attr,omitempty" json:"starred,omitempty"`
+	Genre      string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
 }
 
 type SubsonicArtistIndex struct {
@@ -135,6 +140,7 @@ type SubsonicAlbum struct {
 	Name     string   `xml:"name,attr" json:"name"`
 	Artist   string   `xml:"artist,attr" json:"artist"`
 	CoverArt string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	Genre    string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
 }
 
 type SubsonicPlaylists struct {
@@ -214,4 +220,26 @@ type ApiKeyResponse struct {
 type SubsonicSongWrapper struct {
 	XMLName xml.Name `xml:"song" json:"-"`
 	Song    SubsonicSong
+}
+
+type SubsonicGenres struct {
+	XMLName xml.Name        `xml:"genres" json:"-"`
+	Genres  []SubsonicGenre `xml:"genre" json:"genre"`
+}
+
+type SubsonicGenre struct {
+	XMLName    xml.Name `xml:"genre" json:"-"`
+	Name       string   `xml:",chardata" json:"name"`
+	SongCount  int      `xml:"songCount,attr" json:"songCount"`
+	AlbumCount int      `xml:"albumCount,attr" json:"albumCount"`
+}
+
+type SubsonicStarred struct {
+	XMLName xml.Name       `xml:"starred" json:"-"`
+	Songs   []SubsonicSong `xml:"song" json:"song"`
+}
+
+type SubsonicSongsByGenre struct {
+	XMLName xml.Name       `xml:"songsByGenre" json:"-"`
+	Songs   []SubsonicSong `xml:"song" json:"song"`
 }

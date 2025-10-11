@@ -90,3 +90,40 @@ export async function subsonicFetch(endpoint, params = {}) {
     const data = await res.json();
     return data['subsonic-response'];
 }
+
+// Star/Unstar functions
+export async function starSong(songId) {
+    return await subsonicFetch('star.view', { id: songId });
+}
+
+export async function unstarSong(songId) {
+    return await subsonicFetch('unstar.view', { id: songId });
+}
+
+export async function getStarredSongs() {
+    return await subsonicFetch('getStarred.view');
+}
+
+// Genre functions
+export async function getGenres() {
+    return await subsonicFetch('getGenres.view');
+}
+
+export async function getSongsByGenre(genre, params = {}) {
+    return await subsonicFetch('getSongsByGenre.view', { genre, ...params });
+}
+
+// Enhanced search with genre support
+export async function searchMusic(query, params = {}) {
+    return await subsonicFetch('search2.view', { query, ...params });
+}
+
+// Enhanced album list with genre filtering
+export async function getAlbums(params = {}) {
+    return await subsonicFetch('getAlbumList2.view', { type: 'alphabeticalByArtist', ...params });
+}
+
+// Rescan functionality for admin
+export async function rescanLibrary() {
+    return await apiFetch('/api/v1/admin/scan/rescan', { method: 'POST' });
+}

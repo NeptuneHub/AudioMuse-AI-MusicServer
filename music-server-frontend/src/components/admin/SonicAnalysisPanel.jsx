@@ -6,6 +6,30 @@ function SonicAnalysisPanel() {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(true);
     const [isStarting, setIsStarting] = useState(false);
+    const [audioMuseConfigured, setAudioMuseConfigured] = useState(null); // null = checking, true = configured, false = not configured
+
+    // Check if AudioMuse-AI Core URL is configured
+    const checkAudioMuseConfiguration = useCallback(async () => {
+        const token = localStorage.getItem('token');
+        try {
+            const response = await fetch(`${API_BASE}/rest/getConfiguration.view?f=json`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!response.ok) {
+                throw new Error(`Failed to check configuration: ${response.status}`);
+            }
+            const data = await response.json();
+            const config = data['subsonic-response']?.configurations?.configuration;
+            const audioMuseUrl = config?.find(c => c.name === 'audiomuse_ai_core_url')?.value;
+            const isConfigured = !!(audioMuseUrl && audioMuseUrl.trim());
+            setAudioMuseConfigured(isConfigured);
+            return isConfigured;
+        } catch (err) {
+            console.error("Failed to check AudioMuse configuration:", err);
+            setAudioMuseConfigured(false);
+            return false;
+        }
+    }, []);
 
     const fetchStatus = useCallback(async () => {
         const token = localStorage.getItem('token');
@@ -15,6 +39,10 @@ function SonicAnalysisPanel() {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!response.ok) {
+                // If it's 503 Service Unavailable, it likely means AudioMuse-AI is not configured
+                if (response.status === 503) {
+                    throw new Error("AudioMuse-AI Core URL not configured");
+                }
                 const errData = await response.json().catch(() => ({ error: `Server error: ${response.status}` }));        
                 throw new Error(errData.error || `Server error: ${response.status}`);
             }
@@ -23,6 +51,12 @@ function SonicAnalysisPanel() {
             setStatus(data);
             setError('');
         } catch (err) {
+            if (err.message.includes("AudioMuse-AI Core URL not configured")) {
+                setError("AudioMuse-AI Core URL not configured. Please configure it in the admin panel to use this feature.");
+                setStatus(null);
+                setIsLoading(false);
+                return; // Don't continue polling if not configured
+            }
             setError(err.message);
             console.error("Failed to fetch analysis status:", err);
         } finally {
@@ -31,10 +65,31 @@ function SonicAnalysisPanel() {
     }, []);
 
     useEffect(() => {
-        fetchStatus();
-        const intervalId = setInterval(fetchStatus, 5000); // Poll every 5 seconds
+        const initializePanel = async () => {
+            const isConfigured = await checkAudioMuseConfiguration();
+            if (isConfigured) {
+                fetchStatus();
+            } else {
+                setError("AudioMuse-AI Core URL not configured. Please configure it in the admin panel to use this feature.");
+                setIsLoading(false);
+            }
+        };
+        
+        initializePanel();
+        
+        // Only set up polling if AudioMuse-AI is configured
+        const intervalId = setInterval(async () => {
+            if (audioMuseConfigured === null) {
+                // Still checking configuration, skip this interval
+                return;
+            }
+            if (audioMuseConfigured && (!error || !error.includes("AudioMuse-AI Core URL not configured"))) {
+                fetchStatus();
+            }
+        }, 5000);
+        
         return () => clearInterval(intervalId);
-    }, [fetchStatus]);
+    }, [fetchStatus, checkAudioMuseConfiguration, audioMuseConfigured]);
 
     const startTask = async (endpoint, taskName) => {
         setError('');
@@ -92,23 +147,46 @@ function SonicAnalysisPanel() {
     };
 
     const isTaskRunning = status && (status.status === 'PROGRESS' || status.status === 'STARTED' || status.status === 'PENDING');
+    const isAudioMuseConfigured = audioMuseConfigured === true;
 
     return (
         <div className="bg-gray-800 p-4 sm:p-6 rounded-lg">
             <h3 className="text-xl font-bold mb-4">Analysis and Clustering</h3>
             {error && <p className="text-red-500 mb-4 p-3 bg-red-900/50 rounded">{error}</p>}
             
+            {!isAudioMuseConfigured && audioMuseConfigured !== null && (
+                <div className="mb-4 p-4 bg-yellow-900/50 border border-yellow-600 rounded">
+                    <p className="text-yellow-300 mb-2">
+                        AudioMuse-AI Core URL is not configured. This feature requires the AudioMuse-AI container to be running and configured.
+                    </p>
+                    <button
+                        onClick={async () => {
+                            setIsLoading(true);
+                            const isConfigured = await checkAudioMuseConfiguration();
+                            if (isConfigured) {
+                                fetchStatus();
+                            } else {
+                                setIsLoading(false);
+                            }
+                        }}
+                        className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded"
+                    >
+                        Refresh Configuration
+                    </button>
+                </div>
+            )}
+            
             <div className="flex justify-end mb-4">
                 <button
                     onClick={handleStartClustering}
-                    disabled={isTaskRunning || isLoading || isStarting}
+                    disabled={!isAudioMuseConfigured || isTaskRunning || isLoading || isStarting}
                     className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500 disabled:cursor-not-allowed mr-4"
                 >
                     {isStarting ? 'Starting...' : 'Start Clustering'}
                 </button>
                 <button
                     onClick={handleStart}
-                    disabled={isTaskRunning || isLoading || isStarting}
+                    disabled={!isAudioMuseConfigured || isTaskRunning || isLoading || isStarting}
                     className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500 disabled:cursor-not-allowed"
                 >
                     {isStarting ? 'Starting...' : (isLoading && !isTaskRunning ? 'Loading...' : 'Start New Analysis')}

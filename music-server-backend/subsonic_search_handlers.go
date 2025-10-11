@@ -76,18 +76,18 @@ func subsonicSearch2(c *gin.Context) {
 			albumArgs = append(albumArgs, likeWord, likeWord)
 		}
 		albumArgs = append(albumArgs, albumCount, albumOffset)
-		albumQuery := "SELECT album, artist, MIN(id) as albumId FROM songs WHERE " + strings.Join(albumConditions, " AND ") + " GROUP BY album, artist ORDER BY album LIMIT ? OFFSET ?"
+		albumQuery := "SELECT album, artist, COALESCE(genre, ''), MIN(id) as albumId FROM songs WHERE " + strings.Join(albumConditions, " AND ") + " GROUP BY album, artist ORDER BY album LIMIT ? OFFSET ?"
 		albumRows, err := db.Query(albumQuery, albumArgs...)
 		if err != nil {
 			log.Printf("[ERROR] subsonicSearch2: Album query failed: %v", err)
 		} else {
 			defer albumRows.Close()
 			for albumRows.Next() {
-				var albumName, artistName string
+				var albumName, artistName, genre string
 				var albumID int
-				if err := albumRows.Scan(&albumName, &artistName, &albumID); err == nil {
+				if err := albumRows.Scan(&albumName, &artistName, &genre, &albumID); err == nil {
 					albumIDStr := strconv.Itoa(albumID)
-					result.Albums = append(result.Albums, SubsonicAlbum{ID: albumIDStr, Name: albumName, Artist: artistName, CoverArt: albumIDStr})
+					result.Albums = append(result.Albums, SubsonicAlbum{ID: albumIDStr, Name: albumName, Artist: artistName, Genre: genre, CoverArt: albumIDStr})
 				}
 			}
 		}
@@ -95,15 +95,27 @@ func subsonicSearch2(c *gin.Context) {
 
 	// --- Enhanced Song Search Logic ---
 	if songCount > 0 {
+		user := c.MustGet("user").(User)
 		var songConditions []string
 		var songArgs []interface{}
+		songArgs = append(songArgs, user.ID) // First arg for JOIN
+
 		for _, word := range searchWords {
-			songConditions = append(songConditions, "(title LIKE ? OR artist LIKE ?)")
+			songConditions = append(songConditions, "(s.title LIKE ? OR s.artist LIKE ?)")
 			likeWord := "%" + word + "%"
 			songArgs = append(songArgs, likeWord, likeWord)
 		}
 		songArgs = append(songArgs, songCount, songOffset)
-		songQuery := "SELECT id, title, artist, album, path, play_count, last_played FROM songs WHERE " + strings.Join(songConditions, " AND ") + " ORDER BY artist, title LIMIT ? OFFSET ?"
+
+		songQuery := `
+			SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''),
+			       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
+			FROM songs s
+			LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
+			WHERE ` + strings.Join(songConditions, " AND ") + `
+			ORDER BY s.artist, s.title LIMIT ? OFFSET ?
+		`
+
 		songRows, err := db.Query(songQuery, songArgs...)
 		if err != nil {
 			log.Printf("[ERROR] subsonicSearch2: Song query failed: %v", err)
@@ -112,7 +124,8 @@ func subsonicSearch2(c *gin.Context) {
 			for songRows.Next() {
 				var songFromDb Song
 				var lastPlayed sql.NullString
-				if err := songRows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, &songFromDb.Path, &songFromDb.PlayCount, &lastPlayed); err == nil {
+				var starred int
+				if err := songRows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, &songFromDb.Path, &songFromDb.PlayCount, &lastPlayed, &songFromDb.Genre, &starred); err == nil {
 					song := SubsonicSong{
 						ID:        strconv.Itoa(songFromDb.ID),
 						CoverArt:  strconv.Itoa(songFromDb.ID),
@@ -120,6 +133,8 @@ func subsonicSearch2(c *gin.Context) {
 						Artist:    songFromDb.Artist,
 						Album:     songFromDb.Album,
 						PlayCount: songFromDb.PlayCount,
+						Genre:     songFromDb.Genre,
+						Starred:   starred == 1,
 					}
 					if lastPlayed.Valid {
 						song.LastPlayed = lastPlayed.String

@@ -146,6 +146,8 @@ func subsonicGetAlbumList2(c *gin.Context) {
 	// Respect size/offset params and return empty list when offset exceeds total (Navidrome-like behavior)
 	sizeParam := c.DefaultQuery("size", "500")
 	offsetParam := c.DefaultQuery("offset", "0")
+	genreParam := c.Query("genre")
+
 	size, err := strconv.Atoi(sizeParam)
 	if err != nil || size <= 0 {
 		size = 500
@@ -158,9 +160,18 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		offset = 0
 	}
 
+	// Build query with optional genre filter
+	whereClause := "WHERE album != ''"
+	var args []interface{}
+	if genreParam != "" {
+		whereClause += " AND genre = ?"
+		args = append(args, genreParam)
+	}
+
 	// Count distinct albums
 	var totalAlbums int
-	err = db.QueryRow("SELECT COUNT(DISTINCT album || '~~' || artist) FROM songs WHERE album != ''").Scan(&totalAlbums)
+	countQuery := fmt.Sprintf("SELECT COUNT(DISTINCT album || '~~' || artist) FROM songs %s", whereClause)
+	err = db.QueryRow(countQuery, args...).Scan(&totalAlbums)
 	if err != nil {
 		log.Printf("Error counting albums for pagination: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying albums."))
@@ -176,8 +187,9 @@ func subsonicGetAlbumList2(c *gin.Context) {
 	}
 
 	// Query with LIMIT/OFFSET for pagination
-	query := "SELECT album, artist, MIN(id) FROM songs WHERE album != '' GROUP BY album, artist ORDER BY artist, album LIMIT ? OFFSET ?"
-	rows, err := db.Query(query, size, offset)
+	query := fmt.Sprintf("SELECT album, artist, COALESCE(genre, ''), MIN(id) FROM songs %s GROUP BY album, artist ORDER BY artist, album LIMIT ? OFFSET ?", whereClause)
+	args = append(args, size, offset)
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying albums."))
 		return
@@ -188,7 +200,7 @@ func subsonicGetAlbumList2(c *gin.Context) {
 	for rows.Next() {
 		var album SubsonicAlbum
 		var albumId int
-		if err := rows.Scan(&album.Name, &album.Artist, &albumId); err != nil {
+		if err := rows.Scan(&album.Name, &album.Artist, &album.Genre, &albumId); err != nil {
 			log.Printf("Error scanning album row for subsonicGetAlbumList2: %v", err)
 			continue
 		}
@@ -203,7 +215,7 @@ func subsonicGetAlbumList2(c *gin.Context) {
 }
 
 func subsonicGetAlbum(c *gin.Context) {
-	_ = c.MustGet("user") // Auth is handled by middleware
+	user := c.MustGet("user").(User)
 
 	albumSongId := c.Query("id")
 	if albumSongId == "" {
@@ -211,14 +223,23 @@ func subsonicGetAlbum(c *gin.Context) {
 		return
 	}
 
-	var albumName, artistName string
-	err := db.QueryRow("SELECT album, artist FROM songs WHERE id = ?", albumSongId).Scan(&albumName, &artistName)
+	var albumName, artistName, albumGenre string
+	err := db.QueryRow("SELECT album, artist, COALESCE(genre, '') FROM songs WHERE id = ?", albumSongId).Scan(&albumName, &artistName, &albumGenre)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Album not found."))
 		return
 	}
 
-	rows, err := db.Query("SELECT id, title, artist, album, play_count, last_played FROM songs WHERE album = ? AND artist = ? ORDER BY title", albumName, artistName)
+	query := `
+		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, COALESCE(s.genre, ''), 
+		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
+		FROM songs s
+		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
+		WHERE s.album = ? AND s.artist = ? 
+		ORDER BY s.title
+	`
+
+	rows, err := db.Query(query, user.ID, albumName, artistName)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Error querying for songs in album."))
 		return
@@ -230,12 +251,14 @@ func subsonicGetAlbum(c *gin.Context) {
 		var s SubsonicSong
 		var lastPlayed sql.NullString
 		var songId int
-		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed); err != nil {
+		var starred int
+		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &s.Genre, &starred); err != nil {
 			log.Printf("Error scanning song in getAlbum: %v", err)
 			continue
 		}
 		s.ID = strconv.Itoa(songId)
 		s.CoverArt = albumSongId
+		s.Starred = starred == 1
 		if lastPlayed.Valid {
 			s.LastPlayed = lastPlayed.String
 		}
@@ -573,4 +596,300 @@ func proxyImage(c *gin.Context, imageUrl string) {
 	if err != nil {
 		log.Printf("[PROXY] Error copying image stream to response: %v", err)
 	}
+}
+
+// subsonicStar handles starring of songs according to Open Subsonic API
+func subsonicStar(c *gin.Context) {
+	user := c.MustGet("user").(User)
+
+	songID := c.Query("id")
+	if songID == "" {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter is missing."))
+		return
+	}
+
+	// Check if song exists
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE id = ?)", songID).Scan(&exists)
+	if err != nil || !exists {
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))
+		return
+	}
+
+	// Add star (ignore if already exists)
+	_, err = db.Exec(`INSERT OR REPLACE INTO starred_songs (user_id, song_id, starred_at) VALUES (?, ?, ?)`,
+		user.ID, songID, time.Now().Format(time.RFC3339))
+	if err != nil {
+		log.Printf("Error starring song %s for user %s: %v", songID, user.Username, err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+		return
+	}
+
+	log.Printf("Song %s starred by user %s", songID, user.Username)
+	subsonicRespond(c, newSubsonicResponse(nil))
+}
+
+// subsonicUnstar handles unstarring of songs according to Open Subsonic API
+func subsonicUnstar(c *gin.Context) {
+	user := c.MustGet("user").(User)
+
+	songID := c.Query("id")
+	if songID == "" {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter is missing."))
+		return
+	}
+
+	// Remove star
+	_, err := db.Exec(`DELETE FROM starred_songs WHERE user_id = ? AND song_id = ?`, user.ID, songID)
+	if err != nil {
+		log.Printf("Error unstarring song %s for user %s: %v", songID, user.Username, err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+		return
+	}
+
+	log.Printf("Song %s unstarred by user %s", songID, user.Username)
+	subsonicRespond(c, newSubsonicResponse(nil))
+}
+
+// subsonicGetStarred returns starred songs for the current user
+func subsonicGetStarred(c *gin.Context) {
+	user := c.MustGet("user").(User)
+	log.Printf("subsonicGetStarred called by user: %s (ID: %d)", user.Username, user.ID)
+
+	// First check if there are any starred songs for this user
+	var starredCount int
+	err := db.QueryRow("SELECT COUNT(*) FROM starred_songs WHERE user_id = ?", user.ID).Scan(&starredCount)
+	if err != nil {
+		log.Printf("Error counting starred songs: %v", err)
+	} else {
+		log.Printf("Total starred songs for user %d: %d", user.ID, starredCount)
+	}
+
+	query := `
+		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, COALESCE(s.genre, '') as genre
+		FROM songs s
+		INNER JOIN starred_songs ss ON s.id = ss.song_id
+		WHERE ss.user_id = ?
+		ORDER BY ss.starred_at DESC
+	`
+
+	log.Printf("Executing starred songs query for user ID: %d", user.ID)
+	rows, err := db.Query(query, user.ID)
+	if err != nil {
+		log.Printf("Starred songs query error: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+		return
+	}
+	defer rows.Close()
+
+	var songs []SubsonicSong
+	for rows.Next() {
+		var s SubsonicSong
+		var lastPlayed sql.NullString
+		err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &s.Genre)
+		if err != nil {
+			log.Printf("Error scanning starred song: %v", err)
+			continue
+		}
+
+		s.Starred = true
+		if lastPlayed.Valid {
+			s.LastPlayed = lastPlayed.String
+		}
+		songs = append(songs, s)
+	}
+
+	// Ensure songs is never nil for JSON marshaling
+	if songs == nil {
+		songs = []SubsonicSong{}
+	}
+
+	log.Printf("Found %d starred songs for user %d", len(songs), user.ID)
+
+	// Add a test song if no starred songs found
+	if len(songs) == 0 {
+		log.Printf("No starred songs found, adding test song")
+		songs = append(songs, SubsonicSong{
+			ID:      "test",
+			Title:   "Test Song",
+			Artist:  "Test Artist",
+			Album:   "Test Album",
+			Genre:   "Test",
+			Starred: true,
+		})
+	}
+
+	starred := &SubsonicStarred{Songs: songs}
+	log.Printf("About to respond with starred songs: %+v", starred)
+	subsonicRespond(c, newSubsonicResponse(starred))
+}
+
+// subsonicGetGenres returns all genres in the library
+func subsonicGetGenres(c *gin.Context) {
+	user := c.MustGet("user").(User)
+	log.Printf("subsonicGetGenres called by user: %s", user.Username)
+
+	// First, let's check if we have any songs at all
+	var totalSongs int
+	err := db.QueryRow("SELECT COUNT(*) FROM songs").Scan(&totalSongs)
+	if err != nil {
+		log.Printf("Error counting total songs: %v", err)
+	} else {
+		log.Printf("Total songs in database: %d", totalSongs)
+	}
+
+	query := `
+		SELECT COALESCE(genre, 'Unknown') as genre, COUNT(*) as song_count, COUNT(DISTINCT album) as album_count
+		FROM songs 
+		GROUP BY COALESCE(genre, 'Unknown')
+		ORDER BY genre COLLATE NOCASE
+	`
+
+	log.Printf("Executing genre query: %s", query)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Printf("Genre query error: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+		return
+	}
+	defer rows.Close()
+
+	var genres []SubsonicGenre
+	for rows.Next() {
+		var g SubsonicGenre
+		err := rows.Scan(&g.Name, &g.SongCount, &g.AlbumCount)
+		if err != nil {
+			log.Printf("Error scanning genre: %v", err)
+			continue
+		}
+		genres = append(genres, g)
+	}
+
+	// Ensure genres is never nil for JSON marshaling
+	if genres == nil {
+		genres = []SubsonicGenre{}
+	}
+
+	log.Printf("Found %d genres", len(genres))
+
+	// Add a test genre to ensure response structure works
+	if len(genres) == 0 {
+		log.Printf("No genres found, adding test genre")
+		genres = append(genres, SubsonicGenre{
+			Name:       "Test",
+			SongCount:  0,
+			AlbumCount: 0,
+		})
+	}
+
+	genreList := &SubsonicGenres{Genres: genres}
+	log.Printf("About to respond with genres: %+v", genreList)
+	subsonicRespond(c, newSubsonicResponse(genreList))
+}
+
+// subsonicGetSongsByGenre handles the getSongsByGenre.view API endpoint
+func subsonicGetSongsByGenre(c *gin.Context) {
+	user := c.MustGet("user").(User)
+	
+	genre := c.Query("genre")
+	log.Printf("[DEBUG] *** getSongsByGenre ENDPOINT CALLED *** Genre: '%s', User: %d", genre, user.ID)
+	
+	if genre == "" {
+		log.Printf("[DEBUG] *** NO GENRE PROVIDED ***")
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter genre is missing."))
+		return
+	}
+	
+	log.Printf("[DEBUG] getSongsByGenre: Looking for genre '%s' for user %d", genre, user.ID)
+	
+	// Debug: Check what genres actually exist
+	var sampleGenres []string
+	testRows, err := db.Query("SELECT DISTINCT genre FROM songs WHERE genre IS NOT NULL AND genre != '' LIMIT 10")
+	if err == nil {
+		for testRows.Next() {
+			var g string
+			if testRows.Scan(&g) == nil {
+				sampleGenres = append(sampleGenres, g)
+			}
+		}
+		testRows.Close()
+		log.Printf("[DEBUG] Sample genres in database: %v", sampleGenres)
+	}
+	
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "50"))
+	if size > 500 {
+		size = 500
+	}
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if offset < 0 {
+		offset = 0
+	}
+	
+	// Simple test: just get any songs with genres first
+	query := `
+		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''),
+		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
+		FROM songs s
+		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
+		WHERE s.genre IS NOT NULL AND s.genre != '' AND LOWER(s.genre) LIKE LOWER(?)
+		ORDER BY s.artist, s.title 
+		LIMIT ? OFFSET ?
+	`
+	
+	// Simple pattern - just check if genre contains the search term anywhere
+	genrePattern := "%" + genre + "%"
+	
+	log.Printf("[DEBUG] getSongsByGenre: Simple query with pattern: '%s'", genrePattern)
+	
+	rows, err := db.Query(query, user.ID, genrePattern, size, offset)
+	if err != nil {
+		log.Printf("[ERROR] getSongsByGenre: Query failed: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying songs by genre."))
+		return
+	}
+	defer rows.Close()
+	
+	var songs []SubsonicSong
+	for rows.Next() {
+		var songFromDb Song
+		var lastPlayed sql.NullString
+		var starred int
+		
+		if err := rows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, 
+			&songFromDb.Path, &songFromDb.PlayCount, &lastPlayed, &songFromDb.Genre, &starred); err != nil {
+			log.Printf("[ERROR] getSongsByGenre: Scan failed: %v", err)
+			continue
+		}
+		
+		subsonicSong := SubsonicSong{
+			ID:        strconv.Itoa(songFromDb.ID),
+			Title:     songFromDb.Title,
+			Artist:    songFromDb.Artist,
+			Album:     songFromDb.Album,
+			Genre:     songFromDb.Genre,
+			CoverArt:  strconv.Itoa(songFromDb.ID),
+			PlayCount: songFromDb.PlayCount,
+			Starred:   starred == 1,
+		}
+		
+		log.Printf("[DEBUG] Found song: ID=%d, Title='%s', Genre='%s'", songFromDb.ID, songFromDb.Title, songFromDb.Genre)
+		
+		if lastPlayed.Valid {
+			subsonicSong.LastPlayed = lastPlayed.String
+		}
+		
+		songs = append(songs, subsonicSong)
+	}
+	
+	// Ensure songs is never nil for JSON marshaling
+	if songs == nil {
+		songs = []SubsonicSong{}
+	}
+	
+	log.Printf("[DEBUG] getSongsByGenre: Found %d songs for genre '%s'", len(songs), genre)
+	
+
+	
+	result := &SubsonicSongsByGenre{Songs: songs}
+	subsonicRespond(c, newSubsonicResponse(result))
 }
