@@ -7,8 +7,6 @@
 
 Prototype music server built on the Open Subsonic API, designed to showcase AudioMuse-AI's advanced sonic analysis capabilities.
 
-> 👉 Experience the **Sonic Analysis potentiality** with the [AudioMuse-AI-MusicServer Demo](https://github.com/NeptuneHub/AudioMuse-AI/issues/94)!  
-> _Available for a limited time ⌛_
 
 **The full list or AudioMuse-AI related repository are:** 
   > * [AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI): the core application, it run Flask and Worker containers to actually run all the feature;
@@ -163,3 +161,4 @@ npm start
 Frontend will be reacheable on http://localhost:3000/ you can do the first login with admin/admin
 
 **IMPORTANT** as you can see, running the code OUT of the container, you had the front-end on the different port 3000
+
