@@ -123,6 +123,34 @@ function SonicAnalysisPanel() {
     const handleStartClustering = () => startTask('/rest/startSonicClustering.view', 'Clustering');
     const handleStart = () => startTask('/rest/startSonicAnalysis.view', 'Analysis');
 
+    // Start cleaning - lightweight endpoint outside Subsonic REST namespace
+    const handleStartCleaning = async () => {
+        setError('');
+        setIsStarting(true);
+        const token = localStorage.getItem('token');
+        try {
+            const response = await fetch(`${API_BASE}/api/cleaning/start`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({ error: 'Failed to start cleaning' }));
+                throw new Error(errData.error || 'Failed to start cleaning');
+            }
+            // Give immediate feedback and refresh status/logs
+            setStatus(prev => ({ ...(prev || {}), status: 'PENDING', details: { ...(prev?.details || {}), status_message: 'Cleaning initiated.' } }));
+            await fetchStatus();
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setIsStarting(false);
+        }
+    };
+
     const handleCancel = async () => {
         if (!status || !status.task_id) {
             setError("No active task to cancel.");
@@ -187,9 +215,19 @@ function SonicAnalysisPanel() {
                 <button
                     onClick={handleStart}
                     disabled={!isAudioMuseConfigured || isTaskRunning || isLoading || isStarting}
-                    className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500 disabled:cursor-not-allowed"
+                    className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500 disabled:cursor-not-allowed mr-4"
                 >
                     {isStarting ? 'Starting...' : (isLoading && !isTaskRunning ? 'Loading...' : 'Start New Analysis')}
+                </button>
+
+                {/* Cleaning task uses backend cleaning API (not part of AudioMuse-AI) */}
+                <button
+                    onClick={handleStartCleaning}
+                    disabled={isTaskRunning || isLoading || isStarting}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500 disabled:cursor-not-allowed"
+                    title="Start database cleaning (will call /api/cleaning/start)"
+                >
+                    {isStarting ? 'Starting...' : 'Start Cleaning'}
                 </button>
                 {isTaskRunning && (
                      <button

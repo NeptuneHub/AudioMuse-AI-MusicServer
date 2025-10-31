@@ -150,6 +150,10 @@ func main() {
 		}
 	}
 
+	// Admin-protected cleaning endpoint that proxies to AudioMuse-AI
+	r.POST("/api/cleaning/start", AuthMiddleware(), adminOnly(), CleaningStartHandler)
+
+	// Public endpoint used by the frontend to run Alchemy (may be allowed for non-admin flows)
 	r.POST("/api/alchemy", AlchemyHandler)
 
 	// Serve static files from React build
