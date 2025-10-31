@@ -1,6 +1,7 @@
 // Suggested path: music-server-frontend/src/components/Dashboard.jsx
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Songs, Albums, Artists, AddToPlaylistModal } from './MusicViews.jsx';
+import SongAlchemy from './SongAlchemy.jsx';
 import Playlists from './Playlists.jsx';
 import AdminPanel from './AdminPanel.jsx';
 import CustomAudioPlayer from './AudioPlayer.jsx';
@@ -227,6 +228,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 							<NavLink page="artists" title="Artists">Artists</NavLink>
 							<NavLink page="albums" title="All Albums">Albums</NavLink>
                             <NavLink page="songs" title="Songs">Songs</NavLink>
+                            <NavLink page="alchemy" title="Song Alchemy">Song Alchemy</NavLink>
 							<NavLink page="playlists" title="Playlists">Playlists</NavLink>
 							{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
 							<button onClick={onLogout} className="px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold transition duration-300">Logout</button>
@@ -243,6 +245,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 							<NavLink page="artists" title="Artists">Artists</NavLink>
 							<NavLink page="albums" title="All Albums">Albums</NavLink>
                             <NavLink page="songs" title="Songs">Songs</NavLink>
+                            <NavLink page="alchemy" title="Song Alchemy">Song Alchemy</NavLink>
 							<NavLink page="playlists" title="Playlists">Playlists</NavLink>
 							{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
 							<button onClick={onLogout} className="w-full text-left px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold transition duration-300">Logout</button>
@@ -257,11 +260,12 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						<h2 className="text-3xl font-bold text-white">{currentView.title}</h2>
 					</div>
                     {mixMessage && <p className="text-center text-teal-400 mb-4">{mixMessage}</p>}
-					{currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onInstantMix={handleInstantMix} onAddToPlaylist={setSelectedSongForPlaylist} />}
-					{currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
-					{currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
+                    {currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onInstantMix={handleInstantMix} onAddToPlaylist={setSelectedSongForPlaylist} />}
+                    {currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
+                    {currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
                     {currentView.page === 'playlists' && <Playlists credentials={credentials} isAdmin={isAdmin} onNavigate={handleNavigate} />}
-					{currentView.page === 'admin' && isAdmin && <AdminPanel onConfigChange={fetchConfig} />}
+                    {currentView.page === 'alchemy' && <SongAlchemy onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} />}
+                    {currentView.page === 'admin' && isAdmin && <AdminPanel onConfigChange={fetchConfig} />}
 				</main>
 			</div>
 

@@ -321,7 +321,7 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
             </div>
 
             <div className="mb-4 flex flex-wrap gap-2">
-                {( (songs.length > 0 || allSongs.length > 0) && !searchTerm && (filter?.albumId || filter?.playlistId)) && (
+                {( (songs.length > 0 || allSongs.length > 0) && !searchTerm && (filter?.albumId || filter?.playlistId || filter?.preloadedSongs)) && (
                     <button onClick={handlePlayAlbum} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Play All</button>
                 )}
                 <button 

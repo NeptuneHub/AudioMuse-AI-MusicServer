@@ -150,6 +150,8 @@ func main() {
 		}
 	}
 
+	r.POST("/api/alchemy", AlchemyHandler)
+
 	// Serve static files from React build
 	r.Static("/static", "/app/music-server-frontend/build/static")
 	r.StaticFile("/favicon.ico", "/app/music-server-frontend/build/favicon.ico")
