@@ -2,12 +2,15 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -82,8 +85,8 @@ func subsonicStartSonicAnalysis(c *gin.Context) {
 
 // subsonicCancelSonicAnalysis handles the Subsonic API request to cancel an analysis.
 func subsonicCancelSonicAnalysis(c *gin.Context) {
-	_ = c.MustGet("user") // Auth is handled by middleware
-	taskID := c.Query("taskId")  // Task ID from query parameter
+	_ = c.MustGet("user")       // Auth is handled by middleware
+	taskID := c.Query("taskId") // Task ID from query parameter
 	if taskID == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Parameter 'taskId' is required."))
 		return
@@ -101,4 +104,73 @@ func subsonicGetSonicAnalysisStatus(c *gin.Context) {
 func subsonicStartClusteringAnalysis(c *gin.Context) {
 	_ = c.MustGet("user") // Auth is handled by middleware
 	proxyToAudioMuse(c, "POST", "/api/clustering/start")
+}
+
+// runAnalysisJob performs a POST to the AudioMuse-AI /api/analysis/start endpoint
+// without a gin context. It is safe to call from background goroutines.
+func runAnalysisJob(ctx context.Context) error {
+	coreURL, err := getAudioMuseURL()
+	if err != nil {
+		log.Printf("ERROR: runAnalysisJob: %v", err)
+		return err
+	}
+	trimmed := strings.TrimSuffix(coreURL, "/")
+	target := fmt.Sprintf("%s/api/analysis/start", trimmed)
+
+	log.Printf("INFO: runAnalysisJob: POST %s", target)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", target, bytes.NewReader([]byte("{}")))
+	if err != nil {
+		log.Printf("ERROR: runAnalysisJob new request: %v", err)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("ERROR: runAnalysisJob request failed: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("INFO: runAnalysisJob response: %s", string(body))
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("analysis start returned status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// runClusteringJob performs a POST to the AudioMuse-AI /api/clustering/start endpoint
+func runClusteringJob(ctx context.Context) error {
+	coreURL, err := getAudioMuseURL()
+	if err != nil {
+		log.Printf("ERROR: runClusteringJob: %v", err)
+		return err
+	}
+	trimmed := strings.TrimSuffix(coreURL, "/")
+	target := fmt.Sprintf("%s/api/clustering/start", trimmed)
+
+	log.Printf("INFO: runClusteringJob: POST %s", target)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", target, bytes.NewReader([]byte("{}")))
+	if err != nil {
+		log.Printf("ERROR: runClusteringJob new request: %v", err)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("ERROR: runClusteringJob request failed: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("INFO: runClusteringJob response: %s", string(body))
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("clustering start returned status %d", resp.StatusCode)
+	}
+	return nil
 }

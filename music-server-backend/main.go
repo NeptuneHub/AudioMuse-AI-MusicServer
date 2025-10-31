@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 var db *sql.DB
 var isScanCancelled atomic.Bool // Global flag to signal scan cancellation.
 var scheduler *cron.Cron
+var isAnalysisRunning atomic.Bool
+var isClusteringRunning atomic.Bool
 
 func loggingMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -378,5 +381,78 @@ func startScheduler() {
 		log.Printf("Scheduled library scan started with schedule: '%s'", schedule)
 	} else {
 		log.Println("Scheduled library scan is disabled.")
+	}
+
+	// Schedule Analysis and Clustering if configured
+	// Analysis: read analysis_schedule and analysis_enabled
+	var analysisSchedule string
+	var analysisEnabledStr string
+	if err := db.QueryRow("SELECT value FROM configuration WHERE key = 'analysis_schedule'").Scan(&analysisSchedule); err != nil {
+		log.Printf("Analysis schedule not set in configuration, using default")
+		analysisSchedule = "0 2 * * 0-5" // default: nightly at 2:00 except Saturday
+	}
+	if err := db.QueryRow("SELECT value FROM configuration WHERE key = 'analysis_enabled'").Scan(&analysisEnabledStr); err != nil {
+		analysisEnabledStr = "false"
+	}
+	analysisEnabled := (analysisEnabledStr == "true")
+
+	if analysisEnabled {
+		_, err := scheduler.AddFunc(analysisSchedule, func() {
+			if isAnalysisRunning.Load() {
+				log.Println("Scheduled analysis skipped: analysis already running")
+				return
+			}
+			isAnalysisRunning.Store(true)
+			log.Println("Cron job triggered: starting scheduled analysis")
+			go func() {
+				defer isAnalysisRunning.Store(false)
+				ctx := context.Background()
+				if err := runAnalysisJob(ctx); err != nil {
+					log.Printf("Scheduled analysis failed: %v", err)
+				}
+			}()
+		})
+		if err != nil {
+			log.Fatalf("Error scheduling analysis cron job: %v", err)
+		}
+		log.Printf("Scheduled analysis started with schedule: '%s'", analysisSchedule)
+	} else {
+		log.Println("Scheduled analysis is disabled.")
+	}
+
+	// Clustering: read clustering_schedule and clustering_enabled
+	var clusteringSchedule string
+	var clusteringEnabledStr string
+	if err := db.QueryRow("SELECT value FROM configuration WHERE key = 'clustering_schedule'").Scan(&clusteringSchedule); err != nil {
+		log.Printf("Clustering schedule not set in configuration, using default")
+		clusteringSchedule = "0 2 * * 6" // default: Saturday at 2:00
+	}
+	if err := db.QueryRow("SELECT value FROM configuration WHERE key = 'clustering_enabled'").Scan(&clusteringEnabledStr); err != nil {
+		clusteringEnabledStr = "false"
+	}
+	clusteringEnabled := (clusteringEnabledStr == "true")
+
+	if clusteringEnabled {
+		_, err := scheduler.AddFunc(clusteringSchedule, func() {
+			if isClusteringRunning.Load() {
+				log.Println("Scheduled clustering skipped: clustering already running")
+				return
+			}
+			isClusteringRunning.Store(true)
+			log.Println("Cron job triggered: starting scheduled clustering")
+			go func() {
+				defer isClusteringRunning.Store(false)
+				ctx := context.Background()
+				if err := runClusteringJob(ctx); err != nil {
+					log.Printf("Scheduled clustering failed: %v", err)
+				}
+			}()
+		})
+		if err != nil {
+			log.Fatalf("Error scheduling clustering cron job: %v", err)
+		}
+		log.Printf("Scheduled clustering started with schedule: '%s'", clusteringSchedule)
+	} else {
+		log.Println("Scheduled clustering is disabled.")
 	}
 }

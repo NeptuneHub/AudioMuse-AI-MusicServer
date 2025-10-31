@@ -208,8 +208,10 @@ func subsonicSetConfiguration(c *gin.Context) {
 		return
 	}
 
-	// Restart scheduler if schedule-related config changed
-	if key == "scan_schedule" || key == "scan_enabled" {
+	// Restart scheduler if any schedule-related config changed
+	if key == "scan_schedule" || key == "scan_enabled" ||
+		key == "analysis_schedule" || key == "analysis_enabled" ||
+		key == "clustering_schedule" || key == "clustering_enabled" {
 		log.Println("Scheduler configuration changed, restarting scheduler...")
 		if scheduler != nil {
 			scheduler.Stop()
