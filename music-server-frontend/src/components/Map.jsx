@@ -821,7 +821,7 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
   };
 
   return (
-    <div className="p-2 sm:p-4 bg-gray-900 min-h-screen text-gray-100">
+    <div className="text-gray-100">
       <div className="flex justify-end mb-3 sm:mb-4 flex-wrap gap-2">
         <div className="flex gap-2 items-center">
           <label className="text-gray-400 text-xs sm:text-sm flex items-center">Size:</label>

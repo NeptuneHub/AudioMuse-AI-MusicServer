@@ -127,7 +127,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay }) {
   };
 
   return (
-    <div className="p-4 bg-gray-900 min-h-screen text-gray-100">
+    <div className="text-gray-100">
       <p className="mb-4 text-gray-300">Select tracks to Include or Exclude — boost favorites with Include and remove unwanted flavors with Exclude.</p>
       <form onSubmit={handleSubmit} className="space-y-4">
         <fieldset className="border border-gray-700 rounded p-4 bg-gray-800">
