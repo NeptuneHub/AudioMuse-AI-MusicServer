@@ -821,12 +821,12 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
   };
 
   return (
-    <div className="p-4 bg-gray-900 min-h-screen text-gray-100">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-teal-400">Map</h1>
-        <div className="flex gap-2">
-          <label className="text-gray-400 text-sm flex items-center">Map size:</label>
-          <select value={percent} onChange={e => setPercent(Number(e.target.value))} className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1">
+    <div className="p-2 sm:p-4 bg-gray-900 min-h-screen text-gray-100">
+      <div className="flex items-center justify-between mb-3 sm:mb-4 flex-wrap gap-2">
+        <h1 className="text-xl sm:text-2xl font-bold text-teal-400">Map</h1>
+        <div className="flex gap-2 items-center">
+          <label className="text-gray-400 text-xs sm:text-sm flex items-center">Size:</label>
+          <select value={percent} onChange={e => setPercent(Number(e.target.value))} className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 text-sm">
             <option value={10}>10%</option>
             <option value={25}>25%</option>
             <option value={50}>50%</option>
@@ -835,28 +835,28 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
         </div>
       </div>
 
-      <div className="mb-2 flex gap-2 items-center flex-wrap">
-        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search tracks..." className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 w-64" />
-        <div id="map-status" className="text-gray-300 ml-4">Selected: {selectedIds.length}</div>
-        <button onClick={handleRefresh} className="bg-gray-700 hover:bg-gray-600 px-4 py-1 rounded text-white" title="Clear overlays and selection">
-          🔄 Refresh
+      <div className="mb-2 flex gap-1.5 sm:gap-2 items-center flex-wrap">
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search..." className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 text-sm w-32 sm:w-48 md:w-64" />
+        <div id="map-status" className="text-gray-300 text-xs sm:text-sm ml-1 sm:ml-4">Selected: {selectedIds.length}</div>
+        <button onClick={handleRefresh} className="bg-gray-700 hover:bg-gray-600 px-2 sm:px-4 py-1 rounded text-white text-xs sm:text-sm" title="Clear overlays and selection">
+          🔄 <span className="hidden sm:inline">Refresh</span>
         </button>
         {selectedIds.length >= 2 && (
           <button 
             onClick={selectedIds.length <= 10 ? handleCreatePath : undefined} 
             disabled={selectedIds.length > 10}
             className={selectedIds.length <= 10 
-              ? "bg-yellow-600 hover:bg-yellow-700 px-4 py-1 rounded text-white font-semibold cursor-pointer" 
-              : "bg-gray-600 px-4 py-1 rounded text-gray-400 font-semibold cursor-not-allowed opacity-50"
+              ? "bg-yellow-600 hover:bg-yellow-700 px-2 sm:px-4 py-1 rounded text-white font-semibold cursor-pointer text-xs sm:text-sm" 
+              : "bg-gray-600 px-2 sm:px-4 py-1 rounded text-gray-400 font-semibold cursor-not-allowed opacity-50 text-xs sm:text-sm"
             }
             title={selectedIds.length > 10 ? "Maximum 10 songs allowed for path creation" : "Create path between selected songs"}
           >
-            🛤️ Create Path ({selectedIds.length})
+            🛤️ <span className="hidden sm:inline">Path</span> ({selectedIds.length})
           </button>
         )}
         {selectedIds.length > 0 && (
-          <button onClick={handlePlaySelection} className="bg-green-600 hover:bg-green-700 px-4 py-1 rounded text-white font-semibold">
-            ▶ Play ({selectedIds.length})
+          <button onClick={handlePlaySelection} className="bg-green-600 hover:bg-green-700 px-2 sm:px-4 py-1 rounded text-white font-semibold text-xs sm:text-sm">
+            ▶ <span className="hidden sm:inline">Play</span> ({selectedIds.length})
           </button>
         )}
       </div>
@@ -874,21 +874,21 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
 
       {!loading && !error && (
         <div>
-          <div id="map-plot" ref={plotDivRef} style={{ width: '100%', height: '600px', minHeight: '600px', backgroundColor: '#1f2937', border: '1px solid #374151' }} />
+          <div id="map-plot" ref={plotDivRef} style={{ width: '100%', height: '400px', minHeight: '400px', backgroundColor: '#1f2937', border: '1px solid #374151' }} className="sm:!h-[500px] md:!h-[600px]" />
           
           {/* Interactive genre legend with show/hide controls */}
-          <div className="mt-3 p-3 bg-gray-800 border border-gray-700 rounded">
-            <div className="flex items-center gap-4 mb-2 flex-wrap">
-              <span className="font-semibold text-gray-300">Genres:</span>
-              <button onClick={showAllGenres} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300">
+          <div className="mt-3 p-2 sm:p-3 bg-gray-800 border border-gray-700 rounded">
+            <div className="flex items-center gap-1.5 sm:gap-4 mb-2 flex-wrap">
+              <span className="font-semibold text-gray-300 text-xs sm:text-sm">Genres:</span>
+              <button onClick={showAllGenres} className="text-xs px-1.5 sm:px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300">
                 Show All
               </button>
-              <button onClick={hideAllGenres} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300">
+              <button onClick={hideAllGenres} className="text-xs px-1.5 sm:px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300">
                 Hide All
               </button>
               
               {/* Overlay toggles */}
-              <span className="text-gray-500 mx-2">|</span>
+              <span className="text-gray-500 mx-1 sm:mx-2">|</span>
               <span className="text-gray-400 text-xs">Overlays:</span>
               <button 
                 onClick={() => {

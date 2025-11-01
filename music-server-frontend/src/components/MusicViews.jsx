@@ -81,7 +81,7 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
 };
 
 
-export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQueue, playQueue = [], currentSong, onNavigate, audioMuseUrl, onInstantMix, onAddToPlaylist }) {
+export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQueue, onRemoveFromQueue, playQueue = [], currentSong, onNavigate, audioMuseUrl, onInstantMix, onAddToPlaylist }) {
     const [songs, setSongs] = useState([]);
     const [allSongs, setAllSongs] = useState([]); // For client-side pagination
     const [searchTerm, setSearchTerm] = useState('');
@@ -91,9 +91,33 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
     const [refreshKey, setRefreshKey] = useState(0);
     const [genres, setGenres] = useState([]);
     const [selectedGenre, setSelectedGenre] = useState('');
+    const [isAudioPlaying, setIsAudioPlaying] = useState(false);
 
     const isPlaylistView = !!filter?.playlistId;
     const PAGE_SIZE = 10;
+
+    // Listen to audio play/pause events to update button icon
+    useEffect(() => {
+        const audio = document.querySelector('audio');
+        if (!audio) return;
+
+        const handlePlay = () => setIsAudioPlaying(true);
+        const handlePause = () => setIsAudioPlaying(false);
+        const handleEnded = () => setIsAudioPlaying(false);
+
+        audio.addEventListener('play', handlePlay);
+        audio.addEventListener('pause', handlePause);
+        audio.addEventListener('ended', handleEnded);
+
+        // Set initial state
+        setIsAudioPlaying(!audio.paused);
+
+        return () => {
+            audio.removeEventListener('play', handlePlay);
+            audio.removeEventListener('pause', handlePause);
+            audio.removeEventListener('ended', handleEnded);
+        };
+    }, []);
 
     // Load genres on component mount
     useEffect(() => {
@@ -387,20 +411,24 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                 <th className="px-4 py-3 hidden sm:table-cell">Artist</th>
                                 <th className="px-4 py-3 hidden md:table-cell">Album</th>
                                 <th className="px-4 py-3 hidden lg:table-cell">Genre</th>
-                                <th className="px-4 py-3 hidden xl:table-cell text-center">Plays</th>
+                                <th className="px-4 py-3 hidden xl:table-cell text-center">Play Count</th>
                                 <th className="px-4 py-3 hidden lg:table-cell">Last Played</th>
-                                <th className="px-4 py-3 w-48 text-right">Actions</th>
+                                <th className="px-2 sm:px-4 py-3 w-32 sm:w-48 text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {songs.map((song, index) => {
                                 const isPlaying = currentSong && currentSong.id === song.id;
                                 const isInQueue = playQueue.some(s => s.id === song.id);
+                                const rowColor = isPlaying ? 'bg-teal-900/50 border-l-4 border-l-teal-500' : (index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-850');
                                 return (
-                                    <tr ref={index === songs.length - 1 ? lastSongElementRef : null} key={`${song.id}-${index}`} className={`border-b border-gray-700 transition-colors ${isPlaying ? 'bg-teal-900/50' : 'bg-gray-800 hover:bg-gray-600'}`}>
+                                    <tr ref={index === songs.length - 1 ? lastSongElementRef : null} key={`${song.id}-${index}`} className={`border-b border-gray-700 transition-colors hover:bg-gray-600 ${rowColor}`}>
                                         <td className="px-4 py-4">
-                                            <button onClick={() => onPlay(song, allSongs.length > 0 ? allSongs : songs)} title="Play song">
-                                                {isPlaying ? (
+                                            <button 
+                                                onClick={() => isPlaying ? onTogglePlayPause() : onPlay(song, allSongs.length > 0 ? allSongs : songs)} 
+                                                title={isPlaying ? (isAudioPlaying ? "Pause" : "Resume") : "Play song"}
+                                            >
+                                                {(isPlaying && isAudioPlaying) ? (
                                                     <svg className="w-6 h-6 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg>
                                                 ) : (
                                                     <svg className="w-6 h-6 text-teal-400 hover:text-teal-200" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path></svg>
@@ -411,7 +439,7 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                             <button
                                                 onClick={() => handleStarToggle(song)}
                                                 className={`text-2xl hover:scale-110 transition-transform ${
-                                                    song.starred ? 'text-yellow-400' : 'text-gray-600'
+                                                    song.starred ? 'text-yellow-400' : 'text-gray-400 hover:text-gray-200'
                                                 }`}
                                                 title={song.starred ? 'Remove from favorites' : 'Add to favorites'}
                                             >
@@ -427,22 +455,22 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                         <td className="px-4 py-4 hidden lg:table-cell text-gray-400">{song.genre || 'Unknown'}</td>
                                         <td className="px-4 py-3 hidden xl:table-cell text-center">{song.playCount > 0 ? song.playCount : ''}</td>
                                         <td className="px-4 py-3 hidden lg:table-cell">{formatDate(song.lastPlayed)}</td>
-                                        <td className="px-4 py-4">
-                                            <div className="flex items-center justify-end space-x-2">
+                                        <td className="px-2 sm:px-4 py-4">
+                                            <div className="flex items-center justify-end space-x-1 sm:space-x-2">
                                                  {isPlaylistView && (
                                                     <>
                                                         <div className="flex flex-col -my-1">
                                                             <button onClick={() => handleMoveSong(index, 'up')} disabled={index === 0} className="p-1 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed" title="Move up">
-                                                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd"></path></svg>
+                                                                <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd"></path></svg>
                                                             </button>
                                                             <button onClick={() => handleMoveSong(index, 'down')} disabled={index === allSongs.length - 1} className="p-1 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed" title="Move down">
-                                                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"></path></svg>
+                                                                <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"></path></svg>
                                                             </button>
                                                         </div>
                                                         <button onClick={() => handleDeleteSong(song.id)} title="Remove from playlist" className="p-1 text-gray-400 hover:text-red-500">
-                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                                            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                                         </button>
-                                                        <div className="border-l border-gray-600 h-6 mx-1"></div>
+                                                        <div className="border-l border-gray-600 h-6 mx-0.5 sm:mx-1"></div>
                                                     </>
                                                 )}
                                                 <button
@@ -455,21 +483,21 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                                                         onInstantMix(song);
                                                     }}
                                                     title="Instant Mix"
-                                                    className="p-1 rounded-full transition-colors text-teal-400 hover:bg-gray-700"
+                                                    className="p-1 sm:p-1.5 rounded-full transition-colors text-teal-400 hover:bg-gray-700"
                                                 >
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                                    <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                                                 </button>
                                                 {isInQueue ? (
-                                                    <button onClick={() => onRemoveFromQueue(song.id)} title="Remove from queue" className="text-gray-400 hover:text-red-500">
-                                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                                    <button onClick={() => onRemoveFromQueue(song.id)} title="Remove from queue" className="p-1 sm:p-1.5 text-gray-400 hover:text-red-500">
+                                                        <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                                                     </button>
                                                 ) : (
-                                                    <button onClick={() => onAddToQueue(song)} title="Add to queue" className="text-gray-400 hover:text-white">
-                                                        <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" className="stroke-green-500" /></svg>
+                                                    <button onClick={() => onAddToQueue(song)} title="Add to queue" className="p-1 sm:p-1.5 text-gray-400 hover:text-white">
+                                                        <svg className="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" className="stroke-green-500" /></svg>
                                                     </button>
                                                 )}
-                                                <button onClick={() => onAddToPlaylist(song)} title="Add to playlist" className="text-gray-400 hover:text-white">
-                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                                                <button onClick={() => onAddToPlaylist(song)} title="Add to playlist" className="p-1 sm:p-1.5 text-gray-400 hover:text-white">
+                                                    <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
                                                 </button>
                                             </div>
                                         </td>
@@ -697,14 +725,15 @@ export function Albums({ credentials, filter, onNavigate }) {
                     ))}
                 </select>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
                 {albums.map((album, index) => (
-                    <button 
+                    <div 
                         ref={index === albums.length - 1 ? lastAlbumElementRef : null}
                         key={`${album.id}-${index}`} 
-                        onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })} 
-                        className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
-                        <div className="w-full bg-gray-700 rounded aspect-square flex items-center justify-center mb-2 overflow-hidden">
+                        className="group bg-gray-800 rounded-lg p-3 sm:p-4 text-center hover:bg-gray-700 hover:shadow-lg transition-all duration-200 cursor-pointer"
+                        onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })}
+                    >
+                        <div className="relative w-full bg-gray-700 rounded aspect-square flex items-center justify-center mb-2 overflow-hidden">
                              <ImageWithFallback
                                 src={album.coverArt ? (() => {
                                     const params = new URLSearchParams({ id: album.coverArt, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
@@ -714,10 +743,16 @@ export function Albums({ credentials, filter, onNavigate }) {
                                 placeholder={<AlbumPlaceholder name={album.name} />}
                                 alt={album.name}
                             />
+                            {/* Play button overlay on hover */}
+                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-opacity duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                <svg className="w-12 h-12 sm:w-16 sm:h-16 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path>
+                                </svg>
+                            </div>
                         </div>
-                        <p className="font-bold text-white truncate">{album.name}</p>
-                        <p className="text-sm text-gray-400 truncate">{album.artist}</p>
-                    </button>
+                        <p className="font-bold text-white truncate text-sm sm:text-base group-hover:text-teal-400 transition-colors">{album.name}</p>
+                        <p className="text-xs sm:text-sm text-gray-400 truncate">{album.artist}</p>
+                    </div>
                 ))}
             </div>
             {isLoading && <p className="text-center text-gray-400 mt-4">Loading more albums...</p>}
@@ -810,14 +845,14 @@ export function Artists({ credentials, onNavigate }) {
                     className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
                 />
             </div>
-             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
                 {artists.map((artist, index) => (
-                    <button 
+                    <div 
                         ref={index === artists.length - 1 ? lastArtistElementRef : null}
                         key={`${artist.id}-${index}`} 
                         onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: artist.name })} 
-                        className="bg-gray-800 rounded-lg p-4 text-center hover:bg-gray-700 transition-colors flex flex-col items-center">
-                        <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full bg-gray-700 flex items-center justify-center mb-2 overflow-hidden flex-shrink-0">
+                        className="group bg-gray-800 rounded-lg p-3 sm:p-4 text-center hover:bg-gray-700 hover:shadow-lg transition-all duration-200 flex flex-col items-center cursor-pointer">
+                        <div className="relative w-28 h-28 sm:w-32 sm:h-32 md:w-40 md:h-40 rounded-full bg-gray-700 flex items-center justify-center mb-2 overflow-hidden flex-shrink-0">
                              <ImageWithFallback
                                 src={artist.artistImageUrl ? (() => {
                                     const params = new URLSearchParams({ id: artist.artistImageUrl, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
@@ -827,9 +862,15 @@ export function Artists({ credentials, onNavigate }) {
                                 placeholder={<ArtistPlaceholder />}
                                 alt={artist.name}
                             />
+                            {/* Play button overlay on hover */}
+                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-opacity duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100 rounded-full">
+                                <svg className="w-12 h-12 sm:w-14 sm:h-14 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path>
+                                </svg>
+                            </div>
                         </div>
-                        <p className="font-bold text-white truncate w-full">{artist.name}</p>
-                    </button>
+                        <p className="font-bold text-white truncate w-full text-sm sm:text-base group-hover:text-teal-400 transition-colors">{artist.name}</p>
+                    </div>
                 ))}
             </div>
             {isLoading && <p className="text-center text-gray-400 mt-4">Loading more artists...</p>}

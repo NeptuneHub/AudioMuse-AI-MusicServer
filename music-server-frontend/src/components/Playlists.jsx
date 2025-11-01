@@ -197,8 +197,25 @@ function Playlists({ credentials, isAdmin, onNavigate }) {
                 />
             )}
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {playlists.map((p, index) => (
+            {playlists.length === 0 && !isLoading ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <svg className="w-24 h-24 text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
+                    </svg>
+                    <h3 className="text-xl font-semibold text-gray-400 mb-2">No Playlists Yet</h3>
+                    <p className="text-gray-500 mb-6">Create your first playlist or generate a Sonic Fingerprint!</p>
+                    <div className="flex gap-3">
+                        <button onClick={() => setIsCreating(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded">
+                            Create Playlist
+                        </button>
+                        <button onClick={handleCreateSonicFingerprintPlaylist} disabled={isGenerating} className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-6 rounded disabled:bg-gray-500">
+                            {isGenerating ? 'Generating...' : 'Sonic Fingerprint'}
+                        </button>
+                    </div>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {playlists.map((p, index) => (
                     <div 
                         ref={index === playlists.length - 1 ? lastPlaylistElementRef : null}
                         key={p.id} 
@@ -226,7 +243,8 @@ function Playlists({ credentials, isAdmin, onNavigate }) {
                                 </div>
                     </div>
                 ))}
-            </div>
+                </div>
+            )}
             {isLoading && allPlaylists.length === 0 && <p className="text-center text-gray-400 mt-4">Loading playlists...</p>}
             {!hasMore && playlists.length > 0 && <p className="text-center text-gray-500 mt-4">End of list.</p>}
         </div>

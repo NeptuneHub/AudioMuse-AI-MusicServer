@@ -158,7 +158,7 @@ const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, on
 /**
  * A modal component to display and manage the current play queue.
  */
-function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelect, onAddToPlaylist, onInstantMix, audioMuseUrl, onClearQueue, onReorder, onCreateSongPath }) {
+function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelect, onTogglePlayPause, onAddToPlaylist, onInstantMix, audioMuseUrl, onClearQueue, onReorder, onCreateSongPath }) {
     const [activeMenu, setActiveMenu] = useState({ index: null, style: {} });
     const [startSongId, setStartSongId] = useState(null);
     const [endSongId, setEndSongId] = useState(null);
@@ -244,16 +244,16 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                 className="bg-gray-800 w-full max-w-2xl h-[60vh] rounded-t-lg shadow-lg flex flex-col"
                 onClick={e => e.stopPropagation()}
             >
-                <div className="p-4 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
-                    <h2 className="text-xl font-bold text-white">Up Next</h2>
-                    <div className="flex items-center flex-wrap gap-2">
+                <div className="p-3 sm:p-4 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
+                    <h2 className="text-lg sm:text-xl font-bold text-white">Up Next</h2>
+                    <div className="flex items-center flex-wrap gap-1.5 sm:gap-2">
                         <button 
                             onClick={() => setShowSaveAsPlaylist(true)}
                             disabled={queue.length === 0}
-                            className="text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded disabled:bg-gray-500 disabled:cursor-not-allowed"
+                            className="text-xs sm:text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-2 sm:px-3 rounded disabled:bg-gray-500 disabled:cursor-not-allowed"
                             title="Save all songs in queue as a new playlist"
                         >
-                            Save as Playlist
+                            Save
                         </button>
                          <button 
                             onClick={() => {
@@ -264,15 +264,15 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                                 // Minimal check: onCreateSongPath may depend on server config; call and let backend handle errors
                                 handleCreatePath();
                             }}
-                            className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1 px-3 rounded"
+                            className="text-xs sm:text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1 px-2 sm:px-3 rounded"
                          >
-                            Create Song Path
+                            Path
                         </button>
-                         <button onClick={onClearQueue} className="text-sm bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded">
-                            Clear All
+                         <button onClick={onClearQueue} className="text-xs sm:text-sm bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-2 sm:px-3 rounded">
+                            Clear
                         </button>
-                        <button onClick={onClose} className="text-gray-400 hover:text-white">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        <button onClick={onClose} className="text-gray-400 hover:text-white p-1">
+                            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                         </button>
                     </div>
                 </div>
@@ -296,24 +296,30 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                                 onClick={() => onSelect(index)}
                             >
                                 <div className="flex items-center space-x-4 overflow-hidden">
-                                     {isPlaying ? (
-                                        <svg className="w-5 h-5 text-green-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414z" clipRule="evenodd"></path></svg>
+                                    {isPlaying ? (
+                                        <button 
+                                            onClick={(e) => {e.stopPropagation(); onTogglePlayPause();}} 
+                                            className="flex-shrink-0 hover:scale-110 transition-transform"
+                                            title="Pause"
+                                        >
+                                            <svg className="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg>
+                                        </button>
                                     ) : (
-                                         <span className="text-gray-400 w-5 text-center flex-shrink-0">{index + 1}</span>
+                                        <span className="text-gray-400 w-5 text-center flex-shrink-0">{index + 1}</span>
                                     )}
                                     <div className="overflow-hidden">
                                         <p className={`font-medium truncate ${isPlaying ? 'text-green-400' : 'text-white'}`}>{song.title}</p>
                                         <p className="text-sm text-gray-400 truncate">{song.artist}</p>
                                     </div>
                                 </div>
-                                <div className="flex items-center space-x-1 flex-shrink-0">
+                                <div className="flex items-center space-x-0.5 sm:space-x-1 flex-shrink-0">
                                      <div className="flex flex-col">
-                                        <button onClick={(e) => {e.stopPropagation(); onReorder(index, index - 1);}} className="text-gray-500 hover:text-white disabled:opacity-50" disabled={index === 0}><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd"></path></svg></button>
-                                        <button onClick={(e) => {e.stopPropagation(); onReorder(index, index + 1);}} className="text-gray-500 hover:text-white disabled:opacity-50" disabled={index === queue.length - 1}><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"></path></svg></button>
+                                        <button onClick={(e) => {e.stopPropagation(); onReorder(index, index - 1);}} className="text-gray-500 hover:text-white disabled:opacity-50 p-0.5" disabled={index === 0}><svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd"></path></svg></button>
+                                        <button onClick={(e) => {e.stopPropagation(); onReorder(index, index + 1);}} className="text-gray-500 hover:text-white disabled:opacity-50 p-0.5" disabled={index === queue.length - 1}><svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"></path></svg></button>
                                     </div>
                                     <div className="relative">
-                                        <button onClick={(e) => handleActionClick(e, index)} className="text-gray-500 hover:text-white p-2">
-                                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"></path></svg>
+                                        <button onClick={(e) => handleActionClick(e, index)} className="text-gray-500 hover:text-white p-1 sm:p-2">
+                                            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"></path></svg>
                                         </button>
                                         {activeMenu.index === index && (
                                             <SongActionsMenu
@@ -330,10 +336,10 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                                     </div>
                                     <button 
                                         onClick={(e) => { e.stopPropagation(); onRemove(index); }} 
-                                        className="text-gray-500 hover:text-red-500 p-2"
+                                        className="text-gray-500 hover:text-red-500 p-1 sm:p-2"
                                         title="Remove from queue"
                                     >
-                                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                         <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                                     </button>
                                 </div>
                             </li>

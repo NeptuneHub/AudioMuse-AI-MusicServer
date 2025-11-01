@@ -243,3 +243,90 @@ type SubsonicSongsByGenre struct {
 	XMLName xml.Name       `xml:"songsByGenre" json:"-"`
 	Songs   []SubsonicSong `xml:"song" json:"song"`
 }
+
+// Browsing API models
+
+type SubsonicMusicFolder struct {
+	XMLName xml.Name `xml:"musicFolder" json:"-"`
+	ID      int      `xml:"id,attr" json:"id"`
+	Name    string   `xml:"name,attr" json:"name"`
+}
+
+type SubsonicMusicFolders struct {
+	XMLName xml.Name              `xml:"musicFolders" json:"-"`
+	Folders []SubsonicMusicFolder `xml:"musicFolder" json:"musicFolder"`
+}
+
+type SubsonicIndexArtist struct {
+	XMLName    xml.Name `xml:"artist" json:"-"`
+	ID         string   `xml:"id,attr" json:"id"`
+	Name       string   `xml:"name,attr" json:"name"`
+	AlbumCount int      `xml:"albumCount,attr,omitempty" json:"albumCount,omitempty"`
+}
+
+type SubsonicIndex struct {
+	XMLName xml.Name              `xml:"index" json:"-"`
+	Name    string                `xml:"name,attr" json:"name"`
+	Artists []SubsonicIndexArtist `xml:"artist" json:"artist"`
+}
+
+type SubsonicIndexes struct {
+	XMLName         xml.Name        `xml:"indexes" json:"-"`
+	LastModified    int64           `xml:"lastModified,attr" json:"lastModified"`
+	IgnoredArticles string          `xml:"ignoredArticles,attr,omitempty" json:"ignoredArticles,omitempty"`
+	Indices         []SubsonicIndex `xml:"index" json:"index"`
+}
+
+type SubsonicDirectoryChild struct {
+	XMLName    xml.Name `xml:"child" json:"-"`
+	ID         string   `xml:"id,attr" json:"id"`
+	Parent     string   `xml:"parent,attr,omitempty" json:"parent,omitempty"`
+	Title      string   `xml:"title,attr" json:"title"`
+	Album      string   `xml:"album,attr,omitempty" json:"album,omitempty"`
+	Artist     string   `xml:"artist,attr,omitempty" json:"artist,omitempty"`
+	IsDir      bool     `xml:"isDir,attr" json:"isDir"`
+	CoverArt   string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	Genre      string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
+	PlayCount  int      `xml:"playCount,attr,omitempty" json:"playCount,omitempty"`
+	LastPlayed string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
+	Starred    bool     `xml:"starred,attr,omitempty" json:"starred,omitempty"`
+}
+
+type SubsonicMusicDirectory struct {
+	XMLName  xml.Name                 `xml:"directory" json:"-"`
+	ID       string                   `xml:"id,attr" json:"id"`
+	Parent   string                   `xml:"parent,attr,omitempty" json:"parent,omitempty"`
+	Name     string                   `xml:"name,attr" json:"name"`
+	Children []SubsonicDirectoryChild `xml:"child" json:"child"`
+}
+
+type SubsonicArtistWithAlbums struct {
+	XMLName    xml.Name        `xml:"artist" json:"-"`
+	ID         string          `xml:"id,attr" json:"id"`
+	Name       string          `xml:"name,attr" json:"name"`
+	CoverArt   string          `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	AlbumCount int             `xml:"albumCount,attr" json:"albumCount"`
+	Albums     []SubsonicAlbum `xml:"album" json:"album"`
+}
+
+// Media info API models
+
+type SubsonicTopSongs struct {
+	XMLName xml.Name       `xml:"topSongs" json:"-"`
+	Songs   []SubsonicSong `xml:"song" json:"song"`
+}
+
+type SubsonicSimilarSongs struct {
+	XMLName xml.Name       `xml:"similarSongs2" json:"-"`
+	Songs   []SubsonicSong `xml:"song" json:"song"`
+}
+
+type SubsonicAlbumInfo struct {
+	XMLName        xml.Name `xml:"albumInfo" json:"-"`
+	Notes          string   `xml:"notes,omitempty" json:"notes,omitempty"`
+	MusicBrainzID  string   `xml:"musicBrainzId,omitempty" json:"musicBrainzId,omitempty"`
+	LastFmUrl      string   `xml:"lastFmUrl,omitempty" json:"lastFmUrl,omitempty"`
+	SmallImageUrl  string   `xml:"smallImageUrl,omitempty" json:"smallImageUrl,omitempty"`
+	MediumImageUrl string   `xml:"mediumImageUrl,omitempty" json:"mediumImageUrl,omitempty"`
+	LargeImageUrl  string   `xml:"largeImageUrl,omitempty" json:"largeImageUrl,omitempty"`
+}

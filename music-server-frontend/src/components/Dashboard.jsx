@@ -8,6 +8,7 @@ import AdminPanel from './AdminPanel.jsx';
 import CustomAudioPlayer from './AudioPlayer.jsx';
 import PlayQueueView from './PlayQueueView.jsx';
 import { subsonicFetch } from '../api';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 
 function Dashboard({ onLogout, isAdmin, credentials }) {
@@ -208,12 +209,43 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
             setTimeout(() => setMixMessage(''), 3000);
         }
     };
+
+    // Toggle play/pause for currently playing song
+    const handleTogglePlayPause = useCallback(() => {
+        const audio = document.querySelector('audio');
+        if (audio) {
+            if (audio.paused) {
+                audio.play().catch(e => console.error('Play failed:', e));
+            } else {
+                audio.pause();
+            }
+        }
+    }, []);
+
+    // Keyboard shortcuts (inspired by LMS)
+    useKeyboardShortcuts({
+        onPlayPause: handleTogglePlayPause,
+        onPrevious: handlePlayPrevious,
+        onNext: handlePlayNext,
+        onVolumeUp: () => {
+            const audio = document.querySelector('audio');
+            if (audio && audio.volume < 1) {
+                audio.volume = Math.min(1, audio.volume + 0.1);
+            }
+        },
+        onVolumeDown: () => {
+            const audio = document.querySelector('audio');
+            if (audio && audio.volume > 0) {
+                audio.volume = Math.max(0, audio.volume - 0.1);
+            }
+        }
+    });
     
     // --- Navigation ---
     const NavLink = ({ page, title, children }) => (
          <button 
             onClick={() => handleResetNavigation(page, title)} 
-            className={`w-full text-left px-3 py-2 rounded font-semibold transition duration-300 ${currentView.page === page && navigation.length === 1 ? 'bg-teal-500 text-white' : 'text-gray-300 hover:bg-gray-700'}`}>
+            className={`w-full md:w-auto text-left px-2 lg:px-3 py-2 rounded font-semibold transition duration-300 text-sm lg:text-base ${currentView.page === page && navigation.length === 1 ? 'bg-teal-500 text-white' : 'text-gray-300 hover:bg-gray-700'}`}>
             {children}
         </button>
     );
@@ -225,7 +257,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 					 <div className="container mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
 						<h1 className="text-xl font-bold text-teal-400">AudioMuse-AI</h1>
 						
-						<div className="hidden md:flex items-center space-x-2">
+                        <div className="hidden md:flex items-center space-x-1 lg:space-x-2">
 							<NavLink page="artists" title="Artists">Artists</NavLink>
 							<NavLink page="albums" title="All Albums">Albums</NavLink>
                             <NavLink page="songs" title="Songs">Songs</NavLink>
@@ -233,10 +265,17 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                             <NavLink page="map" title="Map">Map</NavLink>
 							<NavLink page="playlists" title="Playlists">Playlists</NavLink>
 							{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
-							<button onClick={onLogout} className="px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold transition duration-300">Logout</button>
-						</div>
-
-						<div className="md:hidden">
+							{/* Keyboard shortcuts help button */}
+							<button 
+								title="Keyboard Shortcuts: Space (Play/Pause), Ctrl+← (Previous), Ctrl+→ (Next), Ctrl+↑ (Vol+), Ctrl+↓ (Vol-)"
+								className="px-2 py-2 text-gray-400 hover:text-white transition-colors"
+							>
+								<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+								</svg>
+							</button>
+							<button onClick={onLogout} className="px-2 lg:px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold transition duration-300 text-sm lg:text-base">Logout</button>
+						</div>						<div className="md:hidden">
 							<button onClick={() => setIsMenuOpen(!isMenuOpen)} className="text-gray-300 hover:text-white focus:outline-none p-2 rounded-md">
 								 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
 							</button>
@@ -255,15 +294,15 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						</div>
 					)}
 				</nav>
-				<main className="p-4 sm:p-8">
+				<main className="p-4 sm:p-8 pt-8 sm:pt-4">
 					<div className="mb-4">
 						{navigation.length > 1 && (
 							<button onClick={handleBack} className="text-teal-400 hover:text-teal-200 font-semibold mb-4">&larr; Back</button>
 						)}
-						<h2 className="text-3xl font-bold text-white">{currentView.title}</h2>
+						<h2 className="text-3xl font-bold text-white mb-2">{currentView.title}</h2>
 					</div>
                     {mixMessage && <p className="text-center text-teal-400 mb-4">{mixMessage}</p>}
-                    {currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onInstantMix={handleInstantMix} onAddToPlaylist={setSelectedSongForPlaylist} />}
+                    {currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onTogglePlayPause={handleTogglePlayPause} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onInstantMix={handleInstantMix} onAddToPlaylist={setSelectedSongForPlaylist} />}
                     {currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
                     {currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
                     {currentView.page === 'playlists' && <Playlists credentials={credentials} isAdmin={isAdmin} onNavigate={handleNavigate} />}
@@ -291,6 +330,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                 currentIndex={currentTrackIndex}
                 onRemove={handleRemoveFromQueue}
                 onSelect={handleSelectTrack}
+                onTogglePlayPause={handleTogglePlayPause}
                 onAddToPlaylist={setSelectedSongForPlaylist}
                 onInstantMix={handleInstantMix}
                 audioMuseUrl={audioMuseUrl}

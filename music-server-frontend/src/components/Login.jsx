@@ -33,8 +33,8 @@ function Login({ onLogin }) {
 	};
 
 	return (
-		<div className="flex items-center justify-center h-screen">
-			<div className="bg-gray-800 p-8 rounded-lg shadow-xl w-96">
+		<div className="flex items-center justify-center h-screen px-4">
+			<div className="bg-gray-800 p-6 sm:p-8 rounded-lg shadow-xl w-full max-w-md">
 				<h2 className="text-2xl font-bold mb-6 text-center text-teal-400">AudioMuse-AI</h2>
 				<form onSubmit={handleSubmit}>
 					<div className="mb-4">

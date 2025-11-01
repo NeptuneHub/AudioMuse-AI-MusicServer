@@ -91,6 +91,12 @@ func main() {
 		subsonic.GET("/getLicense.view", subsonicGetLicense)
 		subsonic.GET("/stream.view", subsonicStream)
 		subsonic.GET("/scrobble.view", subsonicScrobble)
+
+		// Browsing endpoints
+		subsonic.GET("/getMusicFolders.view", subsonicGetMusicFolders)
+		subsonic.GET("/getIndexes.view", subsonicGetIndexes)
+		subsonic.GET("/getMusicDirectory.view", subsonicGetMusicDirectory)
+		subsonic.GET("/getArtist.view", subsonicGetArtist)
 		subsonic.GET("/getArtists.view", subsonicGetArtists)
 		subsonic.GET("/getAlbumList2.view", subsonicGetAlbumList2)
 		subsonic.GET("/getPlaylists.view", subsonicGetPlaylists)
@@ -105,6 +111,14 @@ func main() {
 		subsonic.GET("/getRandomSongs.view", subsonicGetRandomSongs)
 		subsonic.GET("/getSongsByGenre.view", subsonicGetSongsByGenre)
 		subsonic.GET("/getCoverArt.view", subsonicGetCoverArt)
+
+		// Media info endpoints
+		subsonic.GET("/getTopSongs.view", subsonicGetTopSongs)
+		subsonic.GET("/getSimilarSongs2.view", subsonicGetSimilarSongs2)
+		subsonic.GET("/getAlbumInfo.view", subsonicGetAlbumInfo)
+		subsonic.GET("/getAlbumInfo2.view", subsonicGetAlbumInfo)
+		subsonic.GET("/download.view", subsonicDownload)
+
 		subsonic.Any("/startScan.view", subsonicStartScan)
 		subsonic.GET("/getScanStatus.view", subsonicGetScanStatus)
 		subsonic.GET("/getLibraryPaths.view", subsonicGetLibraryPaths)
