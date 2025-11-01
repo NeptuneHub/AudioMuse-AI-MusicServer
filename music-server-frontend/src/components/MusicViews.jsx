@@ -342,8 +342,16 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                             setRefreshKey(prev => prev + 1);
                             
                             const data = await getStarredSongs();
-                            const starredSongs = data.starred?.song || [];
-                            const songList = Array.isArray(starredSongs) ? starredSongs : [starredSongs].filter(Boolean);
+                            const starredSongs = data.starred?.song;
+                            
+                            // Handle empty/missing starred songs properly
+                            let songList = [];
+                            if (starredSongs) {
+                                songList = Array.isArray(starredSongs) ? starredSongs : [starredSongs];
+                                // Filter out any invalid entries (null, undefined, or objects without id)
+                                songList = songList.filter(s => s && s.id);
+                            }
+                            
                             setAllSongs(songList);
                             setSongs(songList.slice(0, PAGE_SIZE));
                             setHasMore(songList.length > PAGE_SIZE);

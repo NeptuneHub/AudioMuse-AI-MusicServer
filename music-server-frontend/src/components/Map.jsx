@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import Plotly from 'plotly.js-dist-min';
 import { apiFetch, searchMusic, subsonicFetch } from '../api';
 
-export default function Map({ onNavigate, onAddToQueue, onPlay }) {
+export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueue, onClearQueue, playQueue = [] }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
@@ -11,6 +11,9 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
   const [suggestions, setSuggestions] = useState([]);
   const [hiddenGenres, setHiddenGenres] = useState(new Set());
   const [genres, setGenres] = useState([]);
+  const [showSearchHighlight, setShowSearchHighlight] = useState(true);
+  const [showPathLine, setShowPathLine] = useState(true);
+  const [showPathPoints, setShowPathPoints] = useState(true);
   const fetchRef = useRef(0);
   const plotDivRef = useRef(null);
   const rawItemsRef = useRef([]); // Store original items for re-rendering
@@ -31,6 +34,25 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
     if (ids.length === 0) console.debug('extractIdsFromPoints produced no ids for points', points);
     return ids;
   }, []);
+
+  // Sync selectedIds when playQueue changes (bidirectional sync)
+  useEffect(() => {
+    if (!playQueue) return;
+    
+    // Get IDs currently in the queue
+    const queueIds = playQueue.map(song => String(song.id));
+    const queueIdSet = new Set(queueIds);
+    
+    // Remove from selectedIds any IDs that are not in the queue
+    const currentSelection = window._plotSelection || [];
+    const newSelection = currentSelection.filter(id => queueIdSet.has(id));
+    
+    if (newSelection.length !== currentSelection.length) {
+      window._plotSelection = newSelection;
+      setSelectedIds(newSelection);
+      console.log('Queue sync: removed', currentSelection.length - newSelection.length, 'deselected songs from map');
+    }
+  }, [playQueue]);
 
   const attachPlotHandlers = useCallback((gd) => {
     if (!gd) return;
@@ -66,26 +88,64 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
       const MAX_ADD = 1000; let added = 0; const space = Math.max(0, MAX_ADD - window._plotSelection.length);
       for (const id of ids) { if (added >= space) break; const sid = String(id); if (!existingSet.has(sid)) { window._plotSelection.push(sid); existingSet.add(sid); added++; } }
       console.log('Selection updated: before=', beforeLen, 'after=', window._plotSelection.length, 'added=', added);
-      if (ids.length > added) { document.getElementById('map-status') && (document.getElementById('map-status').textContent = `Selected ${window._plotSelection.length} songs (first ${added} added; selection capped at 1000)`); }
-      else { document.getElementById('map-status') && (document.getElementById('map-status').textContent = `Selected ${window._plotSelection.length} songs`); }
+      // Dispatch event to update React state (don't manually update DOM)
       try { window.dispatchEvent(new CustomEvent('am-map-selection-changed')); } catch(e){}
     });
 
-    bind('plotly_click', (ev) => {
+    bind('plotly_click', async (ev) => {
       console.log('plotly_click event fired, point:', ev?.points?.[0]);
       const pt = ev && ev.points && ev.points[0];
       const ids = extractIdsFromPoints(pt ? [pt] : []);
       if (!ids || ids.length === 0) return;
       const id = String(ids[0]);
+      
+      // Debounce: Plotly fires click twice, prevent double-toggle
+      const now = Date.now();
+      const lastClick = gd._lastClickTime || 0;
+      const lastClickId = gd._lastClickId || null;
+      if (lastClickId === id && now - lastClick < 300) {
+        console.log('Ignoring duplicate click event for song', id);
+        return;
+      }
+      gd._lastClickTime = now;
+      gd._lastClickId = id;
+      
       window._plotSelection = window._plotSelection || [];
-      if (!window._plotSelection.includes(id)) window._plotSelection.push(id);
-      document.getElementById('map-status') && (document.getElementById('map-status').textContent = `Selected ${window._plotSelection.length} songs`);
+      
+      // Toggle selection: if already selected, remove it (and from queue); otherwise add it (and to queue)
+      const idx = window._plotSelection.indexOf(id);
+      if (idx !== -1) {
+        window._plotSelection.splice(idx, 1);
+        console.log('Deselected song', id);
+        // Remove from queue if onRemoveFromQueue is available
+        if (onRemoveFromQueue) {
+          onRemoveFromQueue(id);
+        }
+      } else {
+        window._plotSelection.push(id);
+        console.log('Selected song', id);
+        
+        // Add to queue - fetch song details first
+        if (onAddToQueue) {
+          try {
+            const data = await subsonicFetch('getSong.view', { id });
+            if (data && data.song) {
+              onAddToQueue(data.song);
+              console.log('Added song to queue:', data.song.title);
+            }
+          } catch (err) {
+            console.warn('Failed to fetch song for queue:', err);
+          }
+        }
+      }
+      
+      // Dispatch event to update React state (don't manually update DOM)
       try { window.dispatchEvent(new CustomEvent('am-map-selection-changed')); } catch(e){}
     });
 
     gd._amy_handlers_attached = true;
     console.log('attachPlotHandlers completed - handlers bound to plotly_selected and plotly_click');
-  }, [extractIdsFromPoints]);
+  }, [extractIdsFromPoints, onAddToQueue, onRemoveFromQueue]);
 
   // renderPlot: builds traces and calls Plotly.react/newPlot
   const renderPlot = useCallback((items, projection) => {
@@ -259,15 +319,15 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
       return;
     }
     
-    // Calculate radius relative to axis range (like HTML version)
+    // Calculate radius relative to axis range - BIGGER circle for better visibility
     let xRange = null, yRange = null;
     try {
       xRange = (gd.layout && gd.layout.xaxis && gd.layout.xaxis.range) ? gd.layout.xaxis.range : (gd._fullLayout && gd._fullLayout.xaxis && gd._fullLayout.xaxis.range ? gd._fullLayout.xaxis.range : null);
       yRange = (gd.layout && gd.layout.yaxis && gd.layout.yaxis.range) ? gd.layout.yaxis.range : (gd._fullLayout && gd._fullLayout.yaxis && gd._fullLayout.yaxis.range ? gd._fullLayout.yaxis.range : null);
     } catch (e) {}
     
-    const rx = (xRange && xRange[1] - xRange[0]) ? (xRange[1] - xRange[0]) * 0.0075 : 0.15;
-    const ry = (yRange && yRange[1] - yRange[0]) ? (yRange[1] - yRange[0]) * 0.0075 : 0.15;
+    const rx = (xRange && xRange[1] - xRange[0]) ? (xRange[1] - xRange[0]) * 0.02 : 0.2;
+    const ry = (yRange && yRange[1] - yRange[0]) ? (yRange[1] - yRange[0]) * 0.02 : 0.2;
     
     const highlightShape = {
       type: 'circle',
@@ -311,7 +371,9 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
     const onSel = () => {
       const arr = window._plotSelection || [];
       console.log('am-map-selection-changed event received, window._plotSelection has', arr.length, 'items');
-      setSelectedIds(Array.from(new Set(arr.map(String))));
+      const newSelection = Array.from(new Set(arr.map(String)));
+      console.log('Updating selectedIds state to:', newSelection);
+      setSelectedIds(newSelection);
     };
     window.addEventListener('am-map-selection-changed', onSel);
     return () => window.removeEventListener('am-map-selection-changed', onSel);
@@ -392,15 +454,27 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
       
       if (allPathSongs.length === 0) return alert('No path found');
       
-      // Add all path songs to selection
+      // Add all path songs to selection AND queue
       allPathSongs.forEach(s => {
         const sid = String(s.id || '');
         if (sid && !window._plotSelection.includes(sid)) {
           window._plotSelection.push(sid);
+          // Add to queue
+          if (onAddToQueue) {
+            onAddToQueue(s);
+          }
         }
       });
       
+      // Update React state (will trigger re-render with correct count)
       setSelectedIds([...window._plotSelection]);
+      
+      // Dispatch selection changed event
+      try {
+        window.dispatchEvent(new CustomEvent('am-map-selection-changed'));
+      } catch (e) {
+        console.warn('Failed to dispatch selection event', e);
+      }
       
       // Draw path on map - normalize song objects to have item_id field
       const normalizedSongs = allPathSongs.map(s => ({
@@ -428,26 +502,47 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
     }
   };
 
-  // Refresh map: clear all overlays (paths, highlights, selections)
+  // Refresh map: clear everything and reload
   const handleRefresh = () => {
-    const gd = plotDivRef.current || document.getElementById('map-plot');
-    if (!gd) return;
-    
     try {
-      // Remove all shape overlays (paths, highlights)
-      Plotly.relayout(gd, { shapes: [] }).catch(() => {});
+      const gd = plotDivRef.current || document.getElementById('map-plot');
       
-      // Clear selection
+      // Remove all shape overlays (paths, highlights)
+      if (gd) {
+        Plotly.relayout(gd, { shapes: [] }).catch(() => {});
+      }
+      
+      // Clear the entire play queue using the Dashboard's clearQueue function
+      if (onClearQueue) {
+        onClearQueue();
+      }
+      
+      // Clear selection (React state update will handle UI)
       window._plotSelection = [];
       setSelectedIds([]);
       
-      console.log('Map refreshed: cleared overlays and selection');
+      // Clear all genre filters
+      setHiddenGenres(new Set());
+      window._hiddenGenres = new Set();
+      
+      // Reset overlay visibility toggles
+      setShowSearchHighlight(true);
+      setShowPathLine(true);
+      setShowPathPoints(true);
+      
+      // Reload the map with current percentage
+      const items = rawItemsRef.current;
+      if (items && items.length > 0) {
+        renderPlot(items, null);
+      }
+      
+      console.log('Map refreshed: cleared everything (including queue) and reloaded');
     } catch (e) {
       console.warn('Failed to refresh map', e);
     }
   };
 
-  // Genre filtering functions
+  // Genre filtering functions - preserve zoom/axis ranges
   const toggleGenre = (genre) => {
     const newHidden = new Set(hiddenGenres);
     if (newHidden.has(genre)) {
@@ -458,10 +553,37 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
     setHiddenGenres(newHidden);
     window._hiddenGenres = newHidden;
     
-    // Re-render the plot with updated filters using stored raw items
+    // Capture current axis ranges before re-rendering
+    const gd = plotDivRef.current || document.getElementById('map-plot');
+    let preservedShapes = [];
+    let xRange = null, yRange = null;
+    if (gd) {
+      try {
+        if (gd.layout && Array.isArray(gd.layout.shapes)) {
+          preservedShapes = gd.layout.shapes.slice();
+        }
+        xRange = (gd.layout && gd.layout.xaxis && gd.layout.xaxis.range) ? gd.layout.xaxis.range.slice() : null;
+        yRange = (gd.layout && gd.layout.yaxis && gd.layout.yaxis.range) ? gd.layout.yaxis.range.slice() : null;
+      } catch (e) {}
+    }
+    
+    // Re-render the plot with updated filters
     const items = rawItemsRef.current;
     if (items && items.length > 0) {
       renderPlot(items, null);
+      
+      // Restore axis ranges and shapes after render
+      setTimeout(() => {
+        if (gd && (xRange || yRange)) {
+          const update = {};
+          if (xRange) update['xaxis.range'] = xRange;
+          if (yRange) update['yaxis.range'] = yRange;
+          Plotly.relayout(gd, update).catch(() => {});
+        }
+        if (gd && preservedShapes.length > 0) {
+          Plotly.relayout(gd, { shapes: preservedShapes }).catch(() => {});
+        }
+      }, 50);
     }
   };
   
@@ -470,10 +592,35 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
     setHiddenGenres(newHidden);
     window._hiddenGenres = newHidden;
     
-    // Re-render the plot with updated filters using stored raw items
+    // Capture current axis ranges
+    const gd = plotDivRef.current || document.getElementById('map-plot');
+    let preservedShapes = [];
+    let xRange = null, yRange = null;
+    if (gd) {
+      try {
+        if (gd.layout && Array.isArray(gd.layout.shapes)) {
+          preservedShapes = gd.layout.shapes.slice();
+        }
+        xRange = (gd.layout && gd.layout.xaxis && gd.layout.xaxis.range) ? gd.layout.xaxis.range.slice() : null;
+        yRange = (gd.layout && gd.layout.yaxis && gd.layout.yaxis.range) ? gd.layout.yaxis.range.slice() : null;
+      } catch (e) {}
+    }
+    
     const items = rawItemsRef.current;
     if (items && items.length > 0) {
       renderPlot(items, null);
+      
+      setTimeout(() => {
+        if (gd && (xRange || yRange)) {
+          const update = {};
+          if (xRange) update['xaxis.range'] = xRange;
+          if (yRange) update['yaxis.range'] = yRange;
+          Plotly.relayout(gd, update).catch(() => {});
+        }
+        if (gd && preservedShapes.length > 0) {
+          Plotly.relayout(gd, { shapes: preservedShapes }).catch(() => {});
+        }
+      }, 50);
     }
   };
   
@@ -481,10 +628,35 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
     setHiddenGenres(new Set());
     window._hiddenGenres = new Set();
     
-    // Re-render the plot with updated filters using stored raw items
+    // Capture current axis ranges
+    const gd = plotDivRef.current || document.getElementById('map-plot');
+    let preservedShapes = [];
+    let xRange = null, yRange = null;
+    if (gd) {
+      try {
+        if (gd.layout && Array.isArray(gd.layout.shapes)) {
+          preservedShapes = gd.layout.shapes.slice();
+        }
+        xRange = (gd.layout && gd.layout.xaxis && gd.layout.xaxis.range) ? gd.layout.xaxis.range.slice() : null;
+        yRange = (gd.layout && gd.layout.yaxis && gd.layout.yaxis.range) ? gd.layout.yaxis.range.slice() : null;
+      } catch (e) {}
+    }
+    
     const items = rawItemsRef.current;
     if (items && items.length > 0) {
       renderPlot(items, null);
+      
+      setTimeout(() => {
+        if (gd && (xRange || yRange)) {
+          const update = {};
+          if (xRange) update['xaxis.range'] = xRange;
+          if (yRange) update['yaxis.range'] = yRange;
+          Plotly.relayout(gd, update).catch(() => {});
+        }
+        if (gd && preservedShapes.length > 0) {
+          Plotly.relayout(gd, { shapes: preservedShapes }).catch(() => {});
+        }
+      }, 50);
     }
   };
 
@@ -602,7 +774,24 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
     }
   };
 
-  
+  // Toggle overlay visibility by filtering shapes
+  const toggleOverlay = (amType, show) => {
+    const gd = plotDivRef.current || document.getElementById('map-plot');
+    if (!gd) return;
+    
+    try {
+      const shapes = (gd.layout && Array.isArray(gd.layout.shapes)) ? gd.layout.shapes.slice() : [];
+      const filtered = shapes.map(shape => {
+        if (shape && shape.am_type === amType) {
+          return { ...shape, visible: show };
+        }
+        return shape;
+      });
+      Plotly.relayout(gd, { shapes: filtered }).catch(() => {});
+    } catch (e) {
+      console.warn('Failed to toggle overlay', e);
+    }
+  };
 
   return (
     <div className="p-4 bg-gray-900 min-h-screen text-gray-100">
@@ -625,8 +814,16 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
         <button onClick={handleRefresh} className="bg-gray-700 hover:bg-gray-600 px-4 py-1 rounded text-white" title="Clear overlays and selection">
           🔄 Refresh
         </button>
-        {selectedIds.length >= 2 && selectedIds.length <= 10 && (
-          <button onClick={handleCreatePath} className="bg-yellow-600 hover:bg-yellow-700 px-4 py-1 rounded text-white font-semibold">
+        {selectedIds.length >= 2 && (
+          <button 
+            onClick={selectedIds.length <= 10 ? handleCreatePath : undefined} 
+            disabled={selectedIds.length > 10}
+            className={selectedIds.length <= 10 
+              ? "bg-yellow-600 hover:bg-yellow-700 px-4 py-1 rounded text-white font-semibold cursor-pointer" 
+              : "bg-gray-600 px-4 py-1 rounded text-gray-400 font-semibold cursor-not-allowed opacity-50"
+            }
+            title={selectedIds.length > 10 ? "Maximum 10 songs allowed for path creation" : "Create path between selected songs"}
+          >
             🛤️ Create Path ({selectedIds.length})
           </button>
         )}
@@ -654,13 +851,47 @@ export default function Map({ onNavigate, onAddToQueue, onPlay }) {
           
           {/* Interactive genre legend with show/hide controls */}
           <div className="mt-3 p-3 bg-gray-800 border border-gray-700 rounded">
-            <div className="flex items-center gap-4 mb-2">
+            <div className="flex items-center gap-4 mb-2 flex-wrap">
               <span className="font-semibold text-gray-300">Genres:</span>
               <button onClick={showAllGenres} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300">
                 Show All
               </button>
               <button onClick={hideAllGenres} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300">
                 Hide All
+              </button>
+              
+              {/* Overlay toggles */}
+              <span className="text-gray-500 mx-2">|</span>
+              <span className="text-gray-400 text-xs">Overlays:</span>
+              <button 
+                onClick={() => {
+                  setShowSearchHighlight(!showSearchHighlight);
+                  toggleOverlay('search-highlight', !showSearchHighlight);
+                }}
+                className={`text-xs px-2 py-1 rounded ${showSearchHighlight ? 'bg-yellow-600 text-white' : 'bg-gray-700 text-gray-400'}`}
+                title={showSearchHighlight ? 'Hide search highlight' : 'Show search highlight'}
+              >
+                {showSearchHighlight ? '👁' : '👁‍🗨'} Search
+              </button>
+              <button 
+                onClick={() => {
+                  setShowPathLine(!showPathLine);
+                  toggleOverlay('path-line', !showPathLine);
+                }}
+                className={`text-xs px-2 py-1 rounded ${showPathLine ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'}`}
+                title={showPathLine ? 'Hide path line' : 'Show path line'}
+              >
+                {showPathLine ? '👁' : '👁‍🗨'} Path Line
+              </button>
+              <button 
+                onClick={() => {
+                  setShowPathPoints(!showPathPoints);
+                  toggleOverlay('path-point', !showPathPoints);
+                }}
+                className={`text-xs px-2 py-1 rounded ${showPathPoints ? 'bg-red-600 text-white' : 'bg-gray-700 text-gray-400'}`}
+                title={showPathPoints ? 'Hide path points' : 'Show path points'}
+              >
+                {showPathPoints ? '👁' : '👁‍🗨'} Path Points
               </button>
             </div>
             <div className="flex flex-wrap gap-2">

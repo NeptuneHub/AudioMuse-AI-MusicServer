@@ -268,7 +268,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                     {currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
                     {currentView.page === 'playlists' && <Playlists credentials={credentials} isAdmin={isAdmin} onNavigate={handleNavigate} />}
                     {currentView.page === 'alchemy' && <SongAlchemy onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} />}
-                    {currentView.page === 'map' && <Map onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} />}
+                    {currentView.page === 'map' && <Map onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} onRemoveFromQueue={handleRemoveFromQueue} onClearQueue={handleClearQueue} playQueue={playQueue} />}
                     {currentView.page === 'admin' && isAdmin && <AdminPanel onConfigChange={fetchConfig} />}
 				</main>
 			</div>
@@ -281,6 +281,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                 credentials={credentials}
                 hasQueue={playQueue.length > 1}
                 onToggleQueueView={() => setQueueViewOpen(true)}
+                queueCount={playQueue.length}
             />
 
             <PlayQueueView

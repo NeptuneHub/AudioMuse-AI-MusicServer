@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE, apiFetch } from '../api';
 
-function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevious, hasQueue, onToggleQueueView }) {
+function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevious, hasQueue, onToggleQueueView, queueCount = 0 }) {
     const [audioSrc, setAudioSrc] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(false);
@@ -130,10 +130,20 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                     )}
                 </div>
 
-                <div className="flex-shrink-0">
+                <div className="flex-shrink-0 relative">
                     <button onClick={onToggleQueueView} className="text-white p-2 rounded-full hover:bg-gray-700" title="Show queue">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
                     </button>
+                    {/* Live counter badge */}
+                    {queueCount > 0 ? (
+                        <span className="absolute -top-1 -right-1 bg-red-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                            {queueCount}
+                        </span>
+                    ) : (
+                        <span className="absolute -top-1 -right-1 bg-gray-600 text-gray-400 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                            0
+                        </span>
+                    )}
                 </div>
             </div>
         </div>
