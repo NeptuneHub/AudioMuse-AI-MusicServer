@@ -64,16 +64,25 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
 
     const setupMediaSession = useCallback(() => {
         if (song && 'mediaSession' in navigator) {
-            const artworkUrl = (() => {
-                const params = new URLSearchParams({ id: song.coverArt, v: '1.16.1', c: 'AudioMuse-AI' });
-                return `${API_BASE}/rest/getCoverArt.view?${params.toString()}`;
-                // Note: mediaSession artwork can't use auth headers, backend should allow public access or JWT via cookie
-            })();
+            // Only include artwork if song has coverArt and credentials are available
+            const artwork = [];
+            if (song.coverArt && credentials?.username && credentials?.password) {
+                const params = new URLSearchParams({ 
+                    id: song.coverArt, 
+                    v: '1.16.1', 
+                    c: 'AudioMuse-AI',
+                    u: credentials.username,
+                    p: credentials.password
+                });
+                const artworkUrl = `${API_BASE}/rest/getCoverArt.view?${params.toString()}`;
+                artwork.push({ src: artworkUrl, sizes: '300x300', type: 'image/jpeg' });
+            }
+            
             navigator.mediaSession.metadata = new window.MediaMetadata({
                 title: song.title,
                 artist: song.artist,
                 album: song.album,
-                artwork: [ { src: artworkUrl, sizes: '300x300', type: 'image/jpeg' } ]
+                artwork: artwork
             });
 
             navigator.mediaSession.setActionHandler('play', () => audioRef.current?.play());
@@ -81,7 +90,7 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
             navigator.mediaSession.setActionHandler('nexttrack', hasQueue ? onPlayNext : null);
             navigator.mediaSession.setActionHandler('previoustrack', hasQueue ? onPlayPrevious : null);
         }
-    }, [song, hasQueue, onPlayNext, onPlayPrevious]);
+    }, [song, credentials, hasQueue, onPlayNext, onPlayPrevious]);
 
     useEffect(() => {
         setupMediaSession();
