@@ -130,8 +130,18 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
           try {
             const data = await subsonicFetch('getSong.view', { id });
             if (data && data.song) {
+              // Set flag before adding to queue so AudioPlayer won't auto-play
+              window._mapAddedSong = true;
               onAddToQueue(data.song);
-              console.log('Added song to queue:', data.song.title);
+              console.log('Added song to queue from Map:', data.song.title);
+              
+              // Safety: clear flag after a short delay in case AudioPlayer doesn't clear it
+              setTimeout(() => {
+                if (window._mapAddedSong) {
+                  window._mapAddedSong = false;
+                  console.log('Map: Auto-cleared _mapAddedSong flag after timeout');
+                }
+              }, 1000);
             }
           } catch (err) {
             console.warn('Failed to fetch song for queue:', err);
@@ -364,6 +374,12 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
   useEffect(() => {
     window._plotSelection = [];
     console.log('Map mounted: initialized window._plotSelection to empty array');
+    
+    // Clear the flag when Map unmounts
+    return () => {
+      window._mapAddedSong = false;
+      console.log('Map unmounted: cleared _mapAddedSong flag');
+    };
   }, []);
 
   // selection bridge used by UI controls
@@ -465,6 +481,17 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
           }
         }
       });
+      
+      // Set flag so AudioPlayer won't auto-play
+      window._mapAddedSong = true;
+      
+      // Safety: clear flag after a short delay
+      setTimeout(() => {
+        if (window._mapAddedSong) {
+          window._mapAddedSong = false;
+          console.log('Map: Auto-cleared _mapAddedSong flag after path creation');
+        }
+      }, 1000);
       
       // Update React state (will trigger re-render with correct count)
       setSelectedIds([...window._plotSelection]);

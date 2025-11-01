@@ -89,6 +89,12 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
     
     useEffect(() => {
         if (audioSrc && audioRef.current) {
+            // Check if this song was added from Map - if so, don't auto-play
+            if (window._mapAddedSong) {
+                console.log('Map song detected - skipping auto-play');
+                window._mapAddedSong = false;
+                return;
+            }
             audioRef.current.play().catch(e => console.error("Autoplay was prevented:", e));
         }
     }, [audioSrc]);
