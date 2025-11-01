@@ -822,7 +822,8 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
 
   return (
     <div className="text-gray-100">
-      <div className="flex justify-end mb-3 sm:mb-4 flex-wrap gap-2">
+      <div className="mb-2 flex gap-1.5 sm:gap-2 items-center flex-wrap">
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search..." className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 text-sm w-32 sm:w-48 md:w-64" />
         <div className="flex gap-2 items-center">
           <label className="text-gray-400 text-xs sm:text-sm flex items-center">Size:</label>
           <select value={percent} onChange={e => setPercent(Number(e.target.value))} className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 text-sm">
@@ -832,10 +833,6 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
             <option value={100}>100%</option>
           </select>
         </div>
-      </div>
-
-      <div className="mb-2 flex gap-1.5 sm:gap-2 items-center flex-wrap">
-        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search..." className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 text-sm w-32 sm:w-48 md:w-64" />
         <div id="map-status" className="text-gray-300 text-xs sm:text-sm ml-1 sm:ml-4">Selected: {selectedIds.length}</div>
         <button onClick={handleRefresh} className="bg-gray-700 hover:bg-gray-600 px-2 sm:px-4 py-1 rounded text-white text-xs sm:text-sm" title="Clear overlays and selection">
           🔄 <span className="hidden sm:inline">Refresh</span>
