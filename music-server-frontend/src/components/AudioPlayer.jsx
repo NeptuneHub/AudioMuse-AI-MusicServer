@@ -81,7 +81,7 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
             navigator.mediaSession.setActionHandler('nexttrack', hasQueue ? onPlayNext : null);
             navigator.mediaSession.setActionHandler('previoustrack', hasQueue ? onPlayPrevious : null);
         }
-    }, [song, credentials, hasQueue, onPlayNext, onPlayPrevious]);
+    }, [song, hasQueue, onPlayNext, onPlayPrevious]);
 
     useEffect(() => {
         setupMediaSession();

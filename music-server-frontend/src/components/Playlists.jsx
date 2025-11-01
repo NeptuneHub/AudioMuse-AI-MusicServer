@@ -76,7 +76,7 @@ function Playlists({ credentials, isAdmin, onNavigate }) {
         } finally {
             setIsLoading(false);
         }
-    }, [subsonicFetch]);
+    }, []);
 
     useEffect(() => {
         fetchPlaylists();

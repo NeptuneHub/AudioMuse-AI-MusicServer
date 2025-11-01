@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { API_BASE, subsonicFetch, apiFetch } from '../../api';
+import { subsonicFetch, apiFetch } from '../../api';
 import Modal from '../Modal';
 import FileBrowser from './FileBrowser';
 
@@ -170,28 +170,7 @@ function LibraryManagement({ onConfigChange }) {
         }
     };
 
-    const handleRescanAll = async () => {
-        if (!window.confirm("This will delete all songs from the database and re-scan from scratch. This action cannot be undone. Continue?")) {
-            return;
-        }
-        
-        setMessage('Starting full library rescan...');
-        setScanStatus(prev => ({ ...prev, scanning: true, count: 0 }));
-        try {
-            const response = await apiFetch('/api/v1/admin/scan/rescan', {
-                method: 'POST'
-            });
-            if (!response.ok) {
-                const data = await response.json();
-                throw new Error(data.error || 'Failed to start rescan');
-            }
-            setMessage('Full library rescan started. This will clear all data and re-scan from scratch.');
-        } catch (e) {
-            setScanStatus(prev => ({ ...prev, scanning: false }));
-            setError(e.message || 'Error starting rescan.');
-            setMessage('');
-        }
-    };
+    // Note: full rescan action removed from UI for safety. Admins may trigger rescan from backend tools.
 
 
 

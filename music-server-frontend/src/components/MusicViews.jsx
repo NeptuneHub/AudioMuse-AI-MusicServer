@@ -239,7 +239,7 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
         };
 
         fetcher();
-    }, [credentials, filter, searchTerm, songs.length, allSongs, isLoading, hasMore, selectedGenre]);
+    }, [filter, searchTerm, songs.length, allSongs, isLoading, hasMore, selectedGenre]);
 
     useEffect(() => {
         if (songs.length === 0 && hasMore && (searchTerm.length >= 3 || filter || selectedGenre)) {
@@ -321,8 +321,10 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
             </div>
 
             <div className="mb-4 flex flex-wrap gap-2">
-                {( (songs.length > 0 || allSongs.length > 0) && !searchTerm && (filter?.albumId || filter?.playlistId || filter?.preloadedSongs)) && (
-                    <button onClick={handlePlayAlbum} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Play All</button>
+                {(songs.length > 0 || allSongs.length > 0) && (
+                    <button onClick={handlePlayAlbum} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">
+                        ▶ Play All ({allSongs.length > 0 ? allSongs.length : songs.length})
+                    </button>
                 )}
                 <button 
                     onClick={async () => {
@@ -492,6 +494,7 @@ const ImageWithFallback = ({ src, placeholder, alt }) => {
     const [hasError, setHasError] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
     const [objectUrl, setObjectUrl] = useState(null);
+    const objectUrlRef = useRef(null);
     const ref = useRef(null);
 
     useEffect(() => {
@@ -519,9 +522,10 @@ const ImageWithFallback = ({ src, placeholder, alt }) => {
 
     useEffect(() => {
         setHasError(false);
-        // Clean up previous objectUrl
-        if (objectUrl) {
-            URL.revokeObjectURL(objectUrl);
+        // Clean up previous objectUrl stored in ref
+        if (objectUrlRef.current) {
+            URL.revokeObjectURL(objectUrlRef.current);
+            objectUrlRef.current = null;
             setObjectUrl(null);
         }
         // If src is an object with useAuthFetch=true and a token exists, fetch the image via fetch with Authorization
@@ -535,6 +539,7 @@ const ImageWithFallback = ({ src, placeholder, alt }) => {
                     const blob = await res.blob();
                     const url = URL.createObjectURL(blob);
                     setObjectUrl(url);
+                    objectUrlRef.current = url;
                 }
             } catch (e) {
                 console.error('Image fetch failed', e);
@@ -638,7 +643,7 @@ export function Albums({ credentials, filter, onNavigate }) {
         };
         
         fetcher();
-    }, [credentials, filter, searchTerm, albums.length, isLoading, hasMore, selectedGenre]);
+    }, [filter, searchTerm, albums.length, isLoading, hasMore, selectedGenre]);
     
     useEffect(() => {
         if (albums.length === 0 && hasMore) {
@@ -761,7 +766,7 @@ export function Artists({ credentials, onNavigate }) {
         };
 
         fetcher();
-    }, [credentials, searchTerm, artists.length, allArtists, isLoading, hasMore]);
+    }, [searchTerm, artists.length, allArtists, isLoading, hasMore]);
     
     useEffect(() => {
         if (artists.length === 0 && hasMore) {

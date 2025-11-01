@@ -89,7 +89,7 @@ function SonicAnalysisPanel() {
         }, 5000);
         
         return () => clearInterval(intervalId);
-    }, [fetchStatus, checkAudioMuseConfiguration, audioMuseConfigured]);
+    }, [fetchStatus, checkAudioMuseConfiguration, audioMuseConfigured, error]);
 
     const startTask = async (endpoint, taskName) => {
         setError('');

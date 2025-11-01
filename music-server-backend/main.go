@@ -65,6 +65,10 @@ func main() {
 	defer db.Close()
 
 	initDB()
+	// Run idempotent migrations to cover older DBs that may be missing new tables/keys
+	if err := migrateDB(); err != nil {
+		log.Printf("Database migration warnings/errors: %v", err)
+	}
 	startScheduler()
 
 	if _, err := db.Exec("UPDATE scan_status SET is_scanning = 0 WHERE id = 1"); err != nil {
@@ -158,6 +162,11 @@ func main() {
 
 	// Public endpoint used by the frontend to run Alchemy (may be allowed for non-admin flows)
 	r.POST("/api/alchemy", AlchemyHandler)
+
+	// Map and voyager proxy endpoints (authenticated)
+	r.GET("/api/map", AuthMiddleware(), MapHandler)
+	r.GET("/api/voyager/search_tracks", AuthMiddleware(), VoyagerSearchTracksHandler)
+	r.POST("/api/map/create_playlist", AuthMiddleware(), MapCreatePlaylistHandler)
 
 	// Serve static files from React build
 	r.Static("/static", "/app/music-server-frontend/build/static")

@@ -8,8 +8,7 @@ function FileBrowser({ onSelect, onClose }) {
     const [error, setError] = useState('');
 
     const fetchDirectory = useCallback(async (path) => {
-        setError('');
-        const token = localStorage.getItem('token');
+    setError('');
         try {
                 const response = await apiFetch(`/api/v1/admin/browse?path=${encodeURIComponent(path)}`);
             if (!response.ok) {
