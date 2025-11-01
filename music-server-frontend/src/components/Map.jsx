@@ -822,8 +822,7 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
 
   return (
     <div className="p-2 sm:p-4 bg-gray-900 min-h-screen text-gray-100">
-      <div className="flex items-center justify-between mb-3 sm:mb-4 flex-wrap gap-2">
-        <h1 className="text-xl sm:text-2xl font-bold text-teal-400">Map</h1>
+      <div className="flex justify-end mb-3 sm:mb-4 flex-wrap gap-2">
         <div className="flex gap-2 items-center">
           <label className="text-gray-400 text-xs sm:text-sm flex items-center">Size:</label>
           <select value={percent} onChange={e => setPercent(Number(e.target.value))} className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 text-sm">

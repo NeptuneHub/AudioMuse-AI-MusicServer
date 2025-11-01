@@ -65,6 +65,11 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
         fetchConfig();
     }, [fetchConfig]);
 
+    // Scroll to top when component mounts (after login)
+    useEffect(() => {
+        window.scrollTo(0, 0);
+    }, []);
+
     // Save navigation state to localStorage whenever it changes
     useEffect(() => {
         try {
@@ -251,11 +256,10 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     );
 
 	return (
-		<div className="bg-gray-900">
-			<div className="pb-24">
-				<nav className="bg-gray-800 shadow-md sticky top-0 z-20">
-					 <div className="container mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
-						<h1 className="text-xl font-bold text-teal-400">AudioMuse-AI</h1>
+		<div className="bg-gray-900 min-h-screen">
+			<nav className="bg-gray-800 shadow-md fixed top-0 left-0 right-0 z-20">
+				<div className="container mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
+					<h1 className="text-xl font-bold text-teal-400">AudioMuse-AI</h1>
 						
                         <div className="hidden md:flex items-center space-x-1 lg:space-x-2">
 							<NavLink page="artists" title="Artists">Artists</NavLink>
@@ -294,13 +298,10 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						</div>
 					)}
 				</nav>
-				<main className="p-4 sm:p-8 pt-8 sm:pt-4">
-					<div className="mb-4">
-						{navigation.length > 1 && (
-							<button onClick={handleBack} className="text-teal-400 hover:text-teal-200 font-semibold mb-4">&larr; Back</button>
-						)}
-						<h2 className="text-3xl font-bold text-white mb-2">{currentView.title}</h2>
-					</div>
+				<main className="px-4 sm:px-8 pt-24 sm:pt-20 pb-24 bg-gray-900">
+					{navigation.length > 1 && (
+						<button onClick={handleBack} className="text-teal-400 hover:text-teal-200 font-semibold mb-4">&larr; Back</button>
+					)}
                     {mixMessage && <p className="text-center text-teal-400 mb-4">{mixMessage}</p>}
                     {currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onTogglePlayPause={handleTogglePlayPause} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onInstantMix={handleInstantMix} onAddToPlaylist={setSelectedSongForPlaylist} />}
                     {currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
@@ -310,7 +311,6 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                     {currentView.page === 'map' && <Map onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} onRemoveFromQueue={handleRemoveFromQueue} onClearQueue={handleClearQueue} playQueue={playQueue} />}
                     {currentView.page === 'admin' && isAdmin && <AdminPanel onConfigChange={fetchConfig} />}
 				</main>
-			</div>
 
             <CustomAudioPlayer
                 song={currentSong}

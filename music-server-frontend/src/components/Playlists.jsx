@@ -171,8 +171,7 @@ function Playlists({ credentials, isAdmin, onNavigate }) {
 
     return (
         <div>
-            <div className="flex justify-between items-center mb-6">
-                <h2 className="text-3xl font-bold text-white">Your Playlists</h2>
+            <div className="flex justify-end items-center mb-6">
                 <div className="flex items-center space-x-2">
                     <button onClick={handleCreateSonicFingerprintPlaylist} disabled={isGenerating} className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500">
                         {isGenerating ? 'Generating...' : 'Create Sonic Fingerprint Playlist'}
