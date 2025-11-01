@@ -100,7 +100,9 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
         const loadGenres = async () => {
             try {
                 const data = await getGenres();
+                console.log('Raw genre data from API:', data);
                 const genreList = data.genres?.genre || [];
+                console.log('Genre list after extraction:', genreList);
                 const allGenres = Array.isArray(genreList) ? genreList : [genreList].filter(Boolean);
                 
                 // Split semicolon-separated genres and remove duplicates
@@ -116,6 +118,7 @@ export function Songs({ credentials, filter, onPlay, onAddToQueue, onRemoveFromQ
                     }
                 });
                 
+                console.log('Processed individual genres:', individualGenres);
                 setGenres(individualGenres.sort((a, b) => a.name.localeCompare(b.name)));
             } catch (err) {
                 console.error('Failed to load genres:', err);

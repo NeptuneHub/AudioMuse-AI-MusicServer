@@ -292,7 +292,7 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
   useEffect(() => {
     const t = setTimeout(async () => {
       // Require at least 3 chars to reduce noise and match song view behavior
-      if ((!query || query.length < 3)) { setSuggestions([]); return; }
+      if ((!query || query.length < 2)) { setSuggestions([]); return; }
       try {
         // Use the same search as the Songs view (subsonic search2.view) to avoid voyager proxy 404s
         const data = await searchMusic(query, { songCount: 50 });

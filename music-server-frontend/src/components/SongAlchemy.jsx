@@ -32,7 +32,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay }) {
   const fetchSuggestions = async (idx) => {
     const row = rows[idx];
     const q = `${(row.artist || '').trim()} ${(row.title || '').trim()}`.trim();
-    if (!q || q.length < 3) {
+    if (!q || q.length < 2) {
       setSuggestions(s => ({ ...s, [idx]: [] }));
       return;
     }
