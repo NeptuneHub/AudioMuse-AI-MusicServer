@@ -1,5 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { searchMusic } from '../api';
+import Plotly from 'plotly.js-dist-min';
 
 const defaultRow = () => ({ artist: '', title: '', id: '', op: 'ADD' });
 
@@ -11,6 +12,9 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay }) {
   const [results, setResults] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewData, setPreviewData] = useState(null);
+  const previewPlotRef = useRef(null);
 
   const handleRowChange = (idx, field, value) => {
     setRows(rows => rows.map((row, i) => i === idx ? { ...row, [field]: value } : row));
@@ -54,6 +58,161 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay }) {
 
   const addRow = () => setRows([...rows, defaultRow()]);
   const removeRow = idx => setRows(rows => rows.filter((_, i) => i !== idx));
+
+  const handlePreview = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const rowsCopy = [...rows];
+      for (let i = 0; i < rowsCopy.length; i++) {
+        const r = rowsCopy[i];
+        if (!r.id) {
+          const q = `${(r.artist || '').trim()} ${(r.title || '').trim()}`.trim();
+          if (q && q.length >= 3) {
+            try {
+              const data = await searchMusic(q, { songCount: 5 });
+              const list = data.searchResult2?.song || data.searchResult3?.song || [];
+              const arr = Array.isArray(list) ? list : [list].filter(Boolean);
+              if (arr.length === 1) {
+                const item = arr[0];
+                rowsCopy[i] = { ...r, id: item.id || item.item_id };
+              }
+            } catch (err) {
+              console.warn('Auto-resolve search failed for row', i, err);
+            }
+          }
+        }
+      }
+      const items = rowsCopy.filter(r => r.id).map(r => ({ id: r.id, op: r.op }));
+      if (!items.some(i => i.op === 'ADD')) {
+        setError('Please include at least one ADD song.');
+        setLoading(false);
+        return;
+      }
+      const payload = {
+        items,
+        n: nResults,
+        temperature,
+        subtract_distance: subtractDistance,
+        preview: true
+      };
+      const resp = await fetch('/api/alchemy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) {
+        setError(data.error || 'Preview failed');
+        setLoading(false);
+        return;
+      }
+      setPreviewData(data);
+      setShowPreview(true);
+    } catch (err) {
+      setError('Preview request failed');
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (showPreview && previewData && previewPlotRef.current) {
+      const fullLabel = (item) => (item.title ? `${item.title} — ${item.author || item.artist || ''}` : item.item_id);
+      
+      const traces = [];
+      
+      // Removed (filtered out) - Gray X
+      if (previewData.filtered_out && previewData.filtered_out.length) {
+        traces.push({
+          x: previewData.filtered_out.map(p => p.embedding_2d ? p.embedding_2d[0] : 0),
+          y: previewData.filtered_out.map(p => p.embedding_2d ? p.embedding_2d[1] : 0),
+          text: previewData.filtered_out.map(fullLabel),
+          mode: 'markers',
+          type: 'scatter',
+          name: 'Removed (filtered out)',
+          marker: { size: 5, color: 'rgba(156, 163, 175, 0.5)', symbol: 'x', line: { width: 2 } }
+        });
+      }
+      
+      // Kept (results) - Blue circles
+      if (previewData.results && previewData.results.length) {
+        traces.push({
+          x: previewData.results.map(p => p.embedding_2d ? p.embedding_2d[0] : 0),
+          y: previewData.results.map(p => p.embedding_2d ? p.embedding_2d[1] : 0),
+          text: previewData.results.map(fullLabel),
+          mode: 'markers',
+          type: 'scatter',
+          name: 'Kept (results)',
+          marker: { size: 6, color: 'rgba(59, 130, 246, 0.7)', line: { width: 1, color: 'rgba(37, 99, 235, 1)' } }
+        });
+      }
+      
+      // ADD Centroid - Yellow/Green triangle
+      if (previewData.add_centroid_2d) {
+        traces.push({
+          x: [previewData.add_centroid_2d[0]],
+          y: [previewData.add_centroid_2d[1]],
+          text: ['ADD Centroid'],
+          mode: 'markers',
+          type: 'scatter',
+          name: 'Add Centroid',
+          marker: { size: 15, color: 'rgba(253, 224, 71, 1)', symbol: 'triangle-up', line: { width: 2, color: 'rgba(234, 179, 8, 1)' } }
+        });
+      }
+      
+      // SUBTRACT Centroid - Red triangle
+      if (previewData.subtract_centroid_2d) {
+        traces.push({
+          x: [previewData.subtract_centroid_2d[0]],
+          y: [previewData.subtract_centroid_2d[1]],
+          text: ['SUBTRACT Centroid'],
+          mode: 'markers',
+          type: 'scatter',
+          name: 'Subtract Centroid',
+          marker: { size: 15, color: 'rgba(239, 68, 68, 1)', symbol: 'triangle-down', line: { width: 2, color: 'rgba(159, 18, 57, 1)' } }
+        });
+      }
+      
+      // Selected ADD songs - Green circles
+      if (previewData.add_points && previewData.add_points.length) {
+        traces.push({
+          x: previewData.add_points.map(p => p.embedding_2d ? p.embedding_2d[0] : 0),
+          y: previewData.add_points.map(p => p.embedding_2d ? p.embedding_2d[1] : 0),
+          text: previewData.add_points.map(fullLabel),
+          mode: 'markers',
+          type: 'scatter',
+          name: 'Selected ADD song(s)',
+          marker: { size: 12, color: 'rgba(34, 197, 94, 0.9)', line: { width: 2, color: 'rgba(22, 163, 74, 1)' } }
+        });
+      }
+      
+      // Selected SUBTRACT songs - Red circles
+      if (previewData.sub_points && previewData.sub_points.length) {
+        traces.push({
+          x: previewData.sub_points.map(p => p.embedding_2d ? p.embedding_2d[0] : 0),
+          y: previewData.sub_points.map(p => p.embedding_2d ? p.embedding_2d[1] : 0),
+          text: previewData.sub_points.map(fullLabel),
+          mode: 'markers',
+          type: 'scatter',
+          name: 'Selected SUBTRACT song(s)',
+          marker: { size: 10, color: 'rgba(239, 68, 68, 0.9)', line: { width: 2, color: 'rgba(220, 38, 38, 1)' } }
+        });
+      }
+      
+      const layout = {
+        hovermode: 'closest',
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { t: 20, b: 40, l: 40, r: 20 },
+        paper_bgcolor: '#1f2937',
+        plot_bgcolor: '#111827',
+        font: { color: '#d1d5db' },
+        xaxis: { title: 'Dimension 1', gridcolor: '#374151' },
+        yaxis: { title: 'Dimension 2', gridcolor: '#374151' }
+      };
+      
+      Plotly.newPlot(previewPlotRef.current, traces, layout, { responsive: true });
+    }
+  }, [showPreview, previewData]);
 
   const handleSubmit = async e => {
     e.preventDefault();
@@ -178,9 +337,26 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay }) {
             </div>
           </div>
         </fieldset>
-        <button type="submit" className="border-2 border-green-500 text-green-400 bg-green-500/10 hover:bg-green-500/20 hover:scale-105 transition-all px-6 py-2 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100" disabled={loading}>{loading ? 'Running...' : 'Run Alchemy'}</button>
+        <div className="flex gap-3">
+          <button type="button" onClick={handlePreview} className="border-2 border-blue-500 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 hover:scale-105 transition-all px-6 py-2 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100" disabled={loading}>{loading ? 'Loading...' : 'Preview'}</button>
+          <button type="submit" className="border-2 border-green-500 text-green-400 bg-green-500/10 hover:bg-green-500/20 hover:scale-105 transition-all px-6 py-2 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100" disabled={loading}>{loading ? 'Running...' : 'Run Alchemy'}</button>
+        </div>
       </form>
       {error && <div className="text-red-400 mt-2">{error}</div>}
+      
+      {showPreview && previewData && (
+        <div className="mt-6 border border-gray-700 rounded-lg p-4 bg-gray-800">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold text-teal-300">Preview Map</h2>
+            <button onClick={() => setShowPreview(false)} className="text-gray-400 hover:text-white text-2xl">&times;</button>
+          </div>
+          <div ref={previewPlotRef} style={{ width: '100%', height: '500px' }}></div>
+          <div className="text-center text-sm text-gray-400 mt-2">
+            Projection Method: {previewData.projection || 'pca'}
+          </div>
+        </div>
+      )}
+      
       {results && (
         <div className="mt-6">
           <h2 className="text-xl font-semibold mb-2 text-teal-300">Results</h2>
