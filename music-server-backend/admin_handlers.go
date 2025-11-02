@@ -33,7 +33,14 @@ func scanSingleLibrary(pathId int) {
 	// Initialize the scan counter for single path scan
 	db.Exec("UPDATE scan_status SET songs_added = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
 
-	songsAdded := processPath(path)
+	scannedPaths := make(map[string]bool)
+	songsAdded := processPathWithTracking(path, &scannedPaths)
+
+	// Remove songs that are in this library path but weren't found during scan
+	if !isScanCancelled.Load() {
+		removeMissingSongsFromPath(path, scannedPaths)
+	}
+
 	updateSongCountForPath(path, pathId)
 	db.Exec("UPDATE library_paths SET last_scan_ended = ? WHERE id = ?", time.Now().Format(time.RFC3339), pathId)
 
@@ -81,9 +88,21 @@ func scanAllLibraries() {
 			log.Println("Scan All was cancelled, stopping further processing.")
 			break
 		}
-		processPathWithRunningTotal(p.Path, &totalSongsAdded)
+		scannedPaths := make(map[string]bool)
+		processPathWithRunningTotalAndTracking(p.Path, &totalSongsAdded, &scannedPaths)
+
+		// Remove songs that are in this library path but weren't found during scan
+		if !isScanCancelled.Load() {
+			removeMissingSongsFromPath(p.Path, scannedPaths)
+		}
+
 		updateSongCountForPath(p.Path, p.ID)
 		db.Exec("UPDATE library_paths SET last_scan_ended = ? WHERE id = ?", time.Now().Format(time.RFC3339), p.ID)
+	}
+
+	// After scanning all paths, remove orphaned songs (songs that don't belong to any current library path)
+	if !isScanCancelled.Load() {
+		removeOrphanedSongs(pathsToScan)
 	}
 
 	log.Printf("Total new songs added in this run across all paths: %d.", totalSongsAdded)
@@ -197,6 +216,130 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 				if rowsAffected > 0 {
 					*totalSongsAdded++
 					// Update scan status in real-time with the cumulative total
+					db.Exec("UPDATE scan status SET songs_added = ?, last_update_time = ? WHERE id = 1",
+						*totalSongsAdded, time.Now().Format(time.RFC3339))
+				}
+			}
+		}
+		return nil
+	})
+
+	if walkErr != nil {
+		log.Printf("Stopped walking path %s due to error: %v", scanPath, walkErr)
+	}
+}
+
+func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int64 {
+	var songsAdded int64
+	log.Printf("Processing path with tracking: %s", scanPath)
+
+	walkErr := filepath.WalkDir(scanPath, func(path string, d os.DirEntry, err error) error {
+		if isScanCancelled.Load() {
+			return errors.New("scan cancelled by user")
+		}
+		if err != nil {
+			log.Printf("Error accessing path %q: %v\n", path, err)
+			return nil
+		}
+
+		if !d.IsDir() {
+			ext := strings.ToLower(filepath.Ext(path))
+			supportedExts := map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".ogg": true}
+
+			if supportedExts[ext] {
+				// Track this file path
+				(*scannedPaths)[path] = true
+
+				file, err := os.Open(path)
+				if err != nil {
+					log.Printf("Error opening file %s: %v", path, err)
+					return nil
+				}
+				defer file.Close()
+
+				meta, err := tag.ReadFrom(file)
+				if err != nil {
+					log.Printf("Error reading tags from %s: %v", path, err)
+					return nil
+				}
+
+				currentTime := time.Now().Format(time.RFC3339)
+				genre := meta.Genre()
+				if genre == "" {
+					genre = "Unknown"
+				}
+				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path, genre, date_added, date_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+					meta.Title(), meta.Artist(), meta.Album(), path, genre, currentTime, currentTime)
+				if err != nil {
+					log.Printf("Error inserting song from %s into DB: %v", path, err)
+					return nil
+				}
+
+				rowsAffected, _ := res.RowsAffected()
+				if rowsAffected > 0 {
+					songsAdded++
+					db.Exec("UPDATE scan_status SET songs_added = ?, last_update_time = ? WHERE id = 1",
+						songsAdded, time.Now().Format(time.RFC3339))
+				}
+			}
+		}
+		return nil
+	})
+
+	if walkErr != nil {
+		log.Printf("Stopped walking path %s due to error: %v", scanPath, walkErr)
+	}
+	return songsAdded
+}
+
+func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *int64, scannedPaths *map[string]bool) {
+	log.Printf("Processing path with running total and tracking: %s", scanPath)
+
+	walkErr := filepath.WalkDir(scanPath, func(path string, d os.DirEntry, err error) error {
+		if isScanCancelled.Load() {
+			return errors.New("scan cancelled by user")
+		}
+		if err != nil {
+			log.Printf("Error accessing path %q: %v\n", path, err)
+			return nil
+		}
+
+		if !d.IsDir() {
+			ext := strings.ToLower(filepath.Ext(path))
+			supportedExts := map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".ogg": true}
+
+			if supportedExts[ext] {
+				// Track this file path
+				(*scannedPaths)[path] = true
+
+				file, err := os.Open(path)
+				if err != nil {
+					log.Printf("Error opening file %s: %v", path, err)
+					return nil
+				}
+				defer file.Close()
+
+				meta, err := tag.ReadFrom(file)
+				if err != nil {
+					log.Printf("Error reading tags from %s: %v", path, err)
+					return nil
+				}
+
+				currentTime := time.Now().Format(time.RFC3339)
+				genre := meta.Genre()
+				if genre == "" {
+					genre = "Unknown"
+				}
+				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path, genre, date_added, date_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+					meta.Title(), meta.Artist(), meta.Album(), path, genre, currentTime, currentTime)
+				if err != nil {
+					log.Printf("Error inserting song from %s into DB: %v", path, err)
+					return nil
+				}
+
+				rowsAffected, _ := res.RowsAffected()
+				if rowsAffected > 0 {
+					*totalSongsAdded++
 					db.Exec("UPDATE scan_status SET songs_added = ?, last_update_time = ? WHERE id = 1",
 						*totalSongsAdded, time.Now().Format(time.RFC3339))
 				}
@@ -210,6 +353,141 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 	}
 }
 
+func removeMissingSongsFromPath(libraryPath string, scannedPaths map[string]bool) {
+	// Normalize path for comparison
+	searchPath := libraryPath
+	if !strings.HasSuffix(searchPath, "/") && !strings.HasSuffix(searchPath, "\\") {
+		searchPath += string(filepath.Separator)
+	}
+	likePath := searchPath + "%"
+
+	log.Printf("Checking for missing songs in path: %s", libraryPath)
+
+	// Get all songs from database that belong to this library path
+	rows, err := db.Query("SELECT id, path FROM songs WHERE path LIKE ?", likePath)
+	if err != nil {
+		log.Printf("Error querying songs for cleanup: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	var songsToDelete []int
+	for rows.Next() {
+		var songID int
+		var songPath string
+		if err := rows.Scan(&songID, &songPath); err != nil {
+			log.Printf("Error scanning song row for cleanup: %v", err)
+			continue
+		}
+
+		// If this song's path wasn't in our scanned paths, it no longer exists
+		if !scannedPaths[songPath] {
+			songsToDelete = append(songsToDelete, songID)
+			log.Printf("Song file not found, will delete: %s (ID: %d)", songPath, songID)
+		}
+	}
+
+	// Delete missing songs
+	if len(songsToDelete) > 0 {
+		log.Printf("Removing %d missing songs from database", len(songsToDelete))
+
+		for _, songID := range songsToDelete {
+			// Remove from playlists
+			_, err := db.Exec("DELETE FROM playlist_songs WHERE song_id = ?", songID)
+			if err != nil {
+				log.Printf("Error removing song %d from playlists: %v", songID, err)
+			}
+
+			// Remove from starred songs
+			_, err = db.Exec("DELETE FROM starred_songs WHERE song_id = ?", songID)
+			if err != nil {
+				log.Printf("Error removing song %d from starred: %v", songID, err)
+			}
+
+			// Remove the song itself
+			_, err = db.Exec("DELETE FROM songs WHERE id = ?", songID)
+			if err != nil {
+				log.Printf("Error deleting song %d: %v", songID, err)
+			}
+		}
+
+		log.Printf("Successfully removed %d missing songs", len(songsToDelete))
+	} else {
+		log.Printf("No missing songs found in path: %s", libraryPath)
+	}
+}
+
+func removeOrphanedSongs(activePaths []LibraryPath) {
+	log.Println("Checking for orphaned songs (songs not belonging to any current library path)...")
+
+	// Get all songs from database
+	rows, err := db.Query("SELECT id, path FROM songs")
+	if err != nil {
+		log.Printf("Error querying all songs for orphan cleanup: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	var orphanedSongs []int
+	for rows.Next() {
+		var songID int
+		var songPath string
+		if err := rows.Scan(&songID, &songPath); err != nil {
+			log.Printf("Error scanning song row for orphan cleanup: %v", err)
+			continue
+		}
+
+		// Check if this song belongs to any active library path
+		belongsToActiveLibrary := false
+		for _, libraryPath := range activePaths {
+			// Normalize paths for comparison (handle both / and \ separators)
+			normalizedLibPath := filepath.Clean(libraryPath.Path)
+			normalizedSongPath := filepath.Clean(songPath)
+
+			// Check if song path starts with library path
+			if strings.HasPrefix(normalizedSongPath, normalizedLibPath) {
+				belongsToActiveLibrary = true
+				break
+			}
+		}
+
+		// If song doesn't belong to any active library, mark for deletion
+		if !belongsToActiveLibrary {
+			orphanedSongs = append(orphanedSongs, songID)
+			log.Printf("Orphaned song found (no matching library path): %s (ID: %d)", songPath, songID)
+		}
+	}
+
+	// Delete orphaned songs
+	if len(orphanedSongs) > 0 {
+		log.Printf("Removing %d orphaned songs from database", len(orphanedSongs))
+
+		for _, songID := range orphanedSongs {
+			// Remove from playlists
+			_, err := db.Exec("DELETE FROM playlist_songs WHERE song_id = ?", songID)
+			if err != nil {
+				log.Printf("Error removing orphaned song %d from playlists: %v", songID, err)
+			}
+
+			// Remove from starred songs
+			_, err = db.Exec("DELETE FROM starred_songs WHERE song_id = ?", songID)
+			if err != nil {
+				log.Printf("Error removing orphaned song %d from starred: %v", songID, err)
+			}
+
+			// Remove the song itself
+			_, err = db.Exec("DELETE FROM songs WHERE id = ?", songID)
+			if err != nil {
+				log.Printf("Error deleting orphaned song %d: %v", songID, err)
+			}
+		}
+
+		log.Printf("Successfully removed %d orphaned songs", len(orphanedSongs))
+	} else {
+		log.Println("No orphaned songs found")
+	}
+}
+
 func updateSongCountForPath(path string, pathId int) {
 	var count int
 	// Ensure path ends with / for proper pattern matching
@@ -218,7 +496,7 @@ func updateSongCountForPath(path string, pathId int) {
 		searchPath += "/"
 	}
 	likePath := searchPath + "%"
-	
+
 	log.Printf("DEBUG: Counting songs for path '%s' using pattern '%s'", path, likePath)
 	err := db.QueryRow("SELECT COUNT(*) FROM songs WHERE path LIKE ?", likePath).Scan(&count)
 	if err != nil {
