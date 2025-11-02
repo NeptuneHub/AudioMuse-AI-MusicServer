@@ -176,42 +176,45 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
         }
     }, [queue]);
     
-    // Reset visible count and scroll to current song when queue changes or view is opened
+    // Reset visible count when opened
     useEffect(() => {
         if (isOpen) {
             setVisibleCount(50);
-            
-            // Scroll to currently playing song after a short delay to ensure DOM is ready
+        }
+    }, [isOpen]);
+    
+    // Scroll to currently playing song whenever it changes or when queue is opened
+    useEffect(() => {
+        if (isOpen && queueListRef.current && currentIndex >= 0 && queue.length > 0) {
+            // Short delay to ensure DOM is ready
             setTimeout(() => {
-                if (queueListRef.current && currentIndex >= 0 && queue.length > 0) {
-                    // Find the currently playing song element
-                    const listElement = queueListRef.current;
-                    const songElements = listElement.querySelectorAll('li');
+                const listElement = queueListRef.current;
+                if (!listElement) return;
+                
+                const songElements = listElement.querySelectorAll('li');
+                
+                if (songElements[currentIndex]) {
+                    // Check if the list actually has scroll (avoid unnecessary scrolling)
+                    const hasScroll = listElement.scrollHeight > listElement.clientHeight;
                     
-                    if (songElements[currentIndex]) {
-                        // Check if the list actually has scroll (avoid unnecessary scrolling)
-                        const hasScroll = listElement.scrollHeight > listElement.clientHeight;
+                    if (hasScroll) {
+                        // Scroll to position the current song near the top
+                        const songElement = songElements[currentIndex];
                         
-                        if (hasScroll) {
-                            // Scroll to center the current song
-                            const songElement = songElements[currentIndex];
-                            const songRect = songElement.getBoundingClientRect();
-                            
-                            // Calculate the offset to center the song in the visible area
-                            const scrollOffset = songElement.offsetTop - (listElement.clientHeight / 2) + (songRect.height / 2);
-                            
-                            listElement.scrollTo({
-                                top: scrollOffset,
-                                behavior: 'smooth'
-                            });
-                            
-                            console.log('Scrolled PlayQueue to song index', currentIndex);
-                        }
+                        // Position the playing song near the top (with some offset for visibility)
+                        const scrollOffset = songElement.offsetTop - 80; // 80px from top
+                        
+                        listElement.scrollTo({
+                            top: Math.max(0, scrollOffset), // Don't scroll to negative values
+                            behavior: 'smooth'
+                        });
+                        
+                        console.log('Scrolled PlayQueue to currently playing song at index', currentIndex);
                     }
                 }
             }, 100);
         }
-    }, [isOpen, queue, currentIndex]);
+    }, [isOpen, currentIndex, queue.length]);
 
     const songsToDisplay = queue.slice(0, visibleCount);
     const hasMore = visibleCount < queue.length;
