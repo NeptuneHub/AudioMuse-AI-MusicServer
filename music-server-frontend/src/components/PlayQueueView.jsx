@@ -176,16 +176,36 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
         }
     }, [queue]);
     
-    // Reset visible count when opened
+    // Track if we should auto-scroll (only when opening or current song changes, not when manually scrolling)
+    const shouldAutoScrollRef = useRef(false);
+    const prevCurrentIndexRef = useRef(currentIndex);
+    
+    // Reset visible count when opened and ensure current song is loaded
     useEffect(() => {
         if (isOpen) {
-            setVisibleCount(50);
+            // Load at least enough songs to include the current playing song + buffer
+            const minVisible = Math.max(50, currentIndex + 20);
+            setVisibleCount(minVisible);
+            
+            // Enable auto-scroll when opening OR when current song changes
+            if (prevCurrentIndexRef.current !== currentIndex) {
+                shouldAutoScrollRef.current = true;
+                prevCurrentIndexRef.current = currentIndex;
+            } else {
+                shouldAutoScrollRef.current = true; // First open
+            }
         }
-    }, [isOpen]);
+    }, [isOpen, currentIndex]);
     
-    // Scroll to currently playing song whenever it changes or when queue is opened
+    // Scroll to currently playing song only when it changes or queue opens (not when visibleCount increases from manual scrolling)
     useEffect(() => {
-        if (isOpen && queueListRef.current && currentIndex >= 0 && queue.length > 0) {
+        if (isOpen && shouldAutoScrollRef.current && queueListRef.current && currentIndex >= 0 && queue.length > 0) {
+            // Ensure the current song is in the rendered list
+            if (currentIndex >= visibleCount) {
+                setVisibleCount(currentIndex + 20);
+                return; // Wait for next render cycle after visibleCount updates
+            }
+            
             // Short delay to ensure DOM is ready
             setTimeout(() => {
                 const listElement = queueListRef.current;
@@ -194,18 +214,28 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                 const songElements = listElement.querySelectorAll('li');
                 
                 if (songElements[currentIndex]) {
-                    // Use scrollIntoView for accurate positioning
-                    songElements[currentIndex].scrollIntoView({
+                    const targetElement = songElements[currentIndex];
+                    const totalSongs = queue.length;
+                    
+                    // For the last 6 songs, align to bottom; otherwise align to top
+                    const isLastSongs = currentIndex >= totalSongs - 6;
+                    
+                    targetElement.scrollIntoView({
                         behavior: 'smooth',
-                        block: 'start', // Align to the top of the container
+                        block: isLastSongs ? 'end' : 'start',
                         inline: 'nearest'
                     });
                     
-                    console.log('Scrolled PlayQueue to currently playing song at index', currentIndex);
+                    console.log(`Scrolled PlayQueue to song ${currentIndex + 1}/${totalSongs} - aligned to ${isLastSongs ? 'BOTTOM' : 'TOP'}`);
+                    
+                    // Disable auto-scroll after scrolling once
+                    shouldAutoScrollRef.current = false;
+                } else {
+                    console.warn(`Cannot scroll: song element ${currentIndex} not found. visibleCount=${visibleCount}, totalSongs=${queue.length}`);
                 }
             }, 150);
         }
-    }, [isOpen, currentIndex, queue.length]);
+    }, [isOpen, currentIndex, queue.length, visibleCount]);
 
     const songsToDisplay = queue.slice(0, visibleCount);
     const hasMore = visibleCount < queue.length;
