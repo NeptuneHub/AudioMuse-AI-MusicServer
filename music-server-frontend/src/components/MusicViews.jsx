@@ -316,7 +316,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         };
 
         fetcher();
-    }, [filter, searchTerm, songs.length, allSongs, isLoading, hasMore, selectedGenre]);
+    }, [filter, searchTerm, songs.length, allSongs, isLoading, hasMore, selectedGenre, credentials?.username]);
 
     useEffect(() => {
         if (songs.length === 0 && hasMore && (searchTerm.length >= 3 || filter || selectedGenre)) {
