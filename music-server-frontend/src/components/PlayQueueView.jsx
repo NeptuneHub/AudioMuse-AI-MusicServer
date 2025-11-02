@@ -194,25 +194,16 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                 const songElements = listElement.querySelectorAll('li');
                 
                 if (songElements[currentIndex]) {
-                    // Check if the list actually has scroll (avoid unnecessary scrolling)
-                    const hasScroll = listElement.scrollHeight > listElement.clientHeight;
+                    // Use scrollIntoView for accurate positioning
+                    songElements[currentIndex].scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start', // Align to the top of the container
+                        inline: 'nearest'
+                    });
                     
-                    if (hasScroll) {
-                        // Scroll to position the current song near the top
-                        const songElement = songElements[currentIndex];
-                        
-                        // Position the playing song near the top (with some offset for visibility)
-                        const scrollOffset = songElement.offsetTop - 80; // 80px from top
-                        
-                        listElement.scrollTo({
-                            top: Math.max(0, scrollOffset), // Don't scroll to negative values
-                            behavior: 'smooth'
-                        });
-                        
-                        console.log('Scrolled PlayQueue to currently playing song at index', currentIndex);
-                    }
+                    console.log('Scrolled PlayQueue to currently playing song at index', currentIndex);
                 }
-            }, 100);
+            }, 150);
         }
     }, [isOpen, currentIndex, queue.length]);
 
