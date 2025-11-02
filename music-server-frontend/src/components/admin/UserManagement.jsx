@@ -29,8 +29,8 @@ const UserFormModal = ({ onClose, onSubmit, title }) => {
                     <label htmlFor="isAdminCheck" className="ml-2 text-sm font-medium text-gray-300">Is Admin?</label>
                 </div>
                 <div className="flex flex-col sm:flex-row justify-end space-y-2 sm:space-y-0 sm:space-x-4">
-                    <button type="button" onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
-                    <button type="submit" className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Save</button>
+                    <button type="button" onClick={onClose} className="border-2 border-gray-500 text-gray-400 bg-gray-500/10 hover:bg-gray-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg">Cancel</button>
+                    <button type="submit" className="border-2 border-teal-500 text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg">Save</button>
                 </div>
             </form>
         </Modal>
@@ -58,8 +58,8 @@ const PasswordEditModal = ({ user, onClose, onSubmit }) => {
 					/>
 				</div>
                 <div className="flex flex-col sm:flex-row justify-end space-y-2 sm:space-y-0 sm:space-x-4">
-                    <button type="button" onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
-                    <button type="submit" className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Update Password</button>
+                    <button type="button" onClick={onClose} className="border-2 border-gray-500 text-gray-400 bg-gray-500/10 hover:bg-gray-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg">Cancel</button>
+                    <button type="submit" className="border-2 border-teal-500 text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg">Update Password</button>
                 </div>
 			</form>
 		</Modal>
@@ -138,7 +138,7 @@ function UserManagement() {
 		<div className="bg-gray-800 p-4 sm:p-6 rounded-lg">
 			<div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 space-y-2 sm:space-y-0">
 				<h3 className="text-xl font-bold">User Management</h3>
-				<button onClick={() => setIsCreatingUser(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded">Create User</button>
+				<button onClick={() => setIsCreatingUser(true)} className="border-2 border-purple-500 text-purple-400 bg-purple-500/10 hover:bg-purple-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg">Create User</button>
 			</div>
 			{error && <p className="text-red-500 mb-4 p-3 bg-red-900/50 rounded">{error}</p>}
             {successMessage && <p className="text-green-400 mb-4 p-3 bg-green-900/50 rounded">{successMessage}</p>}
@@ -157,8 +157,8 @@ function UserManagement() {
 								<td className="px-6 py-4 font-medium text-white">{user.username}</td>
 								<td className="px-6 py-4">{user.is_admin ? 'Yes' : 'No'}</td>
 								<td className="px-6 py-4 text-right space-x-2 whitespace-nowrap">
-									<button onClick={() => setEditingUser(user)} className="font-medium text-blue-500 hover:underline">Edit Password</button>
-									<button onClick={() => handleDelete(user.username)} className="font-medium text-red-500 hover:underline">Delete</button>
+									<button onClick={() => setEditingUser(user)} className="border-2 border-blue-500 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 hover:scale-105 transition-all px-2 py-1 rounded-lg text-sm">Edit Password</button>
+									<button onClick={() => handleDelete(user.username)} className="border-2 border-red-500 text-red-400 bg-red-500/10 hover:bg-red-500/20 hover:scale-105 transition-all px-2 py-1 rounded-lg text-sm">Delete</button>
 								</td>
 							</tr>
 						))}

@@ -79,7 +79,7 @@ function App() {
 	};
 
 	return (
-		<div className="bg-gray-900 text-white min-h-screen font-sans">
+		<div className="bg-dark-800 text-white min-h-screen font-sans">
 			{credentials ? (
 				<Dashboard onLogout={handleLogout} isAdmin={isAdmin} credentials={credentials} />
 			) : (

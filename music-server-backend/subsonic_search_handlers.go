@@ -22,11 +22,6 @@ func subsonicSearch2(c *gin.Context) {
 	_ = c.MustGet("user") // Auth is handled by middleware
 
 	query := c.Query("query")
-	if query == "" {
-		// Return empty result instead of error for empty query
-		subsonicRespond(c, newSubsonicResponse(&SubsonicSearchResult2{}))
-		return
-	}
 
 	artistCount, _ := strconv.Atoi(c.DefaultQuery("artistCount", "20"))
 	artistOffset, _ := strconv.Atoi(c.DefaultQuery("artistOffset", "0"))
@@ -40,14 +35,24 @@ func subsonicSearch2(c *gin.Context) {
 
 	// --- Enhanced Artist Search Logic ---
 	if artistCount > 0 {
-		var artistConditions []string
+		var artistQuery string
 		var artistArgs []interface{}
-		for _, word := range searchWords {
-			artistConditions = append(artistConditions, "artist LIKE ?")
-			artistArgs = append(artistArgs, "%"+word+"%")
+
+		if query == "" || query == "*" {
+			// Return all artists with pagination when no search query or wildcard
+			artistQuery = "SELECT DISTINCT artist FROM songs WHERE artist != '' ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
+			artistArgs = append(artistArgs, artistCount, artistOffset)
+		} else {
+			// Search artists with query
+			var artistConditions []string
+			for _, word := range searchWords {
+				artistConditions = append(artistConditions, "artist LIKE ?")
+				artistArgs = append(artistArgs, "%"+word+"%")
+			}
+			artistArgs = append(artistArgs, artistCount, artistOffset)
+			artistQuery = "SELECT DISTINCT artist FROM songs WHERE " + strings.Join(artistConditions, " AND ") + " AND artist != '' ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
 		}
-		artistArgs = append(artistArgs, artistCount, artistOffset)
-		artistQuery := "SELECT DISTINCT artist FROM songs WHERE " + strings.Join(artistConditions, " AND ") + " ORDER BY artist LIMIT ? OFFSET ?"
+
 		artistRows, err := db.Query(artistQuery, artistArgs...)
 		if err != nil {
 			log.Printf("[ERROR] subsonicSearch2: Artist query failed: %v", err)

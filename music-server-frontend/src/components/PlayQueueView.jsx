@@ -99,14 +99,14 @@ const SaveAsPlaylistModal = ({ isOpen, onClose, queue, onSuccess }) => {
                     <button 
                         onClick={onClose} 
                         disabled={isCreating}
-                        className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500"
+                        className="border-2 border-gray-500 text-gray-400 bg-gray-500/10 hover:bg-gray-500/20 hover:scale-105 transition-all rounded-lg font-bold py-2 px-4 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                     >
                         Cancel
                     </button>
                     <button 
                         onClick={handleCreatePlaylist}
                         disabled={isCreating || !playlistName.trim()}
-                        className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500"
+                        className="border-2 border-teal-500 text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 hover:scale-105 transition-all rounded-lg font-bold py-2 px-4 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                     >
                         {isCreating ? 'Creating...' : 'Create Playlist'}
                     </button>
@@ -139,13 +139,13 @@ const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, on
             onClick={(e) => e.stopPropagation()}
         >
             <div className="py-1">
-                <button onClick={() => { onSetStart(song.id); onClose(); }} className="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600">Set as Path start</button>
-                <button onClick={() => { onSetEnd(song.id); onClose(); }} className="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600">Set as Path end</button>
-                <button onClick={() => { onAddToPlaylist(song); onClose(); }} className="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600">Add to Playlist</button>
+                <button onClick={() => { onSetStart(song.id); onClose(); }} className="block w-full text-left px-4 py-2 text-sm border-2 border-blue-500 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 transition-all rounded-lg mb-1">Set as Path start</button>
+                <button onClick={() => { onSetEnd(song.id); onClose(); }} className="block w-full text-left px-4 py-2 text-sm border-2 border-purple-500 text-purple-400 bg-purple-500/10 hover:bg-purple-500/20 transition-all rounded-lg mb-1">Set as Path end</button>
+                <button onClick={() => { onAddToPlaylist(song); onClose(); }} className="block w-full text-left px-4 py-2 text-sm border-2 border-teal-500 text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 transition-all rounded-lg mb-1">Add to Playlist</button>
                 <button
                     onClick={() => { onInstantMix(song); onClose(); }}
                     disabled={!audioMuseUrl}
-                    className="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed"
+                    className="block w-full text-left px-4 py-2 text-sm border-2 border-yellow-500 text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20 transition-all rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Instant Mix
                 </button>
@@ -176,12 +176,42 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
         }
     }, [queue]);
     
-    // Reset visible count when queue changes or view is opened
+    // Reset visible count and scroll to current song when queue changes or view is opened
     useEffect(() => {
         if (isOpen) {
             setVisibleCount(50);
+            
+            // Scroll to currently playing song after a short delay to ensure DOM is ready
+            setTimeout(() => {
+                if (queueListRef.current && currentIndex >= 0 && queue.length > 0) {
+                    // Find the currently playing song element
+                    const listElement = queueListRef.current;
+                    const songElements = listElement.querySelectorAll('li');
+                    
+                    if (songElements[currentIndex]) {
+                        // Check if the list actually has scroll (avoid unnecessary scrolling)
+                        const hasScroll = listElement.scrollHeight > listElement.clientHeight;
+                        
+                        if (hasScroll) {
+                            // Scroll to center the current song
+                            const songElement = songElements[currentIndex];
+                            const songRect = songElement.getBoundingClientRect();
+                            
+                            // Calculate the offset to center the song in the visible area
+                            const scrollOffset = songElement.offsetTop - (listElement.clientHeight / 2) + (songRect.height / 2);
+                            
+                            listElement.scrollTo({
+                                top: scrollOffset,
+                                behavior: 'smooth'
+                            });
+                            
+                            console.log('Scrolled PlayQueue to song index', currentIndex);
+                        }
+                    }
+                }
+            }, 100);
         }
-    }, [isOpen, queue]);
+    }, [isOpen, queue, currentIndex]);
 
     const songsToDisplay = queue.slice(0, visibleCount);
     const hasMore = visibleCount < queue.length;
@@ -250,7 +280,7 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                         <button 
                             onClick={() => setShowSaveAsPlaylist(true)}
                             disabled={queue.length === 0}
-                            className="text-xs sm:text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-2 sm:px-3 rounded disabled:bg-gray-500 disabled:cursor-not-allowed"
+                            className="text-xs sm:text-sm border-2 border-green-500 text-green-400 bg-green-500/10 hover:bg-green-500/20 hover:scale-105 transition-all rounded-lg font-bold py-1 px-2 sm:px-3 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                             title="Save all songs in queue as a new playlist"
                         >
                             Save
@@ -264,11 +294,11 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                                 // Minimal check: onCreateSongPath may depend on server config; call and let backend handle errors
                                 handleCreatePath();
                             }}
-                            className="text-xs sm:text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1 px-2 sm:px-3 rounded"
+                            className="text-xs sm:text-sm border-2 border-indigo-500 text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 hover:scale-105 transition-all rounded-lg font-bold py-1 px-2 sm:px-3"
                          >
                             Path
                         </button>
-                         <button onClick={onClearQueue} className="text-xs sm:text-sm bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-2 sm:px-3 rounded">
+                         <button onClick={onClearQueue} className="text-xs sm:text-sm border-2 border-red-500 text-red-400 bg-red-500/10 hover:bg-red-500/20 hover:scale-105 transition-all rounded-lg font-bold py-1 px-2 sm:px-3">
                             Clear
                         </button>
                         <button onClick={onClose} className="text-gray-400 hover:text-white p-1">
@@ -297,18 +327,14 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                             >
                                 <div className="flex items-center space-x-4 overflow-hidden">
                                     {isPlaying ? (
-                                        <button 
-                                            onClick={(e) => {e.stopPropagation(); onTogglePlayPause();}} 
-                                            className="flex-shrink-0 hover:scale-110 transition-transform"
-                                            title="Pause"
-                                        >
-                                            <svg className="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg>
-                                        </button>
+                                        <svg className="w-5 h-5 text-accent-400 flex-shrink-0 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path>
+                                        </svg>
                                     ) : (
                                         <span className="text-gray-400 w-5 text-center flex-shrink-0">{index + 1}</span>
                                     )}
                                     <div className="overflow-hidden">
-                                        <p className={`font-medium truncate ${isPlaying ? 'text-green-400' : 'text-white'}`}>{song.title}</p>
+                                        <p className={`font-medium truncate ${isPlaying ? 'text-accent-400' : 'text-white'}`}>{song.title}</p>
                                         <p className="text-sm text-gray-400 truncate">{song.artist}</p>
                                     </div>
                                 </div>

@@ -169,7 +169,7 @@ function AutoScanManagement({ onConfigChange }) {
                 </div>
             </div>
              <div className="mt-4 flex justify-end">
-                <button onClick={handleSave} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Save Settings</button>
+                <button onClick={handleSave} className="border-2 border-teal-500 text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg">Save Settings</button>
             </div>
             {message && <p className="text-green-400 mt-2">{message}</p>}
             {error && <p className="text-red-500 mt-2">{error}</p>}

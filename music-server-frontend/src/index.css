@@ -3,6 +3,32 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: #121212;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #282828;
+  border-radius: 6px;
+  border: 2px solid #121212;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #333333;
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #282828 #121212;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -10,4 +36,101 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #121212;
+  color: #ffffff;
+  overflow-x: hidden;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Glass morphism utility */
+.glass {
+  background: rgba(18, 18, 18, 0.8);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Animated gradient background */
+.gradient-animated {
+  background: linear-gradient(-45deg, #0a0a0a, #1a1a1a, #0d9488, #14b8a6);
+  background-size: 400% 400%;
+  animation: gradientShift 15s ease infinite;
+}
+
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Hover effect for cards */
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+}
+
+/* Skeleton loader */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    #1e1e1e 25%,
+    #282828 50%,
+    #1e1e1e 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Focus states for accessibility */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid #14b8a6;
+  outline-offset: 2px;
+}
+
+/* Custom button styles */
+.btn-primary {
+  @apply bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-6 rounded-lg transition-all duration-300 shadow-lg hover:shadow-glow;
+}
+
+.btn-secondary {
+  @apply bg-dark-700 hover:bg-dark-600 text-white font-semibold py-2 px-6 rounded-lg transition-all duration-300;
+}
+
+/* Mobile-friendly touch targets */
+@media (max-width: 768px) {
+  button, a {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Hide number input spinners */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* Smooth transitions for all interactive elements */
+button, a, input, select, textarea {
+  transition: all 0.2s ease;
 }

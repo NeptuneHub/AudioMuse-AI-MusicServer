@@ -41,6 +41,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     const [audioMuseUrl, setAudioMuseUrl] = useState('');
     const [selectedSongForPlaylist, setSelectedSongForPlaylist] = useState(null);
     const [mixMessage, setMixMessage] = useState('');
+    const [isAudioPlaying, setIsAudioPlaying] = useState(false);
     
     const currentView = useMemo(() => navigation[navigation.length - 1], [navigation]);
     const currentSong = useMemo(() => playQueue.length > 0 ? playQueue[currentTrackIndex] : null, [playQueue, currentTrackIndex]);
@@ -69,6 +70,29 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     useEffect(() => {
         window.scrollTo(0, 0);
     }, []);
+
+    // Track audio playing state
+    useEffect(() => {
+        const audio = document.querySelector('audio');
+        if (!audio) return;
+
+        const handlePlay = () => setIsAudioPlaying(true);
+        const handlePause = () => setIsAudioPlaying(false);
+        const handleEnded = () => setIsAudioPlaying(false);
+
+        audio.addEventListener('play', handlePlay);
+        audio.addEventListener('pause', handlePause);
+        audio.addEventListener('ended', handleEnded);
+
+        // Initialize state based on current audio state
+        setIsAudioPlaying(!audio.paused);
+
+        return () => {
+            audio.removeEventListener('play', handlePlay);
+            audio.removeEventListener('pause', handlePause);
+            audio.removeEventListener('ended', handleEnded);
+        };
+    }, [currentSong]); // Re-attach when song changes
 
     // Save navigation state to localStorage whenever it changes
     useEffect(() => {
@@ -247,63 +271,119 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     });
     
     // --- Navigation ---
-    const NavLink = ({ page, title, children }) => (
-         <button 
-            onClick={() => handleResetNavigation(page, title)} 
-            className={`w-full md:w-auto text-left px-2 lg:px-3 py-2 rounded font-semibold transition duration-300 text-sm lg:text-base ${currentView.page === page && navigation.length === 1 ? 'bg-teal-500 text-white' : 'text-gray-300 hover:bg-gray-700'}`}>
-            {children}
-        </button>
-    );
+    const NavLink = ({ page, title, children }) => {
+		const isActive = currentView.page === page && navigation.length === 1;
+		return (
+			<button 
+				onClick={() => handleResetNavigation(page, title)} 
+				className={`relative w-full md:w-auto text-left px-3 lg:px-4 py-2 rounded-lg font-semibold transition-all duration-300 text-sm lg:text-base ${
+					isActive 
+						? 'bg-gradient-accent text-white shadow-glow' 
+						: 'text-gray-300 hover:bg-dark-700 hover:text-white'
+				}`}
+			>
+				{children}
+				{isActive && (
+					<span className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-1/2 h-0.5 bg-accent-400"></span>
+				)}
+			</button>
+		);
+	};
 
 	return (
-		<div className="bg-gray-900 min-h-screen">
-			<nav className="bg-gray-800 shadow-md fixed top-0 left-0 right-0 z-20">
-				<div className="container mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
-					<h1 className="text-xl font-bold text-teal-400">AudioMuse-AI</h1>
+		<div className="bg-dark-800 min-h-screen">
+			{/* Enhanced Navigation Bar */}
+			<nav className="glass fixed top-0 left-0 right-0 z-20 border-b border-dark-600">
+				<div className="container mx-auto px-4 sm:px-6 py-2 sm:py-3 flex justify-between items-center">
+					{/* Title only */}
+					<h1 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-accent-400 to-accent-600 bg-clip-text text-transparent">
+						AudioMuse-AI
+					</h1>
 						
-                        <div className="hidden md:flex items-center space-x-1 lg:space-x-2">
-							<NavLink page="artists" title="Artists">Artists</NavLink>
-							<NavLink page="albums" title="All Albums">Albums</NavLink>
-                            <NavLink page="songs" title="Songs">Songs</NavLink>
-                            <NavLink page="alchemy" title="Alchemy">Alchemy</NavLink>
-                            <NavLink page="map" title="Map">Map</NavLink>
-							<NavLink page="playlists" title="Playlists">Playlists</NavLink>
-							{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
-							{/* Keyboard shortcuts help button */}
-							<button 
-								title="Keyboard Shortcuts: Space (Play/Pause), Ctrl+← (Previous), Ctrl+→ (Next), Ctrl+↑ (Vol+), Ctrl+↓ (Vol-)"
-								className="px-2 py-2 text-gray-400 hover:text-white transition-colors"
-							>
-								<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-								</svg>
-							</button>
-							<button onClick={onLogout} className="px-2 lg:px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold transition duration-300 text-sm lg:text-base">Logout</button>
-						</div>						<div className="md:hidden">
-							<button onClick={() => setIsMenuOpen(!isMenuOpen)} className="text-gray-300 hover:text-white focus:outline-none p-2 rounded-md">
-								 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
-							</button>
-						</div>
+					{/* Desktop Navigation */}
+					<div className="hidden md:flex items-center space-x-1 lg:space-x-2">
+						<NavLink page="artists" title="Artists">Artists</NavLink>
+						<NavLink page="albums" title="All Albums">Albums</NavLink>
+						<NavLink page="songs" title="Songs">Songs</NavLink>
+						<NavLink page="alchemy" title="Alchemy">Alchemy</NavLink>
+						<NavLink page="map" title="Map">Map</NavLink>
+						<NavLink page="playlists" title="Playlists">Playlists</NavLink>
+						{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
+						
+						{/* Keyboard shortcuts help button */}
+						<button 
+							title="Keyboard Shortcuts: Space (Play/Pause), Ctrl+← (Previous), Ctrl+→ (Next), Ctrl+↑ (Vol+), Ctrl+↓ (Vol-)"
+							className="px-2 py-2 text-gray-400 hover:text-accent-400 transition-colors rounded-lg"
+						>
+							<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+							</svg>
+						</button>
+						
+						<button 
+							onClick={onLogout} 
+							className="ml-2 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold transition-all duration-300 shadow-md hover:shadow-lg text-sm lg:text-base"
+						>
+							Logout
+						</button>
 					</div>
-					{isMenuOpen && (
-						<div className="md:hidden px-2 pt-2 pb-3 space-y-1 sm:px-3">
-							<NavLink page="artists" title="Artists">Artists</NavLink>
-							<NavLink page="albums" title="All Albums">Albums</NavLink>
-                            <NavLink page="songs" title="Songs">Songs</NavLink>
-                            <NavLink page="alchemy" title="Alchemy">Alchemy</NavLink>
-                            <NavLink page="map" title="Map">Map</NavLink>
-							<NavLink page="playlists" title="Playlists">Playlists</NavLink>
-							{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
-							<button onClick={onLogout} className="w-full text-left px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold transition duration-300">Logout</button>
-						</div>
-					)}
-				</nav>
-				<main className="px-4 sm:px-8 pt-24 sm:pt-20 pb-24 bg-gray-900">
-					{navigation.length > 1 && (
-						<button onClick={handleBack} className="text-teal-400 hover:text-teal-200 font-semibold mb-4">&larr; Back</button>
-					)}
-                    {mixMessage && <p className="text-center text-teal-400 mb-4">{mixMessage}</p>}
-                    {currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onTogglePlayPause={handleTogglePlayPause} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onInstantMix={handleInstantMix} onAddToPlaylist={setSelectedSongForPlaylist} />}
+					
+					{/* Mobile Menu Button */}
+					<div className="md:hidden">
+						<button 
+							onClick={() => setIsMenuOpen(!isMenuOpen)} 
+							className="text-gray-300 hover:text-white focus:outline-none p-2 rounded-lg hover:bg-dark-700 transition-all"
+						>
+							<svg className={`w-6 h-6 transition-transform ${isMenuOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								{isMenuOpen ? (
+									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+								) : (
+									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7"></path>
+								)}
+							</svg>
+						</button>
+					</div>
+				</div>
+				
+				{/* Mobile Navigation Menu */}
+				{isMenuOpen && (
+					<div className="md:hidden px-4 pt-2 pb-4 space-y-2 border-t border-dark-600 bg-dark-750 animate-slide-up">
+						<NavLink page="artists" title="Artists">Artists</NavLink>
+						<NavLink page="albums" title="All Albums">Albums</NavLink>
+						<NavLink page="songs" title="Songs">Songs</NavLink>
+						<NavLink page="alchemy" title="Alchemy">Alchemy</NavLink>
+						<NavLink page="map" title="Map">Map</NavLink>
+						<NavLink page="playlists" title="Playlists">Playlists</NavLink>
+						{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
+						<button 
+							onClick={onLogout} 
+							className="w-full text-left px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold transition-all duration-300"
+						>
+							Logout
+						</button>
+					</div>
+				)}
+			</nav>
+			
+			{/* Main Content - optimized padding for navbar and audio bar */}
+			<main className="px-3 sm:px-6 pt-16 sm:pt-20 pb-20 sm:pb-24 bg-dark-800 min-h-screen">
+				{navigation.length > 1 && (
+					<button 
+						onClick={handleBack} 
+						className="flex items-center gap-2 text-accent-400 hover:text-accent-300 font-semibold mb-6 transition-all group"
+					>
+						<svg className="w-5 h-5 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path>
+						</svg>
+						Back
+					</button>
+				)}
+				{mixMessage && (
+					<div className="max-w-2xl mx-auto mb-6 p-4 bg-accent-500/10 border border-accent-500/50 rounded-lg text-center animate-fade-in">
+						<p className="text-accent-400 font-medium">{mixMessage}</p>
+					</div>
+				)}
+                    {currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onTogglePlayPause={handleTogglePlayPause} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} isAudioPlaying={isAudioPlaying} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onInstantMix={handleInstantMix} onAddToPlaylist={setSelectedSongForPlaylist} />}
                     {currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
                     {currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
                     {currentView.page === 'playlists' && <Playlists credentials={credentials} isAdmin={isAdmin} onNavigate={handleNavigate} />}

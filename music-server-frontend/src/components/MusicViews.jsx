@@ -21,15 +21,13 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
     useEffect(() => {
         const fetchPlaylists = async () => {
             try {
-                // The getPlaylists.view endpoint doesn't support pagination, so we fetch all.
                 const data = await subsonicFetch('getPlaylists.view');
                 const playlistData = data.playlists?.playlist || [];
                 setPlaylists(Array.isArray(playlistData) ? playlistData : [playlistData]);
                 if (playlistData.length > 0) {
                     setSelectedPlaylist(playlistData[0].id);
                 }
-            } catch (err)
-                {
+            } catch (err) {
                 setError('Failed to fetch playlists.');
             }
         };
@@ -44,6 +42,23 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
         setError('');
         setSuccess('');
         try {
+            // First, fetch the playlist details to check if song already exists
+            const playlistData = await subsonicFetch('getPlaylist.view', {
+                id: selectedPlaylist
+            });
+            
+            const existingSongs = playlistData.playlist?.entry || [];
+            const songList = Array.isArray(existingSongs) ? existingSongs : (existingSongs ? [existingSongs] : []);
+            
+            // Check if song is already in the playlist
+            const songAlreadyExists = songList.some(s => String(s.id) === String(song.id));
+            
+            if (songAlreadyExists) {
+                setError('Song already present in the playlist');
+                return;
+            }
+            
+            // Add the song to the playlist
             await subsonicFetch('updatePlaylist.view', {
                 playlistId: selectedPlaylist,
                 songIdToAdd: song.id,
@@ -52,28 +67,76 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
             onAdded();
             setTimeout(onClose, 1500);
         } catch (err) {
+            console.error('Failed to add song to playlist:', err);
             setError('Failed to add song to playlist.');
         }
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
-            <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-full sm:w-11/12 md:max-w-md relative">
-                 <h3 className="text-xl font-bold mb-4 text-teal-400">Add "{song.title}" to...</h3>
-                {error && <p className="text-red-500 mb-2">{error}</p>}
-                {success && <p className="text-green-400 mb-2">{success}</p>}
-                <select
-                    value={selectedPlaylist}
-                    onChange={(e) => setSelectedPlaylist(e.target.value)}
-                    className="w-full p-2 bg-gray-700 rounded mb-4"
-                >
-                    {playlists.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                </select>
-                <div className="flex justify-end space-x-4">
-                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
-                    <button onClick={handleAddToPlaylist} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Add to Playlist</button>
+        <div className="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-sm flex items-center justify-center z-[60] p-4 animate-fade-in">
+            <div className="glass rounded-2xl shadow-2xl w-full sm:w-11/12 md:max-w-md relative animate-scale-in">
+                <div className="p-6 sm:p-8">
+                    <div className="flex items-start justify-between mb-6">
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-1">Add to Playlist</h3>
+                            <p className="text-sm text-gray-400 truncate max-w-[280px]">"{song.title}"</p>
+                        </div>
+                        <button 
+                            onClick={onClose}
+                            className="text-gray-400 hover:text-white transition-colors p-1"
+                        >
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+
+                    {error && (
+                        <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 mb-4 animate-fade-in">
+                            <p className="text-red-400 text-sm flex items-center gap-2">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                {error}
+                            </p>
+                        </div>
+                    )}
+                    
+                    {success && (
+                        <div className="bg-green-500/10 border border-green-500/50 rounded-lg p-3 mb-4 animate-fade-in">
+                            <p className="text-green-400 text-sm flex items-center gap-2">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                {success}
+                            </p>
+                        </div>
+                    )}
+
+                    <select
+                        value={selectedPlaylist}
+                        onChange={(e) => setSelectedPlaylist(e.target.value)}
+                        className="w-full p-3 bg-dark-700 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white mb-6 transition-all"
+                    >
+                        {playlists.map((p) => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                    </select>
+
+                    <div className="flex justify-end gap-3">
+                        <button 
+                            onClick={onClose} 
+                            className="px-5 py-2.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-white font-semibold transition-all"
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            onClick={handleAddToPlaylist} 
+                            className="px-5 py-2.5 rounded-lg bg-gradient-accent text-white font-semibold transition-all shadow-lg hover:shadow-glow"
+                        >
+                            Add to Playlist
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -81,7 +144,7 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
 };
 
 
-export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQueue, onRemoveFromQueue, playQueue = [], currentSong, onNavigate, audioMuseUrl, onInstantMix, onAddToPlaylist }) {
+export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQueue, onRemoveFromQueue, playQueue = [], currentSong, isAudioPlaying = false, onNavigate, audioMuseUrl, onInstantMix, onAddToPlaylist }) {
     const [songs, setSongs] = useState([]);
     const [allSongs, setAllSongs] = useState([]); // For client-side pagination
     const [searchTerm, setSearchTerm] = useState('');
@@ -91,33 +154,13 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     const [refreshKey, setRefreshKey] = useState(0);
     const [genres, setGenres] = useState([]);
     const [selectedGenre, setSelectedGenre] = useState('');
-    const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+    const [playlistOwner, setPlaylistOwner] = useState(null);
 
     const isPlaylistView = !!filter?.playlistId;
     const PAGE_SIZE = 10;
-
-    // Listen to audio play/pause events to update button icon
-    useEffect(() => {
-        const audio = document.querySelector('audio');
-        if (!audio) return;
-
-        const handlePlay = () => setIsAudioPlaying(true);
-        const handlePause = () => setIsAudioPlaying(false);
-        const handleEnded = () => setIsAudioPlaying(false);
-
-        audio.addEventListener('play', handlePlay);
-        audio.addEventListener('pause', handlePause);
-        audio.addEventListener('ended', handleEnded);
-
-        // Set initial state
-        setIsAudioPlaying(!audio.paused);
-
-        return () => {
-            audio.removeEventListener('play', handlePlay);
-            audio.removeEventListener('pause', handlePause);
-            audio.removeEventListener('ended', handleEnded);
-        };
-    }, []);
+    
+    // Check if playlist is read-only (owned by another user)
+    const isPlaylistReadOnly = isPlaylistView && playlistOwner && credentials?.username && playlistOwner !== credentials.username;
 
     // Load genres on component mount
     useEffect(() => {
@@ -220,6 +263,13 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                         if (idParam) {
                             const data = await subsonicFetch(endpoint, { id: idParam });
                             const songContainer = data.album || data.directory;
+                            
+                            // Store playlist owner for access control
+                            if (filter.playlistId && data.playlist) {
+                                setPlaylistOwner(data.playlist.owner || null);
+                                console.log('Playlist owner:', data.playlist.owner, 'Current user:', credentials?.username);
+                            }
+                            
                             if (songContainer?.song) songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
                         }
                     } else if (selectedGenre && !filter) {
@@ -326,19 +376,59 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
 
     return (
         <div>
-            {error && <p className="text-red-500 mb-4 p-3 bg-red-900/50 rounded">{error}</p>}
-            <div className="mb-4 flex flex-col sm:flex-row gap-4">
-                <input
-                    type="text"
-                    placeholder="Search for a song or artist..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="flex-1 p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
-                />
+            {error && (
+                <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-4 mb-6 animate-fade-in">
+                    <p className="text-red-400 flex items-center gap-2">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        {error}
+                    </p>
+                </div>
+            )}
+            
+            {/* Read-only playlist notice */}
+            {isPlaylistReadOnly && (
+                <div className="bg-yellow-500/10 border border-yellow-500/50 rounded-lg p-4 mb-6 animate-fade-in">
+                    <p className="text-yellow-400 flex items-center gap-2">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                        </svg>
+                        Read-Only: This playlist is owned by {playlistOwner}. You can view and play songs but cannot modify it.
+                    </p>
+                </div>
+            )}
+            
+            {/* Modern Search Bar */}
+            <div className="mb-6 flex flex-col sm:flex-row gap-3">
+                <div className="flex-1 relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Search for a song or artist..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full pl-10 pr-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white placeholder-gray-500 transition-all"
+                    />
+                    {searchTerm && (
+                        <button
+                            onClick={() => setSearchTerm('')}
+                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-white"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    )}
+                </div>
                 <select
                     value={selectedGenre}
                     onChange={(e) => setSelectedGenre(e.target.value)}
-                    className="p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500 min-w-[120px]"
+                    className="px-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white min-w-[150px] transition-all"
                 >
                     <option value="">All Genres</option>
                     {genres.map(genre => (
@@ -347,10 +437,17 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                 </select>
             </div>
 
-            <div className="mb-4 flex flex-wrap gap-2">
+            {/* Action Buttons */}
+            <div className="mb-6 flex flex-wrap gap-3">
                 {(songs.length > 0 || allSongs.length > 0) && (
-                    <button onClick={handlePlayAlbum} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">
-                        ▶ Play All ({allSongs.length > 0 ? allSongs.length : songs.length})
+                    <button 
+                        onClick={handlePlayAlbum} 
+                        className="inline-flex items-center gap-2 border-2 border-green-500 text-green-400 bg-green-500/10 hover:bg-green-500/20 hover:scale-105 transition-all rounded-lg py-2.5 px-5 font-semibold"
+                    >
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path>
+                        </svg>
+                        Play All ({allSongs.length > 0 ? allSongs.length : songs.length})
                     </button>
                 )}
                 <button 
@@ -388,22 +485,40 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             setIsLoading(false);
                         }
                     }}
-                    className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded"
+                    className="inline-flex items-center gap-2 bg-dark-750 hover:bg-dark-700 text-yellow-400 border border-yellow-400/30 font-semibold py-2.5 px-5 rounded-lg transition-all hover:border-yellow-400/50"
                 >
-                    ⭐ Starred Songs
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                    </svg>
+                    Starred Songs
                 </button>
             </div>
             
-            {!isLoading && songs.length === 0 && (searchTerm || filter) && <p className="text-center text-gray-500">No songs found.</p>}
+            {/* Empty States */}
+            {!isLoading && songs.length === 0 && (searchTerm || filter) && (
+                <div className="text-center py-16">
+                    <svg className="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
+                    </svg>
+                    <p className="text-gray-400 text-lg">No songs found</p>
+                    <p className="text-gray-500 text-sm mt-2">Try a different search term or filter</p>
+                </div>
+            )}
 
             {!isLoading && songs.length === 0 && !searchTerm && !filter && (
-                 <p className="text-center text-gray-500">Start typing in the search bar to find songs.</p>
+                <div className="text-center py-16">
+                    <svg className="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    <p className="text-gray-400 text-lg">Start searching for music</p>
+                    <p className="text-gray-500 text-sm mt-2">Type in the search bar to find songs</p>
+                </div>
             )}
 
             {songs.length > 0 && (
-                <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm text-left text-gray-400">
-                        <thead className="text-xs text-gray-300 uppercase bg-gray-700">
+                <div className="overflow-x-auto rounded-lg border border-dark-600">
+                    <table className="min-w-full text-sm text-left text-gray-300">
+                        <thead className="text-xs text-gray-400 uppercase bg-dark-750 border-b border-dark-600">
                             <tr>
                                 <th className="px-4 py-3 w-12"></th>
                                 <th className="px-4 py-3 w-12 text-center">⭐</th>
@@ -413,42 +528,75 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 <th className="px-4 py-3 hidden lg:table-cell">Genre</th>
                                 <th className="px-4 py-3 hidden xl:table-cell text-center">Play Count</th>
                                 <th className="px-4 py-3 hidden lg:table-cell">Last Played</th>
-                                <th className="px-2 sm:px-4 py-3 w-32 sm:w-48 text-right">Actions</th>
+                                <th className="px-2 sm:px-4 py-3 w-16 sm:w-48 text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {songs.map((song, index) => {
-                                const isPlaying = currentSong && currentSong.id === song.id;
+                                const isCurrentSong = currentSong && currentSong.id === song.id;
+                                const isPlaying = isCurrentSong && isAudioPlaying;
                                 const isInQueue = playQueue.some(s => s.id === song.id);
-                                const rowColor = isPlaying ? 'bg-teal-900/50 border-l-4 border-l-teal-500' : (index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-850');
+                                const rowColor = isCurrentSong 
+                                    ? 'bg-accent-500/10 border-l-4 border-l-accent-500' 
+                                    : (index % 2 === 0 ? 'bg-dark-800' : 'bg-dark-750');
                                 return (
-                                    <tr ref={index === songs.length - 1 ? lastSongElementRef : null} key={`${song.id}-${index}`} className={`border-b border-gray-700 transition-colors hover:bg-gray-600 ${rowColor}`}>
+                                    <tr ref={index === songs.length - 1 ? lastSongElementRef : null} key={`${song.id}-${index}`} className={`border-b border-dark-600 transition-all hover:bg-dark-700 ${rowColor}`}>
                                         <td className="px-4 py-4">
                                             <button 
-                                                onClick={() => isPlaying ? onTogglePlayPause() : onPlay(song, allSongs.length > 0 ? allSongs : songs)} 
-                                                title={isPlaying ? (isAudioPlaying ? "Pause" : "Resume") : "Play song"}
+                                                onClick={() => {
+                                                    if (isCurrentSong) {
+                                                        // If current song, toggle play/pause
+                                                        onTogglePlayPause();
+                                                    } else {
+                                                        // If different song or nothing playing, play this song
+                                                        onPlay(song, allSongs.length > 0 ? allSongs : songs);
+                                                    }
+                                                }}
+                                                title={isPlaying ? "Pause song" : "Play song"}
+                                                className={`p-1.5 rounded-lg border-2 transition-all hover:scale-105 flex items-center justify-center ${
+                                                    isPlaying 
+                                                        ? 'border-accent-500 text-accent-400 bg-accent-500/20 shadow-glow animate-pulse' 
+                                                        : 'border-gray-600 text-gray-400 hover:border-accent-500 hover:text-accent-400 hover:bg-accent-500/10'
+                                                }`}
                                             >
-                                                {(isPlaying && isAudioPlaying) ? (
-                                                    <svg className="w-6 h-6 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg>
+                                                {isPlaying ? (
+                                                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path>
+                                                    </svg>
                                                 ) : (
-                                                    <svg className="w-6 h-6 text-teal-400 hover:text-teal-200" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path></svg>
+                                                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path>
+                                                    </svg>
                                                 )}
                                             </button>
                                         </td>
                                         <td className="px-4 py-4 text-center">
                                             <button
                                                 onClick={() => handleStarToggle(song)}
-                                                className={`text-2xl hover:scale-110 transition-transform ${
-                                                    song.starred ? 'text-yellow-400' : 'text-gray-400 hover:text-gray-200'
+                                                className={`p-1.5 rounded-lg border-2 transition-all hover:scale-105 flex items-center justify-center ${
+                                                    song.starred 
+                                                        ? 'border-yellow-500 text-yellow-400 bg-yellow-500/10 shadow-glow' 
+                                                        : 'border-gray-600 text-gray-500 hover:border-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/10'
                                                 }`}
                                                 title={song.starred ? 'Remove from favorites' : 'Add to favorites'}
                                             >
-                                                {song.starred ? '⭐' : '☆'}
+                                                <svg className="w-5 h-5" fill={song.starred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                                                </svg>
                                             </button>
                                         </td>
-                                        <td className={`px-4 py-4 font-medium ${isPlaying ? 'text-green-400' : 'text-white'}`}>
-                                            <div>{song.title}</div>
-                                            <div className="sm:hidden text-xs text-gray-400">{song.artist}</div>
+                                        <td className={`px-4 py-4 font-medium ${isPlaying ? 'text-accent-400' : 'text-white'}`}>
+                                            <div className="flex items-center gap-2">
+                                                {song.title}
+                                                {isPlaying && (
+                                                    <span className="flex gap-0.5">
+                                                        <span className="w-1 h-3 bg-accent-400 rounded-full animate-pulse"></span>
+                                                        <span className="w-1 h-3 bg-accent-400 rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></span>
+                                                        <span className="w-1 h-3 bg-accent-400 rounded-full animate-pulse" style={{animationDelay: '0.4s'}}></span>
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="sm:hidden text-xs text-gray-400 mt-1">{song.artist}</div>
                                         </td>
                                         <td className="px-4 py-4 hidden sm:table-cell">{song.artist}</td>
                                         <td className="px-4 py-4 hidden md:table-cell">{song.album}</td>
@@ -456,48 +604,64 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                         <td className="px-4 py-3 hidden xl:table-cell text-center">{song.playCount > 0 ? song.playCount : ''}</td>
                                         <td className="px-4 py-3 hidden lg:table-cell">{formatDate(song.lastPlayed)}</td>
                                         <td className="px-2 sm:px-4 py-4">
-                                            <div className="flex items-center justify-end space-x-1 sm:space-x-2">
+                                            {/* Desktop: Show all buttons */}
+                                            <div className="hidden sm:flex items-center justify-end space-x-1 sm:space-x-2">
                                                  {isPlaylistView && (
                                                     <>
                                                         <div className="flex flex-col -my-1">
-                                                            <button onClick={() => handleMoveSong(index, 'up')} disabled={index === 0} className="p-1 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed" title="Move up">
-                                                                <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd"></path></svg>
+                                                            <button onClick={() => handleMoveSong(index, 'up')} disabled={index === 0 || isPlaylistReadOnly} className="p-1 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50" title={isPlaylistReadOnly ? "Cannot edit admin's playlist" : "Move up"}>
+                                                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd"></path></svg>
                                                             </button>
-                                                            <button onClick={() => handleMoveSong(index, 'down')} disabled={index === allSongs.length - 1} className="p-1 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed" title="Move down">
-                                                                <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"></path></svg>
+                                                            <button onClick={() => handleMoveSong(index, 'down')} disabled={index === allSongs.length - 1 || isPlaylistReadOnly} className="p-1 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50" title={isPlaylistReadOnly ? "Cannot edit admin's playlist" : "Move down"}>
+                                                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"></path></svg>
                                                             </button>
                                                         </div>
-                                                        <button onClick={() => handleDeleteSong(song.id)} title="Remove from playlist" className="p-1 text-gray-400 hover:text-red-500">
-                                                            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                                        <button onClick={() => handleDeleteSong(song.id)} disabled={isPlaylistReadOnly} title={isPlaylistReadOnly ? "Cannot edit admin's playlist" : "Remove from playlist"} className="p-1 text-gray-400 hover:text-red-500 disabled:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50">
+                                                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                                         </button>
-                                                        <div className="border-l border-gray-600 h-6 mx-0.5 sm:mx-1"></div>
+                                                        <div className="border-l border-gray-600 h-6 mx-1"></div>
                                                     </>
                                                 )}
                                                 <button
                                                     onClick={() => {
                                                         if (!audioMuseUrl) {
-                                                            // Minimal error handler when AudioMuse isn't configured
                                                             alert('Instant Mix is not configured on the server. Ask an admin to enable AudioMuse.');
                                                             return;
                                                         }
                                                         onInstantMix(song);
                                                     }}
                                                     title="Instant Mix"
-                                                    className="p-1 sm:p-1.5 rounded-full transition-colors text-teal-400 hover:bg-gray-700"
+                                                    className="p-1.5 rounded-lg border-2 border-accent-500 text-accent-400 hover:bg-accent-500/10 transition-all hover:scale-105 flex items-center justify-center"
                                                 >
-                                                    <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                                                 </button>
                                                 {isInQueue ? (
-                                                    <button onClick={() => onRemoveFromQueue(song.id)} title="Remove from queue" className="p-1 sm:p-1.5 text-gray-400 hover:text-red-500">
-                                                        <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                                    <button onClick={() => onRemoveFromQueue(song.id)} title="Remove from queue" className="p-1.5 rounded-lg border-2 border-red-500 text-red-400 hover:bg-red-500/10 transition-all hover:scale-105 flex items-center justify-center">
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                                                     </button>
                                                 ) : (
-                                                    <button onClick={() => onAddToQueue(song)} title="Add to queue" className="p-1 sm:p-1.5 text-gray-400 hover:text-white">
-                                                        <svg className="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" className="stroke-green-500" /></svg>
+                                                    <button onClick={() => onAddToQueue(song)} title="Add to queue" className="p-1.5 rounded-lg border-2 border-green-500 text-green-400 hover:bg-green-500/10 transition-all hover:scale-105 flex items-center justify-center">
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" /></svg>
                                                     </button>
                                                 )}
-                                                <button onClick={() => onAddToPlaylist(song)} title="Add to playlist" className="p-1 sm:p-1.5 text-gray-400 hover:text-white">
-                                                    <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                                                <button onClick={() => onAddToPlaylist(song)} title="Add to playlist" className="p-1.5 rounded-lg border-2 border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-all hover:scale-105 flex items-center justify-center">
+                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                                                </button>
+                                            </div>
+                                            
+                                            {/* Mobile: Compact vertical buttons - matching desktop style */}
+                                            <div className="flex sm:hidden flex-col gap-1 items-end">
+                                                {isInQueue ? (
+                                                    <button onClick={() => onRemoveFromQueue(song.id)} title="Remove from queue" className="p-1.5 rounded-lg border-2 border-red-500 text-red-400 hover:bg-red-500/10 flex items-center justify-center">
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                                    </button>
+                                                ) : (
+                                                    <button onClick={() => onAddToQueue(song)} title="Add to queue" className="p-1.5 rounded-lg border-2 border-green-500 text-green-400 hover:bg-green-500/10 flex items-center justify-center">
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" /></svg>
+                                                    </button>
+                                                )}
+                                                <button onClick={() => onAddToPlaylist(song)} title="Add to playlist" className="p-1.5 rounded-lg border-2 border-purple-500 text-purple-400 hover:bg-purple-500/10 flex items-center justify-center">
+                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
                                                 </button>
                                             </div>
                                         </td>
@@ -515,62 +679,55 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
 }
 
 const AlbumPlaceholder = ({ name }) => {
-	const initials = (name || '??').split(' ').slice(0, 2).map(word => word[0]).join('').toUpperCase();
+	const initial = name ? name.charAt(0).toUpperCase() : '?';
 	return (
-		<div className="w-full h-full bg-gray-700 flex items-center justify-center">
-			<span className="text-gray-400 text-3xl font-bold">{initials}</span>
+		<div className="w-full h-full bg-gradient-to-br from-dark-700 to-dark-600 flex items-center justify-center">
+			<span className="text-4xl sm:text-5xl font-bold text-gray-500">{initial}</span>
 		</div>
 	);
 };
 
 const ArtistPlaceholder = () => (
-	<div className="w-full h-full bg-gray-700 flex items-center justify-center rounded-full">
-		<svg className="w-1/2 h-1/2 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"></path></svg>
+	<div className="w-full h-full bg-gradient-to-br from-dark-700 to-dark-600 flex items-center justify-center rounded-full">
+		<svg className="w-12 h-12 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+			<path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+		</svg>
 	</div>
 );
 
 const ImageWithFallback = ({ src, placeholder, alt }) => {
     const [hasError, setHasError] = useState(false);
-    const [isVisible, setIsVisible] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
     const [objectUrl, setObjectUrl] = useState(null);
     const objectUrlRef = useRef(null);
-    const ref = useRef(null);
-
-    useEffect(() => {
-        const observer = new IntersectionObserver(
-            ([entry]) => {
-                if (entry.isIntersecting) {
-                    setIsVisible(true);
-                    observer.unobserve(entry.target);
-                }
-            },
-            { rootMargin: '200px' }
-        );
-
-        const currentRef = ref.current;
-        if (currentRef) {
-            observer.observe(currentRef);
-        }
-
-        return () => {
-            if (currentRef) {
-                observer.unobserve(currentRef);
-            }
-        };
-    }, []);
 
     useEffect(() => {
         setHasError(false);
+        setIsLoading(true);
+        
         // Clean up previous objectUrl stored in ref
         if (objectUrlRef.current) {
             URL.revokeObjectURL(objectUrlRef.current);
             objectUrlRef.current = null;
             setObjectUrl(null);
         }
+        
+        // If no src, show placeholder immediately
+        if (!src) {
+            setIsLoading(false);
+            setHasError(true);
+            return;
+        }
+        
         // If src is an object with useAuthFetch=true and a token exists, fetch the image via fetch with Authorization
         const doFetch = async () => {
             try {
-                if (!src || typeof src === 'string') return;
+                if (typeof src === 'string') {
+                    // For regular URLs, let the img tag handle loading
+                    setIsLoading(false);
+                    return;
+                }
+                
                 const token = localStorage.getItem('token');
                 if (src.useAuthFetch && token && src.url) {
                     const res = await fetch(src.url, { headers: { 'Authorization': `Bearer ${token}` } });
@@ -579,24 +736,35 @@ const ImageWithFallback = ({ src, placeholder, alt }) => {
                     const url = URL.createObjectURL(blob);
                     setObjectUrl(url);
                     objectUrlRef.current = url;
+                    setIsLoading(false);
                 }
             } catch (e) {
                 console.error('Image fetch failed', e);
                 setHasError(true);
+                setIsLoading(false);
             }
         };
         doFetch();
     }, [src]);
 
+    // Show placeholder if error or no src
+    if (hasError || !src) {
+        return <div className="w-full h-full">{placeholder}</div>;
+    }
+
+    // Show loading skeleton while loading
+    if (isLoading && typeof src !== 'string') {
+        return <div className="w-full h-full bg-dark-700 animate-pulse"></div>;
+    }
+
+    // Show the actual image
     return (
-        <div ref={ref} className="w-full h-full">
-            {isVisible && !hasError ? (
-                (objectUrl && <img src={objectUrl} alt={alt} onError={() => setHasError(true)} className="w-full h-full object-cover" />)
-                || (typeof src === 'string' && <img src={src} alt={alt} onError={() => setHasError(true)} className="w-full h-full object-cover" />)
-                || placeholder
-            ) : (
-                placeholder
-            )}
+        <div className="w-full h-full">
+            {objectUrl ? (
+                <img src={objectUrl} alt={alt} onError={() => setHasError(true)} className="w-full h-full object-cover" />
+            ) : typeof src === 'string' ? (
+                <img src={src} alt={alt} onError={() => setHasError(true)} className="w-full h-full object-cover" />
+            ) : null}
         </div>
     );
 };
@@ -706,18 +874,36 @@ export function Albums({ credentials, filter, onNavigate }) {
 
     return (
         <div>
-            <div className="mb-4 flex flex-col sm:flex-row gap-4">
-                <input
-                    type="text"
-                    placeholder="Search for an album or artist..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="flex-1 p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
-                />
+            {/* Modern Search Bar */}
+            <div className="mb-6 flex flex-col sm:flex-row gap-3">
+                <div className="flex-1 relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Search for an album or artist..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full pl-10 pr-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white placeholder-gray-500 transition-all"
+                    />
+                    {searchTerm && (
+                        <button
+                            onClick={() => setSearchTerm('')}
+                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-white"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    )}
+                </div>
                 <select
                     value={selectedGenre}
                     onChange={(e) => setSelectedGenre(e.target.value)}
-                    className="p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500 min-w-[120px]"
+                    className="px-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white min-w-[150px] transition-all"
                 >
                     <option value="">All Genres</option>
                     {genres.map(genre => (
@@ -725,15 +911,17 @@ export function Albums({ credentials, filter, onNavigate }) {
                     ))}
                 </select>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
+            
+            {/* Album Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
                 {albums.map((album, index) => (
                     <div 
                         ref={index === albums.length - 1 ? lastAlbumElementRef : null}
                         key={`${album.id}-${index}`} 
-                        className="group bg-gray-800 rounded-lg p-3 sm:p-4 text-center hover:bg-gray-700 hover:shadow-lg transition-all duration-200 cursor-pointer"
+                        className="group bg-dark-750 rounded-xl p-3 sm:p-4 text-center hover:bg-dark-700 card-hover cursor-pointer transition-all"
                         onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })}
                     >
-                        <div className="relative w-full bg-gray-700 rounded aspect-square flex items-center justify-center mb-2 overflow-hidden">
+                        <div className="relative w-full bg-dark-700 rounded-lg aspect-square flex items-center justify-center mb-3 overflow-hidden shadow-md">
                              <ImageWithFallback
                                 src={album.coverArt ? (() => {
                                     const params = new URLSearchParams({ id: album.coverArt, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
@@ -744,35 +932,43 @@ export function Albums({ credentials, filter, onNavigate }) {
                                 alt={album.name}
                             />
                             {/* Play button overlay on hover */}
-                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-opacity duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
-                                <svg className="w-12 h-12 sm:w-16 sm:h-16 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path>
-                                </svg>
+                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                <div className="bg-accent-500 rounded-full p-3 shadow-glow transform group-hover:scale-110 transition-transform">
+                                    <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
+                                    </svg>
+                                </div>
                             </div>
                         </div>
-                        <p className="font-bold text-white truncate text-sm sm:text-base group-hover:text-teal-400 transition-colors">{album.name}</p>
-                        <p className="text-xs sm:text-sm text-gray-400 truncate">{album.artist}</p>
+                        <p className="font-semibold text-white truncate text-sm sm:text-base group-hover:text-accent-400 transition-colors">{album.name}</p>
+                        <p className="text-xs sm:text-sm text-gray-400 truncate mt-1">{album.artist}</p>
                     </div>
                 ))}
             </div>
-            {isLoading && <p className="text-center text-gray-400 mt-4">Loading more albums...</p>}
-            {!hasMore && albums.length > 0 && <p className="text-center text-gray-500 mt-4">End of list.</p>}
+            
+            {isLoading && (
+                <div className="flex justify-center items-center mt-8">
+                    <svg className="animate-spin h-8 w-8 text-accent-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </div>
+            )}
+            {!hasMore && albums.length > 0 && <p className="text-center text-gray-500 mt-8 text-sm">You've reached the end</p>}
         </div>
     );
 }
 
 export function Artists({ credentials, onNavigate }) {
     const [artists, setArtists] = useState([]);
-    const [allArtists, setAllArtists] = useState([]); // For client-side pagination
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [hasMore, setHasMore] = useState(true);
-    const PAGE_SIZE = 10;
+    const PAGE_SIZE = 50; // Increased page size for better performance
 
     useEffect(() => {
         setArtists([]);
         setHasMore(true);
-        if (searchTerm.length === 0) setAllArtists([]);
     }, [searchTerm]);
 
     const loadMoreArtists = useCallback(() => {
@@ -781,29 +977,21 @@ export function Artists({ credentials, onNavigate }) {
 
         const fetcher = async () => {
             try {
-                if (searchTerm.length >= 2) {
-                    const data = await subsonicFetch('search2.view', { query: searchTerm, artistCount: PAGE_SIZE, artistOffset: artists.length });
-                    const artistList = data.searchResult2?.artist || data.searchResult3?.artist || [];
-                    const newArtists = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
-                    setArtists(prev => [...prev, ...newArtists]);
-                    setHasMore(newArtists.length === PAGE_SIZE);
-                } 
-                else if (searchTerm.length === 0) { 
-                    let baseList = allArtists;
-                    if (baseList.length === 0) {
-                        const data = await subsonicFetch('getArtists.view');
-                        const indexData = data.artists?.index || [];
-                        const indices = Array.isArray(indexData) ? indexData : [indexData].filter(Boolean);
-                        baseList = indices.flatMap(i => i.artist || []);
-                        setAllArtists(baseList);
-                    }
-                    const currentCount = artists.length;
-                    const newCount = currentCount + PAGE_SIZE;
-                    setArtists(baseList.slice(0, newCount));
-                    setHasMore(newCount < baseList.length);
-                } else {
-                    setHasMore(false);
-                }
+                // Use search2.view for all cases with proper pagination
+                // Use "*" as query for listing all artists (backend supports this)
+                const query = searchTerm.length >= 1 ? searchTerm : '*';
+                const data = await subsonicFetch('search2.view', { 
+                    query: query, 
+                    artistCount: PAGE_SIZE, 
+                    artistOffset: artists.length,
+                    albumCount: 0,  // Don't fetch albums
+                    songCount: 0    // Don't fetch songs
+                });
+                
+                const artistList = data.searchResult2?.artist || data.searchResult3?.artist || [];
+                const newArtists = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
+                setArtists(prev => [...prev, ...newArtists]);
+                setHasMore(newArtists.length === PAGE_SIZE);
             } catch (e) {
                 console.error("Failed to fetch artists:", e);
             } finally {
@@ -812,7 +1000,7 @@ export function Artists({ credentials, onNavigate }) {
         };
 
         fetcher();
-    }, [searchTerm, artists.length, allArtists, isLoading, hasMore]);
+    }, [searchTerm, artists.length, isLoading, hasMore]);
     
     useEffect(() => {
         if (artists.length === 0 && hasMore) {
@@ -836,23 +1024,43 @@ export function Artists({ credentials, onNavigate }) {
 
     return (
         <div>
-            <div className="mb-4">
-                <input
-                    type="text"
-                    placeholder="Search for an artist..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full p-2 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:border-teal-500"
-                />
+            {/* Modern Search Bar */}
+            <div className="mb-6">
+                <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Search for an artist..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full pl-10 pr-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white placeholder-gray-500 transition-all"
+                    />
+                    {searchTerm && (
+                        <button
+                            onClick={() => setSearchTerm('')}
+                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-white"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    )}
+                </div>
             </div>
-             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
+            
+            {/* Artist Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
                 {artists.map((artist, index) => (
                     <div 
                         ref={index === artists.length - 1 ? lastArtistElementRef : null}
                         key={`${artist.id}-${index}`} 
                         onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: artist.name })} 
-                        className="group bg-gray-800 rounded-lg p-3 sm:p-4 text-center hover:bg-gray-700 hover:shadow-lg transition-all duration-200 flex flex-col items-center cursor-pointer">
-                        <div className="relative w-28 h-28 sm:w-32 sm:h-32 md:w-40 md:h-40 rounded-full bg-gray-700 flex items-center justify-center mb-2 overflow-hidden flex-shrink-0">
+                        className="group bg-dark-750 rounded-xl p-3 sm:p-4 text-center hover:bg-dark-700 card-hover flex flex-col items-center cursor-pointer">
+                        <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-accent-500/20 to-purple-500/20 flex items-center justify-center mb-3 overflow-hidden flex-shrink-0 shadow-lg border-2 border-dark-600 group-hover:border-accent-500/50 transition-all">
                              <ImageWithFallback
                                 src={artist.artistImageUrl ? (() => {
                                     const params = new URLSearchParams({ id: artist.artistImageUrl, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
@@ -863,18 +1071,28 @@ export function Artists({ credentials, onNavigate }) {
                                 alt={artist.name}
                             />
                             {/* Play button overlay on hover */}
-                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-opacity duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100 rounded-full">
-                                <svg className="w-12 h-12 sm:w-14 sm:h-14 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path>
-                                </svg>
+                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100 rounded-full">
+                                <div className="bg-accent-500 rounded-full p-3 shadow-glow transform group-hover:scale-110 transition-transform">
+                                    <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
+                                    </svg>
+                                </div>
                             </div>
                         </div>
-                        <p className="font-bold text-white truncate w-full text-sm sm:text-base group-hover:text-teal-400 transition-colors">{artist.name}</p>
+                        <p className="font-semibold text-white truncate w-full text-sm sm:text-base group-hover:text-accent-400 transition-colors">{artist.name}</p>
                     </div>
                 ))}
             </div>
-            {isLoading && <p className="text-center text-gray-400 mt-4">Loading more artists...</p>}
-            {!hasMore && artists.length > 0 && <p className="text-center text-gray-500 mt-4">End of list.</p>}
+            
+            {isLoading && (
+                <div className="flex justify-center items-center mt-8">
+                    <svg className="animate-spin h-8 w-8 text-accent-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </div>
+            )}
+            {!hasMore && artists.length > 0 && <p className="text-center text-gray-500 mt-8 text-sm">You've reached the end</p>}
         </div>
     );
 }

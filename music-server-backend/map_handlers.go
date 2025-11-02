@@ -1,15 +1,12 @@
 package main
 
 import (
-	"compress/gzip"
 	"errors"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -52,18 +49,27 @@ func MapHandler(c *gin.Context) {
 		final = final + "?" + c.Request.URL.RawQuery
 	}
 
-	// Use simple in-memory cache with gzip; key by final URL
-	cached, ok := mapCache.Get(final)
-	if ok {
-		c.Header("Content-Type", cached.contentType)
-		c.Header("Content-Encoding", "gzip")
-		c.Data(http.StatusOK, cached.contentType, cached.data)
+	// NO CACHE - Always fetch fresh data from AudioMuse-AI
+	// The map is dynamically generated and must reflect the latest state
+	log.Printf("🔄 Fetching FRESH map data from AudioMuse-AI: %s", final)
+
+	// Create request with explicit no-cache headers
+	req, err := http.NewRequest("GET", final, nil)
+	if err != nil {
+		log.Printf("❌ Error creating request to AudioMuse-AI /api/map: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
 		return
 	}
 
-	resp, err := http.Get(final)
+	// Add aggressive no-cache headers to ensure AudioMuse-AI doesn't cache
+	req.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	req.Header.Set("Pragma", "no-cache")
+	req.Header.Set("Expires", "0")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Error calling AudioMuse-AI /api/map: %v", err)
+		log.Printf("❌ Error calling AudioMuse-AI /api/map: %v", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to contact AudioMuse-AI Core"})
 		return
 	}
@@ -71,25 +77,19 @@ func MapHandler(c *gin.Context) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		log.Printf("❌ Error reading response from AudioMuse-AI /api/map: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from AudioMuse-AI Core"})
 		return
 	}
 
-	// gzip-compress and store in cache
-	var gzbuf strings.Builder
-	gw := gzip.NewWriter(&gzbuf)
-	if _, err := gw.Write(body); err == nil {
-		gw.Close()
-		compressed := []byte(gzbuf.String())
-		ct := resp.Header.Get("Content-Type")
-		mapCache.Set(final, compressed, ct, 5*time.Minute)
-		c.Header("Content-Type", ct)
-		c.Header("Content-Encoding", "gzip")
-		c.Data(resp.StatusCode, ct, compressed)
-		return
-	}
+	log.Printf("✅ Received map data from AudioMuse-AI: %d bytes (status %d)", len(body), resp.StatusCode)
 
-	// If gzip failed, return uncompressed
+	// Set explicit no-cache headers to prevent ANY caching
+	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+
+	// Return the response directly without caching
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
 }
 
@@ -142,46 +142,6 @@ func VoyagerSearchTracksHandler(c *gin.Context) {
 	}
 
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
-}
-
-// Map cache implementation
-type cachedResponse struct {
-	data        []byte
-	contentType string
-	expiry      time.Time
-}
-
-type simpleCache struct {
-	mu    sync.RWMutex
-	store map[string]cachedResponse
-}
-
-var mapCache = &simpleCache{store: make(map[string]cachedResponse)}
-
-func (c *simpleCache) Get(key string) (cachedResponse, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	v, ok := c.store[key]
-	if !ok {
-		return cachedResponse{}, false
-	}
-	if time.Now().After(v.expiry) {
-		go c.delete(key)
-		return cachedResponse{}, false
-	}
-	return v, true
-}
-
-func (c *simpleCache) Set(key string, data []byte, contentType string, ttl time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.store[key] = cachedResponse{data: data, contentType: contentType, expiry: time.Now().Add(ttl)}
-}
-
-func (c *simpleCache) delete(key string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.store, key)
 }
 
 // Create playlist from map selection

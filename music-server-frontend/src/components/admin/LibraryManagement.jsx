@@ -22,11 +22,11 @@ const LibraryPathModal = ({ path, onClose, onSave }) => {
                     className="flex-grow p-2 bg-gray-700 rounded border border-gray-600"
                     readOnly
                 />
-                <button onClick={() => setShowBrowser(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Browse</button>
+                <button onClick={() => setShowBrowser(true)} className="border-2 border-blue-500 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg">Browse</button>
             </div>
             <div className="flex justify-end space-x-4 mt-6">
-                <button onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
-                <button onClick={handleSave} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded">Save</button>
+                <button onClick={onClose} className="border-2 border-gray-500 text-gray-400 bg-gray-500/10 hover:bg-gray-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg">Cancel</button>
+                <button onClick={handleSave} className="border-2 border-teal-500 text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg">Save</button>
             </div>
             {showBrowser && <FileBrowser
 				onSelect={(selectedPath) => { setCurrentPath(selectedPath); setShowBrowser(false); }}
@@ -188,10 +188,10 @@ function LibraryManagement({ onConfigChange }) {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 space-y-2 sm:space-y-0">
                 <h3 className="text-xl font-bold">Library Management</h3>
                 <div className="flex flex-wrap gap-2">
-                     <button onClick={() => handleStartScan(null)} disabled={scanStatus.scanning} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-green-400 disabled:cursor-not-allowed">
+                     <button onClick={() => handleStartScan(null)} disabled={scanStatus.scanning} className="border-2 border-green-500 text-green-400 bg-green-500/10 hover:bg-green-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
                         Scan All
                     </button>
-                    <button onClick={() => setIsAddingPath(true)} disabled={scanStatus.scanning} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded disabled:bg-indigo-400 disabled:cursor-not-allowed">
+                    <button onClick={() => setIsAddingPath(true)} disabled={scanStatus.scanning} className="border-2 border-purple-500 text-purple-400 bg-purple-500/10 hover:bg-purple-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
                         Add Path
                     </button>
                 </div>
@@ -203,7 +203,7 @@ function LibraryManagement({ onConfigChange }) {
             {scanStatus.scanning && (
                 <div className="text-center my-4 p-3 bg-gray-700 rounded">
                     <p>Scan in Progress... {scanStatus.count} new songs found.</p>
-                     <button onClick={handleCancelScan} className="mt-2 bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded text-sm">
+                     <button onClick={handleCancelScan} className="mt-2 border-2 border-red-500 text-red-400 bg-red-500/10 hover:bg-red-500/20 hover:scale-105 transition-all font-bold py-1 px-3 rounded-lg text-sm">
                         Cancel Scan
                     </button>
                 </div>
@@ -226,9 +226,9 @@ function LibraryManagement({ onConfigChange }) {
                                 <td className="px-6 py-4">{path.songCount}</td>
                                 <td className="px-6 py-4">{formatDate(path.lastScanEnded)}</td>
                                 <td className="px-6 py-4 text-right space-x-2 whitespace-nowrap">
-                                    <button onClick={() => handleStartScan(path.id)} disabled={scanStatus.scanning} className="font-medium text-green-500 hover:underline disabled:text-gray-500 disabled:cursor-not-allowed">Scan</button>
-                                    <button onClick={() => setEditingPath(path)} disabled={scanStatus.scanning} className="font-medium text-blue-500 hover:underline disabled:text-gray-500 disabled:cursor-not-allowed">Edit</button>
-                                    <button onClick={() => handleDeletePath(path.id)} disabled={scanStatus.scanning} className="font-medium text-red-500 hover:underline disabled:text-gray-500 disabled:cursor-not-allowed">Delete</button>
+                                    <button onClick={() => handleStartScan(path.id)} disabled={scanStatus.scanning} className="border-2 border-green-500 text-green-400 bg-green-500/10 hover:bg-green-500/20 hover:scale-105 transition-all px-2 py-1 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">Scan</button>
+                                    <button onClick={() => setEditingPath(path)} disabled={scanStatus.scanning} className="border-2 border-blue-500 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 hover:scale-105 transition-all px-2 py-1 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">Edit</button>
+                                    <button onClick={() => handleDeletePath(path.id)} disabled={scanStatus.scanning} className="border-2 border-red-500 text-red-400 bg-red-500/10 hover:bg-red-500/20 hover:scale-105 transition-all px-2 py-1 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">Delete</button>
                                 </td>
                             </tr>
                         ))}

@@ -197,7 +197,7 @@ function SonicAnalysisPanel() {
                                 setIsLoading(false);
                             }
                         }}
-                        className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded"
+                        className="border-2 border-yellow-500 text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg"
                     >
                         Refresh Configuration
                     </button>
@@ -208,14 +208,14 @@ function SonicAnalysisPanel() {
                 <button
                     onClick={handleStartClustering}
                     disabled={!isAudioMuseConfigured || isTaskRunning || isLoading || isStarting}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500 disabled:cursor-not-allowed mr-4"
+                    className="border-2 border-blue-500 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 mr-4"
                 >
                     {isStarting ? 'Starting...' : 'Start Clustering'}
                 </button>
                 <button
                     onClick={handleStart}
                     disabled={!isAudioMuseConfigured || isTaskRunning || isLoading || isStarting}
-                    className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500 disabled:cursor-not-allowed mr-4"
+                    className="border-2 border-green-500 text-green-400 bg-green-500/10 hover:bg-green-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 mr-4"
                 >
                     {isStarting ? 'Starting...' : (isLoading && !isTaskRunning ? 'Loading...' : 'Start New Analysis')}
                 </button>
@@ -224,7 +224,7 @@ function SonicAnalysisPanel() {
                 <button
                     onClick={handleStartCleaning}
                     disabled={isTaskRunning || isLoading || isStarting}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500 disabled:cursor-not-allowed"
+                    className="border-2 border-purple-500 text-purple-400 bg-purple-500/10 hover:bg-purple-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                     title="Start database cleaning (will call /api/cleaning/start)"
                 >
                     {isStarting ? 'Starting...' : 'Start Cleaning'}
@@ -233,7 +233,7 @@ function SonicAnalysisPanel() {
                      <button
                         onClick={handleCancel}
                         disabled={isLoading}
-                        className="ml-4 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500 disabled:cursor-not-allowed"
+                        className="ml-4 border-2 border-red-500 text-red-400 bg-red-500/10 hover:bg-red-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                     >
                         Cancel Task
                     </button>

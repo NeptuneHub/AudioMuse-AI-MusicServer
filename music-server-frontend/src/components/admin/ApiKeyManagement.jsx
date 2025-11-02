@@ -109,14 +109,14 @@ function ApiKeyManagement() {
                 <button 
                     onClick={handleRevoke} 
                     disabled={!apiKey || isLoading}
-                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded disabled:bg-red-400 disabled:cursor-not-allowed"
+                    className="border-2 border-red-500 text-red-400 bg-red-500/10 hover:bg-red-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
                     Revoke Key
                 </button>
                 <button 
                     onClick={fetchApiKey} 
                     disabled={isLoading}
-                    className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded disabled:bg-teal-400 disabled:cursor-not-allowed"
+                    className="border-2 border-teal-500 text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 hover:scale-105 transition-all font-bold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
                     {apiKey ? 'Refresh' : 'Generate Key'}
                 </button>

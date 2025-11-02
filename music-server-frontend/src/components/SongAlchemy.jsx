@@ -159,7 +159,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay }) {
               </div>
             </div>
           ))}
-          <button type="button" onClick={addRow} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">Add Another Song</button>
+          <button type="button" onClick={addRow} className="border-2 border-blue-500 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 hover:scale-105 transition-all px-3 py-1.5 rounded-lg">Add Another Song</button>
         </fieldset>
         <fieldset className="border border-gray-700 rounded p-4 bg-gray-800">
           <legend className="font-semibold text-teal-300">Parameters</legend>
@@ -178,7 +178,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay }) {
             </div>
           </div>
         </fieldset>
-        <button type="submit" className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded font-semibold" disabled={loading}>{loading ? 'Running...' : 'Run Alchemy'}</button>
+        <button type="submit" className="border-2 border-green-500 text-green-400 bg-green-500/10 hover:bg-green-500/20 hover:scale-105 transition-all px-6 py-2 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100" disabled={loading}>{loading ? 'Running...' : 'Run Alchemy'}</button>
       </form>
       {error && <div className="text-red-400 mt-2">{error}</div>}
       {results && (
