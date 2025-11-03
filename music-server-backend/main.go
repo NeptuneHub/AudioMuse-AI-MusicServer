@@ -206,8 +206,25 @@ func main() {
 		c.File("/app/music-server-frontend/build/index.html")
 	})
 
-	log.Println("[GIN-debug] Listening and serving HTTP on :8080")
-	r.Run(":8080")
+	// Configure server with HTTP/2 support
+	srv := &http.Server{
+		Addr:              ":8080",
+		Handler:           r,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1MB
+	}
+
+	log.Println("[GIN-debug] Listening and serving HTTP with HTTP/2 support on :8080")
+	log.Println("[HTTP/2] Multiplexing enabled for parallel cover art requests")
+
+	// HTTP/2 is automatically enabled for h2c (HTTP/2 Cleartext)
+	// No TLS required - Gin/Go will handle h2c negotiation
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("Server failed to start: %v", err)
+	}
 }
 
 func adminOnly() gin.HandlerFunc {

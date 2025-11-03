@@ -1,5 +1,5 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { API_BASE, subsonicFetch, starSong, unstarSong, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed } from '../api';
 
 const formatDate = (isoString) => {
@@ -894,78 +894,92 @@ const ArtistPlaceholder = () => (
 
 const ImageWithFallback = ({ src, placeholder, alt }) => {
     const [hasError, setHasError] = useState(false);
-    const [isLoading, setIsLoading] = useState(true);
-    const [objectUrl, setObjectUrl] = useState(null);
-    const objectUrlRef = useRef(null);
+    const [isLoaded, setIsLoaded] = useState(false);
 
-    useEffect(() => {
-        setHasError(false);
-        setIsLoading(true);
+    // Build authenticated URL with JWT token - MUST call API!
+    const imageSrc = useMemo(() => {
+        if (!src) return null;
         
-        // Clean up previous objectUrl stored in ref
-        if (objectUrlRef.current) {
-            URL.revokeObjectURL(objectUrlRef.current);
-            objectUrlRef.current = null;
-            setObjectUrl(null);
+        // If already a string URL, use it
+        if (typeof src === 'string') {
+            return src;
         }
         
-        // If no src, show placeholder immediately
-        if (!src) {
-            setIsLoading(false);
-            setHasError(true);
-            return;
+        // Build authenticated URL with JWT token
+        const token = localStorage.getItem('token');
+        if (src.useAuthFetch && token && src.url) {
+            const url = new URL(src.url, window.location.origin);
+            url.searchParams.set('jwt', token);
+            return url.toString();
         }
         
-        // If src is an object with useAuthFetch=true and a token exists, fetch the image via fetch with Authorization
-        const doFetch = async () => {
-            try {
-                if (typeof src === 'string') {
-                    // For regular URLs, let the img tag handle loading
-                    setIsLoading(false);
-                    return;
-                }
-                
-                const token = localStorage.getItem('token');
-                if (src.useAuthFetch && token && src.url) {
-                    const res = await fetch(src.url, { headers: { 'Authorization': `Bearer ${token}` } });
-                    if (!res.ok) throw new Error('Failed to load image');
-                    const blob = await res.blob();
-                    const url = URL.createObjectURL(blob);
-                    setObjectUrl(url);
-                    objectUrlRef.current = url;
-                    setIsLoading(false);
-                }
-            } catch (e) {
-                console.error('Image fetch failed', e);
-                setHasError(true);
-                setIsLoading(false);
-            }
-        };
-        doFetch();
+        return src.url || null;
     }, [src]);
 
+    // Reset state when src changes - ALWAYS load new images!
+    useEffect(() => {
+        setHasError(false);
+        setIsLoaded(false);
+    }, [imageSrc]);
+
     // Show placeholder if error or no src
-    if (hasError || !src) {
+    if (hasError || !imageSrc) {
         return <div className="w-full h-full">{placeholder}</div>;
     }
 
-    // Show loading skeleton while loading
-    if (isLoading && typeof src !== 'string') {
-        return <div className="w-full h-full bg-dark-700 animate-pulse"></div>;
-    }
-
-    // Show the actual image
+    // Show the actual image - ALWAYS render to trigger API call!
     return (
-        <div className="w-full h-full">
-            {objectUrl ? (
-                <img src={objectUrl} alt={alt} onError={() => setHasError(true)} className="w-full h-full object-cover" />
-            ) : typeof src === 'string' ? (
-                <img src={src} alt={alt} onError={() => setHasError(true)} className="w-full h-full object-cover" />
-            ) : null}
+        <div className="w-full h-full relative">
+            {/* Placeholder shown until image loads - NO FLICKER */}
+            {!isLoaded && (
+                <div className="absolute inset-0">{placeholder}</div>
+            )}
+            {/* Image loads and calls API */}
+            <img 
+                src={imageSrc}
+                alt={alt}
+                loading="lazy"
+                onLoad={() => setIsLoaded(true)}
+                onError={() => setHasError(true)}
+                className={`w-full h-full object-cover transition-opacity duration-200 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+            />
         </div>
     );
 };
 
+// Memoized album card to prevent unnecessary re-renders during scroll
+const AlbumCard = React.memo(({ album, isLastElement, lastAlbumElementRef, onNavigate }) => {
+    return (
+        <div 
+            ref={isLastElement ? lastAlbumElementRef : null}
+            key={album.id}
+            className="group bg-dark-750 rounded-xl p-3 sm:p-4 text-center hover:bg-dark-700 card-hover cursor-pointer transition-all"
+            onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })}
+        >
+            <div className="relative w-full bg-dark-700 rounded-lg aspect-square flex items-center justify-center mb-3 overflow-hidden shadow-md">
+                <ImageWithFallback
+                    src={album.coverArt ? (() => {
+                        const params = new URLSearchParams({ id: album.coverArt, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
+                        const url = `${API_BASE}/rest/getCoverArt.view?${params.toString()}`;
+                        return { url, useAuthFetch: true };
+                    })() : ''}
+                    placeholder={<AlbumPlaceholder name={album.name} />}
+                    alt={album.name}
+                />
+                {/* Play button overlay on hover */}
+                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                    <div className="bg-accent-500 rounded-full p-3 shadow-glow transform group-hover:scale-110 transition-transform">
+                        <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            <p className="font-semibold text-white truncate text-sm sm:text-base group-hover:text-accent-400 transition-colors">{album.name}</p>
+            <p className="text-xs sm:text-sm text-gray-400 truncate mt-1">{album.artist}</p>
+        </div>
+    );
+});
 
 export function Albums({ credentials, filter, onNavigate }) {
     const [albums, setAlbums] = useState([]);
@@ -1136,34 +1150,13 @@ export function Albums({ credentials, filter, onNavigate }) {
             {/* Album Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
                 {albums.map((album, index) => (
-                    <div 
-                        ref={index === albums.length - 1 ? lastAlbumElementRef : null}
-                        key={`${album.id}-${index}`} 
-                        className="group bg-dark-750 rounded-xl p-3 sm:p-4 text-center hover:bg-dark-700 card-hover cursor-pointer transition-all"
-                        onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })}
-                    >
-                        <div className="relative w-full bg-dark-700 rounded-lg aspect-square flex items-center justify-center mb-3 overflow-hidden shadow-md">
-                             <ImageWithFallback
-                                src={album.coverArt ? (() => {
-                                    const params = new URLSearchParams({ id: album.coverArt, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
-                                    const url = `${API_BASE}/rest/getCoverArt.view?${params.toString()}`;
-                                    return { url, useAuthFetch: true };
-                                })() : ''}
-                                placeholder={<AlbumPlaceholder name={album.name} />}
-                                alt={album.name}
-                            />
-                            {/* Play button overlay on hover */}
-                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
-                                <div className="bg-accent-500 rounded-full p-3 shadow-glow transform group-hover:scale-110 transition-transform">
-                                    <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                        <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
-                                    </svg>
-                                </div>
-                            </div>
-                        </div>
-                        <p className="font-semibold text-white truncate text-sm sm:text-base group-hover:text-accent-400 transition-colors">{album.name}</p>
-                        <p className="text-xs sm:text-sm text-gray-400 truncate mt-1">{album.artist}</p>
-                    </div>
+                    <AlbumCard
+                        key={album.id}
+                        album={album}
+                        isLastElement={index === albums.length - 1}
+                        lastAlbumElementRef={lastAlbumElementRef}
+                        onNavigate={onNavigate}
+                    />
                 ))}
             </div>
             

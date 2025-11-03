@@ -786,18 +786,31 @@ func findLocalImage(dir string) (string, bool) {
 }
 
 func resizeAndServeImage(c *gin.Context, reader io.Reader, contentType string, size int) {
-	img, err := imaging.Decode(reader)
+	// Read all data first so we can retry with different decoders
+	data, err := io.ReadAll(reader)
 	if err != nil {
-		log.Printf("[RESIZE] Failed to decode image: %v", err)
+		log.Printf("[RESIZE] Failed to read image data: %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
 
+	// Try to decode image (supports JPEG, PNG, GIF, TIFF, BMP)
+	img, err := imaging.Decode(bytes.NewReader(data))
+	if err != nil {
+		log.Printf("[RESIZE] Unsupported image format, serving original: %v", err)
+		// Serve original image without resizing (better than 500 error!)
+		c.Header("Content-Type", contentType)
+		c.Data(http.StatusOK, contentType, data)
+		return
+	}
+
+	// Resize image
 	resizedImg := imaging.Fit(img, size, size, imaging.Lanczos)
 
+	// Determine output format
 	var format imaging.Format
 	switch contentType {
-	case "image/jpeg":
+	case "image/jpeg", "image/jpg":
 		format = imaging.JPEG
 	case "image/png":
 		format = imaging.PNG
@@ -808,13 +821,16 @@ func resizeAndServeImage(c *gin.Context, reader io.Reader, contentType string, s
 	case "image/bmp":
 		format = imaging.BMP
 	default:
-		format = imaging.JPEG // Default to JPEG
+		// Unknown format - convert to JPEG
+		format = imaging.JPEG
+		contentType = "image/jpeg"
 	}
 
 	c.Header("Content-Type", contentType)
 	err = imaging.Encode(c.Writer, resizedImg, format)
 	if err != nil {
 		log.Printf("[RESIZE] Failed to encode resized image: %v", err)
+		c.Status(http.StatusInternalServerError)
 	}
 }
 
