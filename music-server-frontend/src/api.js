@@ -158,3 +158,40 @@ export async function getRecentlyPlayed(limit = 50, offset = 0, genre = '') {
     const data = await res.json();
     return Array.isArray(data) ? data : [];
 }
+
+// Radio API functions
+export async function createRadio(name, seedSongs, temperature, subtractDistance) {
+    const res = await apiFetch('/api/radios', {
+        method: 'POST',
+        body: JSON.stringify({
+            name,
+            seed_songs: JSON.stringify(seedSongs),
+            temperature,
+            subtract_distance: subtractDistance
+        })
+    });
+    return await res.json();
+}
+
+export async function getRadios() {
+    const res = await apiFetch('/api/radios');
+    return await res.json();
+}
+
+export async function getRadioSeed(radioId) {
+    const res = await apiFetch(`/api/radios/${radioId}/seed`);
+    return await res.json();
+}
+
+export async function deleteRadio(radioId) {
+    const res = await apiFetch(`/api/radios/${radioId}`, { method: 'DELETE' });
+    return await res.json();
+}
+
+export async function updateRadioName(radioId, name) {
+    const res = await apiFetch(`/api/radios/${radioId}/name`, {
+        method: 'PUT',
+        body: JSON.stringify({ name })
+    });
+    return await res.json();
+}

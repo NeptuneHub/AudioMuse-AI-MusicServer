@@ -140,6 +140,28 @@ func migrateDB() error {
 		log.Printf("migrateDB: failed to create transcoding_settings table: %v", err)
 	}
 
+	// Create radio_stations table for Radio feature
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS radio_stations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		name TEXT NOT NULL,
+		seed_songs TEXT NOT NULL,
+		temperature REAL NOT NULL DEFAULT 1.0,
+		subtract_distance REAL NOT NULL DEFAULT 0.3,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	);`)
+	if err != nil {
+		log.Printf("migrateDB: failed to create radio_stations table: %v", err)
+	}
+
+	// Create index for radio_stations user lookup
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_radio_stations_user ON radio_stations (user_id);`)
+	if err != nil {
+		log.Printf("migrateDB: failed to create radio_stations index: %v", err)
+	}
+
 	log.Println("migrateDB: completed migrations (idempotent)")
 	return nil
 }

@@ -1,14 +1,14 @@
 // Suggested path: music-server-frontend/src/components/Dashboard.jsx
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Songs, Albums, Artists, AddToPlaylistModal } from './MusicViews.jsx';
-import SongAlchemy from './SongAlchemy.jsx';
+import RadioPage from './RadioPage.jsx';
 import Map from './Map.jsx';
 import Playlists from './Playlists.jsx';
 import AdminPanel from './AdminPanel.jsx';
 import UserSettings from './UserSettings.jsx';
 import CustomAudioPlayer from './AudioPlayer.jsx';
 import PlayQueueView from './PlayQueueView.jsx';
-import { subsonicFetch } from '../api';
+import { subsonicFetch, getRadioSeed } from '../api';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 
@@ -180,9 +180,66 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
         setQueueViewOpen(false);
     }, []);
 
-    const handlePlayNext = useCallback(() => {
-        if (playQueue.length > 0) setCurrentTrackIndex(prev => (prev + 1) % playQueue.length);
-    }, [playQueue.length]);
+    const handlePlayNext = useCallback(async () => {
+        if (playQueue.length === 0) return;
+
+        const currentSong = playQueue[currentTrackIndex];
+        const isLastSong = currentTrackIndex === playQueue.length - 1;
+
+        // If on last song of a radio station, auto-rerun the alchemy
+        if (isLastSong && currentSong?._isRadioSong && currentSong?._radioId) {
+            console.log('🔄 Last song of radio reached, fetching 200 more songs...');
+            try {
+                // Fetch radio seed
+                const seed = await getRadioSeed(currentSong._radioId);
+                
+                // Parse seed_songs if it's a string
+                const items = typeof seed.seed_songs === 'string' 
+                    ? JSON.parse(seed.seed_songs) 
+                    : seed.seed_songs;
+                
+                // Run alchemy with the same parameters (using correct API structure)
+                const alchemyResponse = await fetch('/api/alchemy', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({
+                        items: items,  // Array of {id, op} objects
+                        n: 200,
+                        temperature: seed.temperature || 1.0,
+                        subtract_distance: seed.subtract_distance || 0.3
+                    })
+                });
+
+                if (alchemyResponse.ok) {
+                    const alchemyData = await alchemyResponse.json();
+                    
+                    // Map results to song objects with radio metadata
+                    const newSongs = (alchemyData.results || []).map(r => ({
+                        id: r.item_id || r.id || r.songId || '',
+                        title: r.title || r.name || '',
+                        artist: r.author || r.artist || r.creator || '',
+                        _radioId: currentSong._radioId,
+                        _radioName: currentSong._radioName,
+                        _isRadioSong: true
+                    }));
+
+                    // Replace queue with fresh songs (remove old, add new 200)
+                    setPlayQueue(newSongs);
+                    setCurrentTrackIndex(0); // Start from first new song
+                    console.log(`✅ Refreshed radio "${currentSong._radioName}" with ${newSongs.length} new songs`);
+                    return;
+                }
+            } catch (error) {
+                console.error('❌ Failed to auto-rerun radio:', error);
+            }
+        }
+
+        // Normal next behavior - loop back to beginning
+        setCurrentTrackIndex(prev => (prev + 1) % playQueue.length);
+    }, [playQueue, currentTrackIndex]);
 
     const handlePlayPrevious = useCallback(() => {
         if (playQueue.length > 0) setCurrentTrackIndex(prev => (prev - 1 + playQueue.length) % playQueue.length);
@@ -306,7 +363,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						<NavLink page="artists" title="Artists">Artists</NavLink>
 						<NavLink page="albums" title="All Albums">Albums</NavLink>
 						<NavLink page="songs" title="Songs">Songs</NavLink>
-						<NavLink page="alchemy" title="Alchemy">Alchemy</NavLink>
+						<NavLink page="radio" title="Radio">Radio</NavLink>
 						<NavLink page="map" title="Map">Map</NavLink>
 						<NavLink page="playlists" title="Playlists">Playlists</NavLink>
 						{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
@@ -362,7 +419,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						<NavLink page="artists" title="Artists">Artists</NavLink>
 						<NavLink page="albums" title="All Albums">Albums</NavLink>
 						<NavLink page="songs" title="Songs">Songs</NavLink>
-						<NavLink page="alchemy" title="Alchemy">Alchemy</NavLink>
+						<NavLink page="radio" title="Radio">Radio</NavLink>
 						<NavLink page="map" title="Map">Map</NavLink>
 						<NavLink page="playlists" title="Playlists">Playlists</NavLink>
 						{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
@@ -399,7 +456,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                     {currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
                     {currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
                     {currentView.page === 'playlists' && <Playlists credentials={credentials} isAdmin={isAdmin} onNavigate={handleNavigate} />}
-                    {currentView.page === 'alchemy' && <SongAlchemy onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} />}
+                    {currentView.page === 'radio' && <RadioPage onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} />}
                     {currentView.page === 'map' && <Map onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} onRemoveFromQueue={handleRemoveFromQueue} onClearQueue={handleClearQueue} playQueue={playQueue} />}
                     {currentView.page === 'admin' && isAdmin && <AdminPanel onConfigChange={fetchConfig} />}
                     {currentView.page === 'settings' && <UserSettings credentials={credentials} />}

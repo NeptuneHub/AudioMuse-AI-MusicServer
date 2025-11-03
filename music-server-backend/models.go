@@ -50,6 +50,17 @@ type FileItem struct {
 	Type string `json:"type"`
 }
 
+type RadioStation struct {
+	ID               int     `json:"id"`
+	UserID           int     `json:"user_id"`
+	Name             string  `json:"name"`
+	SeedSongs        string  `json:"seed_songs"` // JSON string: [{"id":"123","op":"ADD"},...]
+	Temperature      float64 `json:"temperature"`
+	SubtractDistance float64 `json:"subtract_distance"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
+}
+
 type LibraryPath struct {
 	ID            int    `json:"id"`
 	Path          string `json:"path"`

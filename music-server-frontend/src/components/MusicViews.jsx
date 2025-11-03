@@ -1,6 +1,6 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { API_BASE, subsonicFetch, starSong, unstarSong, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed } from '../api';
+import { API_BASE, subsonicFetch, starSong, unstarSong, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed, getRadioSeed } from '../api';
 
 const formatDate = (isoString) => {
     if (!isoString) return 'Never';
@@ -158,8 +158,11 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     const [discoveryView, setDiscoveryView] = useState('all'); // 'all', 'recent', 'popular', 'history'
     const [totalCount, setTotalCount] = useState(0);
     const [isStarredFilter, setIsStarredFilter] = useState(false);
+    const [radioFetching, setRadioFetching] = useState(false);
+    const radioFetchedRef = useRef(false); // Track if we already fetched more songs
 
     const isPlaylistView = !!filter?.playlistId;
+    const isRadioView = !!filter?.isRadio;
     const PAGE_SIZE = 10;
     
     // Check if playlist is read-only (owned by another user)
@@ -222,7 +225,81 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         setAllSongs([]);
         setHasMore(true);
         setDiscoveryView('all'); // Reset discovery view on filter/genre change
+        radioFetchedRef.current = false; // Reset radio fetch tracker
     }, [searchTerm, filter, refreshKey, selectedGenre]);
+
+    // Radio Auto-Rerun: Fetch more songs when approaching end of queue
+    useEffect(() => {
+        if (!isRadioView || !filter?.radioId || radioFetching || radioFetchedRef.current) return;
+        if (!currentSong || playQueue.length === 0) return;
+
+        // Find current song index in play queue
+        const currentIndex = playQueue.findIndex(s => s.id === currentSong.id);
+        if (currentIndex === -1) return;
+
+        // When we reach 20 songs before the end, fetch more (180/200 = 90%)
+        const songsRemaining = playQueue.length - currentIndex;
+        if (songsRemaining <= 20) {
+            console.log(`🔄 Radio auto-rerun triggered: ${songsRemaining} songs remaining`);
+            
+            const fetchMoreRadioSongs = async () => {
+                setRadioFetching(true);
+                radioFetchedRef.current = true;
+                
+                try {
+                    // Get the radio seed configuration
+                    const seedData = await getRadioSeed(filter.radioId);
+                    const items = JSON.parse(seedData.seed_songs);
+
+                    // Run alchemy with n=200
+                    const alchemyPayload = {
+                        items,
+                        n: 200,
+                        temperature: seedData.temperature,
+                        subtract_distance: seedData.subtract_distance
+                    };
+
+                    const response = await fetch('/api/alchemy', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        },
+                        body: JSON.stringify(alchemyPayload)
+                    });
+
+                    const data = await response.json();
+                    
+                    if (!response.ok || data.error) {
+                        console.error('Radio auto-rerun failed:', data.error);
+                        setRadioFetching(false);
+                        return;
+                    }
+
+                    // Map results and add to queue
+                    const newSongs = (data.results || []).map(r => ({
+                        id: r.item_id || r.id || r.songId || '',
+                        title: r.title || r.name || '',
+                        artist: r.author || r.artist || r.creator || ''
+                    }));
+
+                    console.log(`✨ Radio auto-rerun complete: ${newSongs.length} new songs added to queue`);
+                    
+                    // Add new songs to the queue
+                    newSongs.forEach(song => onAddToQueue(song));
+                    
+                } catch (err) {
+                    console.error('Radio auto-rerun error:', err);
+                } finally {
+                    setRadioFetching(false);
+                    // Reset after delay so we can fetch again on next cycle
+                    setTimeout(() => { radioFetchedRef.current = false; }, 10000);
+                }
+            };
+
+            fetchMoreRadioSongs();
+        }
+    }, [isRadioView, filter?.radioId, currentSong, playQueue, radioFetching, onAddToQueue]);
 
     // Load counts when genre changes or component mounts
     useEffect(() => {
@@ -437,6 +514,19 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                         </svg>
                         Read-Only: This playlist is owned by {playlistOwner}. You can view and play songs but cannot modify it.
+                    </p>
+                </div>
+            )}
+
+            {/* Radio auto-fetch indicator */}
+            {isRadioView && radioFetching && (
+                <div className="bg-teal-500/10 border border-teal-500/50 rounded-lg p-4 mb-6 animate-fade-in">
+                    <p className="text-teal-400 flex items-center gap-2">
+                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        📻 Radio generating more songs... (200 tracks incoming!)
                     </p>
                 </div>
             )}
@@ -732,11 +822,11 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                         // If current song, toggle play/pause
                                                         onTogglePlayPause();
                                                     } else {
-                                                        // If different song or nothing playing, play this song
-                                                        onPlay(song, allSongs.length > 0 ? allSongs : songs);
+                                                        // Play ONLY this single song (not the whole list)
+                                                        onPlay(song, [song]);
                                                     }
                                                 }}
-                                                title={isPlaying ? "Pause song" : "Play song"}
+                                                title={isPlaying ? "Pause song" : "Play this song"}
                                                 className={`p-1.5 rounded-lg border-2 transition-all hover:scale-105 flex items-center justify-center ${
                                                     isPlaying 
                                                         ? 'border-accent-500 text-accent-400 bg-accent-500/20 shadow-glow animate-pulse' 

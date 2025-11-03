@@ -186,6 +186,13 @@ func main() {
 	// Public endpoint used by the frontend to run Alchemy (may be allowed for non-admin flows)
 	r.POST("/api/alchemy", AlchemyHandler)
 
+	// Radio endpoints (authenticated)
+	r.POST("/api/radios", AuthMiddleware(), createRadioHandler)
+	r.GET("/api/radios", AuthMiddleware(), getRadiosHandler)
+	r.GET("/api/radios/:id/seed", AuthMiddleware(), getRadioSeedHandler)
+	r.DELETE("/api/radios/:id", AuthMiddleware(), deleteRadioHandler)
+	r.PUT("/api/radios/:id/name", AuthMiddleware(), updateRadioNameHandler)
+
 	// Map and voyager proxy endpoints (authenticated)
 	r.GET("/api/map", AuthMiddleware(), MapHandler)
 	r.GET("/api/voyager/search_tracks", AuthMiddleware(), VoyagerSearchTracksHandler)
