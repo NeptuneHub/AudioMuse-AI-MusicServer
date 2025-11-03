@@ -36,6 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     curl \
     bash \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install 'serve' globally to serve the built frontend

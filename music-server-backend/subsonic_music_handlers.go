@@ -50,9 +50,13 @@ func subsonicStream(c *gin.Context) {
 
 	useTranscoding := err == nil && transcodingEnabled == 1
 
+	log.Printf("🎧 Stream request: user=%s, song=%s, transcoding_enabled=%v, format=%s, bitrate=%d",
+		user.Username, filepath.Base(path), useTranscoding, format, bitrate)
+
 	if useTranscoding {
 		streamWithTranscoding(c, path, format, bitrate)
 	} else {
+		log.Printf("📀 Direct stream (no transcoding): %s", filepath.Base(path))
 		streamDirect(c, path)
 	}
 }
@@ -76,6 +80,8 @@ func streamDirect(c *gin.Context, path string) {
 }
 
 func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitrate int) {
+	log.Printf("🎵 TRANSCODING ACTIVE: format=%s, bitrate=%dkbps, file=%s", format, bitrate, filepath.Base(inputPath))
+
 	// Map format to FFmpeg codec and file extension
 	codecMap := map[string]string{
 		"mp3":  "libmp3lame",
@@ -92,7 +98,7 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 
 	codec, ok := codecMap[format]
 	if !ok {
-		log.Printf("Unsupported transcoding format: %s", format)
+		log.Printf("❌ Unsupported transcoding format: %s - falling back to direct stream", format)
 		streamDirect(c, inputPath)
 		return
 	}
@@ -110,16 +116,38 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 		"pipe:1", // Output to stdout
 	}
 
+	log.Printf("🔧 FFmpeg command: ffmpeg %s", strings.Join(args, " "))
+
 	cmd := exec.Command("ffmpeg", args...)
+
+	// Capture stderr for debugging
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		log.Printf("❌ Failed to create FFmpeg stderr pipe: %v", err)
+	} else {
+		go func() {
+			buf := make([]byte, 1024)
+			for {
+				n, err := stderr.Read(buf)
+				if n > 0 {
+					log.Printf("📹 FFmpeg: %s", string(buf[:n]))
+				}
+				if err != nil {
+					break
+				}
+			}
+		}()
+	}
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Printf("Failed to create FFmpeg stdout pipe: %v", err)
+		log.Printf("❌ Failed to create FFmpeg stdout pipe: %v - falling back to direct stream", err)
 		streamDirect(c, inputPath)
 		return
 	}
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("Failed to start FFmpeg: %v", err)
+		log.Printf("❌ Failed to start FFmpeg: %v - falling back to direct stream", err)
 		streamDirect(c, inputPath)
 		return
 	}
@@ -131,13 +159,21 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 		"aac":  "audio/aac",
 		"opus": "audio/opus",
 	}
-	c.Header("Content-Type", contentTypes[format])
+	contentType := contentTypes[format]
+	c.Header("Content-Type", contentType)
 	c.Header("Accept-Ranges", "none") // Transcoding doesn't support range requests
+	c.Header("X-Transcoded", "true")  // Custom header to indicate transcoding
+	c.Header("X-Transcode-Format", format)
+	c.Header("X-Transcode-Bitrate", bitrateStr)
+
+	log.Printf("✅ Streaming transcoded audio: Content-Type=%s, Bitrate=%s", contentType, bitrateStr)
 
 	// Stream transcoded output to client
-	io.Copy(c.Writer, stdout)
+	bytesWritten, _ := io.Copy(c.Writer, stdout)
 
 	cmd.Wait()
+
+	log.Printf("✅ Transcoding complete: %d bytes sent", bytesWritten)
 }
 
 func subsonicScrobble(c *gin.Context) {
