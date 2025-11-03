@@ -161,6 +161,9 @@ func main() {
 			userRoutes.POST("/login", loginUser)
 			// Return info about the logged-in user (JWT required)
 			userRoutes.GET("/me", AuthMiddleware(), userInfo)
+			// User transcoding settings
+			userRoutes.GET("/settings/transcoding", AuthMiddleware(), getUserTranscodingSettings)
+			userRoutes.POST("/settings/transcoding", AuthMiddleware(), updateUserTranscodingSettings)
 		}
 		adminRoutes := v1.Group("/admin")
 		adminRoutes.Use(AuthMiddleware(), adminOnly())
@@ -169,6 +172,12 @@ func main() {
 			adminRoutes.POST("/scan/cancel", cancelAdminScan)
 			adminRoutes.POST("/scan/rescan", rescanAllLibraries)
 		}
+		// Discovery views (authenticated)
+		v1.GET("/counts", AuthMiddleware(), getMusicCounts)
+		v1.GET("/recently-added", AuthMiddleware(), getRecentlyAdded)
+		v1.GET("/most-played", AuthMiddleware(), getMostPlayed)
+		v1.GET("/recently-played", AuthMiddleware(), getRecentlyPlayed)
+		v1.GET("/debug/songs", AuthMiddleware(), debugSongsHandler)
 	}
 
 	// Admin-protected cleaning endpoint that proxies to AudioMuse-AI

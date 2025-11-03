@@ -1,6 +1,6 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { API_BASE, subsonicFetch, starSong, unstarSong, getStarredSongs, getGenres } from '../api';
+import { API_BASE, subsonicFetch, starSong, unstarSong, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed } from '../api';
 
 const formatDate = (isoString) => {
     if (!isoString) return 'Never';
@@ -155,6 +155,9 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     const [genres, setGenres] = useState([]);
     const [selectedGenre, setSelectedGenre] = useState('');
     const [playlistOwner, setPlaylistOwner] = useState(null);
+    const [discoveryView, setDiscoveryView] = useState('all'); // 'all', 'recent', 'popular', 'history'
+    const [totalCount, setTotalCount] = useState(0);
+    const [isStarredFilter, setIsStarredFilter] = useState(false);
 
     const isPlaylistView = !!filter?.playlistId;
     const PAGE_SIZE = 10;
@@ -218,7 +221,23 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         setSongs([]);
         setAllSongs([]);
         setHasMore(true);
+        setDiscoveryView('all'); // Reset discovery view on filter/genre change
     }, [searchTerm, filter, refreshKey, selectedGenre]);
+
+    // Load counts when genre changes or component mounts
+    useEffect(() => {
+        const loadCounts = async () => {
+            try {
+                const counts = await getMusicCounts(selectedGenre);
+                setTotalCount(counts.songs);
+            } catch (err) {
+                console.error('Failed to load counts:', err);
+            }
+        };
+        if (!filter) {
+            loadCounts();
+        }
+    }, [selectedGenre, filter]);
 
     const loadMoreSongs = useCallback(() => {
         if (isLoading || !hasMore) return;
@@ -227,6 +246,29 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
 
         const fetcher = async () => {
             try {
+                // Handle discovery views with pagination
+                if (!filter && !searchTerm && discoveryView !== 'all') {
+                    let newSongs = [];
+                    try {
+                        if (discoveryView === 'recent') {
+                            newSongs = await getRecentlyAdded(PAGE_SIZE, songs.length, selectedGenre);
+                        } else if (discoveryView === 'popular') {
+                            newSongs = await getMostPlayed(PAGE_SIZE, songs.length, selectedGenre);
+                        } else if (discoveryView === 'history') {
+                            newSongs = await getRecentlyPlayed(PAGE_SIZE, songs.length, selectedGenre);
+                        }
+                        const songsArray = newSongs || [];
+                        setSongs(prev => [...prev, ...songsArray]);
+                        setHasMore(songsArray.length === PAGE_SIZE);
+                    } catch (err) {
+                        setError('Failed to load more songs: ' + err.message);
+                        setHasMore(false);
+                    } finally {
+                        setIsLoading(false);
+                    }
+                    return;
+                }
+
                 if (searchTerm.length >= 3) {
                     const data = await subsonicFetch('search2.view', { query: searchTerm, songCount: PAGE_SIZE, songOffset: songs.length });
                     const songList = data.searchResult2?.song || data.searchResult3?.song || [];
@@ -316,14 +358,14 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         };
 
         fetcher();
-    }, [filter, searchTerm, songs.length, allSongs, isLoading, hasMore, selectedGenre, credentials?.username]);
+    }, [filter, searchTerm, songs.length, allSongs, isLoading, hasMore, selectedGenre, credentials?.username, discoveryView]);
 
     useEffect(() => {
-        if (songs.length === 0 && hasMore && (searchTerm.length >= 3 || filter || selectedGenre)) {
+        if (songs.length === 0 && hasMore && (searchTerm.length >= 3 || filter || selectedGenre || discoveryView !== 'all')) {
             const timer = setTimeout(() => loadMoreSongs(), 300);
             return () => clearTimeout(timer);
         }
-    }, [songs.length, hasMore, loadMoreSongs, searchTerm, filter, selectedGenre]);
+    }, [songs.length, hasMore, loadMoreSongs, searchTerm, filter, selectedGenre, discoveryView]);
 
     const observer = useRef();
     const lastSongElementRef = useCallback(node => {
@@ -398,6 +440,135 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     </p>
                 </div>
             )}
+
+            {/* Discovery Tabs - only show when not in a filtered view */}
+            {!filter && (
+                <div className="mb-6">
+                    <div className="flex gap-2 overflow-x-auto pb-2">
+                        <button
+                            onClick={() => {
+                                setDiscoveryView('all');
+                                setSongs([]);
+                                setAllSongs([]);
+                                setHasMore(true);
+                                setSearchTerm('');
+                            }}
+                            className={`px-3 sm:px-4 py-2 rounded-lg font-semibold whitespace-nowrap transition-all ${
+                                discoveryView === 'all'
+                                    ? 'bg-gradient-accent text-white shadow-glow'
+                                    : 'bg-dark-750 text-gray-400 hover:bg-dark-700 hover:text-white'
+                            }`}
+                            title="All Songs"
+                        >
+                            <span className="flex items-center gap-2">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
+                                </svg>
+                                <span className={discoveryView === 'all' ? 'inline' : 'hidden sm:inline'}>All Songs {totalCount > 0 && `(${totalCount})`}</span>
+                            </span>
+                        </button>
+                        <button
+                            onClick={async () => {
+                                setDiscoveryView('recent');
+                                setSongs([]);
+                                setAllSongs([]);
+                                setIsLoading(true);
+                                setHasMore(true);
+                                try {
+                                    const newSongs = await getRecentlyAdded(PAGE_SIZE, 0, selectedGenre);
+                                    const songsArray = newSongs || [];
+                                    setAllSongs(songsArray);
+                                    setSongs(songsArray.slice(0, PAGE_SIZE));
+                                    setHasMore(songsArray.length >= PAGE_SIZE);
+                                } catch (err) {
+                                    setError('Failed to load recently added songs');
+                                } finally {
+                                    setIsLoading(false);
+                                }
+                            }}
+                            className={`px-3 sm:px-4 py-2 rounded-lg font-semibold whitespace-nowrap transition-all ${
+                                discoveryView === 'recent'
+                                    ? 'bg-gradient-accent text-white shadow-glow'
+                                    : 'bg-dark-750 text-gray-400 hover:bg-dark-700 hover:text-white'
+                            }`}
+                            title="Recently Added"
+                        >
+                            <span className="flex items-center gap-2">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <span className={discoveryView === 'recent' ? 'inline' : 'hidden sm:inline'}>Recently Added</span>
+                            </span>
+                        </button>
+                        <button
+                            onClick={async () => {
+                                setDiscoveryView('popular');
+                                setSongs([]);
+                                setAllSongs([]);
+                                setIsLoading(true);
+                                setHasMore(true);
+                                try {
+                                    const newSongs = await getMostPlayed(PAGE_SIZE, 0, selectedGenre);
+                                    const songsArray = newSongs || [];
+                                    setAllSongs(songsArray);
+                                    setSongs(songsArray.slice(0, PAGE_SIZE));
+                                    setHasMore(songsArray.length >= PAGE_SIZE);
+                                } catch (err) {
+                                    setError('Failed to load most played songs');
+                                } finally {
+                                    setIsLoading(false);
+                                }
+                            }}
+                            className={`px-3 sm:px-4 py-2 rounded-lg font-semibold whitespace-nowrap transition-all ${
+                                discoveryView === 'popular'
+                                    ? 'bg-gradient-accent text-white shadow-glow'
+                                    : 'bg-dark-750 text-gray-400 hover:bg-dark-700 hover:text-white'
+                            }`}
+                            title="Most Played"
+                        >
+                            <span className="flex items-center gap-2">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                                </svg>
+                                <span className={discoveryView === 'popular' ? 'inline' : 'hidden sm:inline'}>Most Played</span>
+                            </span>
+                        </button>
+                        <button
+                            onClick={async () => {
+                                setDiscoveryView('history');
+                                setSongs([]);
+                                setAllSongs([]);
+                                setIsLoading(true);
+                                setHasMore(true);
+                                try {
+                                    const newSongs = await getRecentlyPlayed(PAGE_SIZE, 0, selectedGenre);
+                                    const songsArray = newSongs || [];
+                                    setAllSongs(songsArray);
+                                    setSongs(songsArray.slice(0, PAGE_SIZE));
+                                    setHasMore(songsArray.length >= PAGE_SIZE);
+                                } catch (err) {
+                                    setError('Failed to load recently played songs');
+                                } finally {
+                                    setIsLoading(false);
+                                }
+                            }}
+                            className={`px-3 sm:px-4 py-2 rounded-lg font-semibold whitespace-nowrap transition-all ${
+                                discoveryView === 'history'
+                                    ? 'bg-gradient-accent text-white shadow-glow'
+                                    : 'bg-dark-750 text-gray-400 hover:bg-dark-700 hover:text-white'
+                            }`}
+                            title="Play History"
+                        >
+                            <span className="flex items-center gap-2">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                </svg>
+                                <span className={discoveryView === 'history' ? 'inline' : 'hidden sm:inline'}>Play History</span>
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            )}
             
             {/* Modern Search Bar */}
             <div className="mb-6 flex flex-col sm:flex-row gap-3">
@@ -452,6 +623,16 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                 )}
                 <button 
                     onClick={async () => {
+                        // Toggle: if already showing starred, reset to all songs
+                        if (isStarredFilter) {
+                            setIsStarredFilter(false);
+                            setSongs([]);
+                            setAllSongs([]);
+                            setHasMore(true);
+                            setRefreshKey(prev => prev + 1);
+                            return;
+                        }
+
                         try {
                             // Clear all state first to ensure clean reset
                             setSongs([]);
@@ -461,9 +642,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             setSearchTerm('');
                             setSelectedGenre('');
                             setHasMore(false);
-                            
-                            // Force refresh by incrementing refreshKey
-                            setRefreshKey(prev => prev + 1);
+                            setIsStarredFilter(true);
                             
                             const data = await getStarredSongs();
                             const starredSongs = data.starred?.song;
@@ -481,11 +660,16 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             setHasMore(songList.length > PAGE_SIZE);
                         } catch (err) {
                             setError('Failed to load starred songs: ' + err.message);
+                            setIsStarredFilter(false);
                         } finally {
                             setIsLoading(false);
                         }
                     }}
-                    className="inline-flex items-center gap-2 bg-dark-750 hover:bg-dark-700 text-yellow-400 border border-yellow-400/30 font-semibold py-2.5 px-5 rounded-lg transition-all hover:border-yellow-400/50"
+                    className={`inline-flex items-center gap-2 font-semibold py-2.5 px-5 rounded-lg transition-all ${
+                        isStarredFilter
+                            ? 'bg-yellow-500/20 text-yellow-400 border-2 border-yellow-400 shadow-glow'
+                            : 'bg-dark-750 hover:bg-dark-700 text-yellow-400 border border-yellow-400/30 hover:border-yellow-400/50'
+                    }`}
                 >
                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                         <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
@@ -790,6 +974,7 @@ export function Albums({ credentials, filter, onNavigate }) {
     const [hasMore, setHasMore] = useState(true);
     const [genres, setGenres] = useState([]);
     const [selectedGenre, setSelectedGenre] = useState('');
+    const [totalCount, setTotalCount] = useState(0);
     const PAGE_SIZE = 10;
     
     // Load genres on component mount
@@ -830,7 +1015,20 @@ export function Albums({ credentials, filter, onNavigate }) {
     useEffect(() => {
         setAlbums([]);
         setHasMore(true);
-    }, [searchTerm, selectedGenre])
+    }, [searchTerm, selectedGenre]);
+
+    // Load album counts
+    useEffect(() => {
+        const loadCounts = async () => {
+            try {
+                const counts = await getMusicCounts(selectedGenre);
+                setTotalCount(counts.albums);
+            } catch (err) {
+                console.error('Failed to load album counts:', err);
+            }
+        };
+        loadCounts();
+    }, [selectedGenre])
 
 
     const loadMoreAlbums = useCallback(() => {
@@ -887,6 +1085,16 @@ export function Albums({ credentials, filter, onNavigate }) {
 
     return (
         <div>
+            {/* Count Header */}
+            {totalCount > 0 && (
+                <div className="mb-4">
+                    <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                        Albums
+                        <span className="text-accent-400 text-lg">({totalCount})</span>
+                    </h2>
+                </div>
+            )}
+            
             {/* Modern Search Bar */}
             <div className="mb-6 flex flex-col sm:flex-row gap-3">
                 <div className="flex-1 relative">
@@ -977,12 +1185,26 @@ export function Artists({ credentials, onNavigate }) {
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [hasMore, setHasMore] = useState(true);
+    const [totalCount, setTotalCount] = useState(0);
     const PAGE_SIZE = 50; // Increased page size for better performance
 
     useEffect(() => {
         setArtists([]);
         setHasMore(true);
     }, [searchTerm]);
+
+    // Load artist counts
+    useEffect(() => {
+        const loadCounts = async () => {
+            try {
+                const counts = await getMusicCounts('');
+                setTotalCount(counts.artists);
+            } catch (err) {
+                console.error('Failed to load artist counts:', err);
+            }
+        };
+        loadCounts();
+    }, []);
 
     const loadMoreArtists = useCallback(() => {
         if (isLoading || !hasMore) return;
@@ -1037,6 +1259,16 @@ export function Artists({ credentials, onNavigate }) {
 
     return (
         <div>
+            {/* Count Header */}
+            {totalCount > 0 && (
+                <div className="mb-4">
+                    <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                        Artists
+                        <span className="text-accent-400 text-lg">({totalCount})</span>
+                    </h2>
+                </div>
+            )}
+            
             {/* Modern Search Bar */}
             <div className="mb-6">
                 <div className="relative">

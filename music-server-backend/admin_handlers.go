@@ -145,10 +145,20 @@ func processPath(scanPath string) int64 {
 				if genre == "" {
 					genre = "Unknown"
 				}
-				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path, genre, date_added, date_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				// Use INSERT ... ON CONFLICT to update existing songs or insert new ones
+				// This ensures date_added is set for old songs missing it, and date_updated is always current
+				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, genre, date_added, date_updated) 
+					VALUES (?, ?, ?, ?, ?, ?, ?)
+					ON CONFLICT(path) DO UPDATE SET 
+						title=excluded.title, 
+						artist=excluded.artist, 
+						album=excluded.album, 
+						genre=excluded.genre,
+						date_added=COALESCE(songs.date_added, excluded.date_added),
+						date_updated=excluded.date_updated`,
 					meta.Title(), meta.Artist(), meta.Album(), path, genre, currentTime, currentTime)
 				if err != nil {
-					log.Printf("Error inserting song from %s into DB: %v", path, err)
+					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
 				}
 
@@ -205,10 +215,19 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 				if genre == "" {
 					genre = "Unknown"
 				}
-				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path, genre, date_added, date_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				// Use UPSERT to update existing songs or insert new ones
+				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, genre, date_added, date_updated) 
+					VALUES (?, ?, ?, ?, ?, ?, ?)
+					ON CONFLICT(path) DO UPDATE SET 
+						title=excluded.title, 
+						artist=excluded.artist, 
+						album=excluded.album, 
+						genre=excluded.genre,
+						date_added=COALESCE(songs.date_added, excluded.date_added),
+						date_updated=excluded.date_updated`,
 					meta.Title(), meta.Artist(), meta.Album(), path, genre, currentTime, currentTime)
 				if err != nil {
-					log.Printf("Error inserting song from %s into DB: %v", path, err)
+					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
 				}
 
@@ -268,10 +287,30 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				if genre == "" {
 					genre = "Unknown"
 				}
-				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path, genre, date_added, date_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
-					meta.Title(), meta.Artist(), meta.Album(), path, genre, currentTime, currentTime)
+
+				title := meta.Title()
+				artist := meta.Artist()
+				album := meta.Album()
+
+				// DEBUG: Log the first few songs being inserted
+				if songsAdded < 3 {
+					log.Printf("DEBUG [processPathWithTracking]: Inserting song #%d: title='%s', date_added='%s', date_updated='%s'",
+						songsAdded+1, title, currentTime, currentTime)
+				}
+
+				// Use UPSERT to update existing songs or insert new ones
+				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, genre, date_added, date_updated) 
+					VALUES (?, ?, ?, ?, ?, ?, ?)
+					ON CONFLICT(path) DO UPDATE SET 
+						title=excluded.title, 
+						artist=excluded.artist, 
+						album=excluded.album, 
+						genre=excluded.genre,
+						date_added=COALESCE(songs.date_added, excluded.date_added),
+						date_updated=excluded.date_updated`,
+					title, artist, album, path, genre, currentTime, currentTime)
 				if err != nil {
-					log.Printf("Error inserting song from %s into DB: %v", path, err)
+					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
 				}
 
@@ -280,6 +319,17 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 					songsAdded++
 					db.Exec("UPDATE scan_status SET songs_added = ?, last_update_time = ? WHERE id = 1",
 						songsAdded, time.Now().Format(time.RFC3339))
+
+					// DEBUG: Verify the song was actually inserted with date_added
+					if songsAdded <= 3 {
+						var checkDateAdded string
+						err := db.QueryRow("SELECT date_added FROM songs WHERE path = ?", path).Scan(&checkDateAdded)
+						if err != nil {
+							log.Printf("DEBUG [processPathWithTracking]: ERROR querying date_added after insert: %v", err)
+						} else {
+							log.Printf("DEBUG [processPathWithTracking]: Verified song #%d in DB: date_added='%s'", songsAdded, checkDateAdded)
+						}
+					}
 				}
 			}
 		}
@@ -330,18 +380,49 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 				if genre == "" {
 					genre = "Unknown"
 				}
-				res, err := db.Exec("INSERT OR IGNORE INTO songs (title, artist, album, path, genre, date_added, date_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
-					meta.Title(), meta.Artist(), meta.Album(), path, genre, currentTime, currentTime)
+
+				title := meta.Title()
+				artist := meta.Artist()
+				album := meta.Album()
+
+				// DEBUG: Log the first few songs being inserted
+				if *totalSongsAdded < 3 {
+					log.Printf("DEBUG [processPathWithRunningTotalAndTracking]: Inserting song #%d: title='%s', date_added='%s'",
+						*totalSongsAdded+1, title, currentTime)
+				}
+
+				// Use UPSERT to update existing songs or insert new ones
+				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, genre, date_added, date_updated) 
+					VALUES (?, ?, ?, ?, ?, ?, ?)
+					ON CONFLICT(path) DO UPDATE SET 
+						title=excluded.title, 
+						artist=excluded.artist, 
+						album=excluded.album, 
+						genre=excluded.genre,
+						date_added=COALESCE(songs.date_added, excluded.date_added),
+						date_updated=excluded.date_updated`,
+					title, artist, album, path, genre, currentTime, currentTime)
 				if err != nil {
-					log.Printf("Error inserting song from %s into DB: %v", path, err)
+					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
 				}
 
 				rowsAffected, _ := res.RowsAffected()
 				if rowsAffected > 0 {
-					*totalSongsAdded++
+					(*totalSongsAdded)++
 					db.Exec("UPDATE scan_status SET songs_added = ?, last_update_time = ? WHERE id = 1",
 						*totalSongsAdded, time.Now().Format(time.RFC3339))
+
+					// DEBUG: Verify first few songs were inserted with date_added
+					if *totalSongsAdded <= 3 {
+						var checkDateAdded string
+						err := db.QueryRow("SELECT date_added FROM songs WHERE path = ?", path).Scan(&checkDateAdded)
+						if err != nil {
+							log.Printf("DEBUG [processPathWithRunningTotalAndTracking]: ERROR querying date_added: %v", err)
+						} else {
+							log.Printf("DEBUG [processPathWithRunningTotalAndTracking]: Verified song #%d in DB: date_added='%s'", *totalSongsAdded, checkDateAdded)
+						}
+					}
 				}
 			}
 		}

@@ -127,3 +127,34 @@ export async function getAlbums(params = {}) {
 export async function rescanLibrary() {
     return await apiFetch('/api/v1/admin/scan/rescan', { method: 'POST' });
 }
+
+// Discovery views
+export async function getMusicCounts(genre = '') {
+    const params = genre ? `?genre=${encodeURIComponent(genre)}` : '';
+    const res = await apiFetch(`/api/v1/counts${params}`);
+    return await res.json();
+}
+
+export async function getRecentlyAdded(limit = 50, offset = 0, genre = '') {
+    const params = new URLSearchParams({ limit, offset });
+    if (genre) params.set('genre', genre);
+    const res = await apiFetch(`/api/v1/recently-added?${params.toString()}`);
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+}
+
+export async function getMostPlayed(limit = 50, offset = 0, genre = '') {
+    const params = new URLSearchParams({ limit, offset });
+    if (genre) params.set('genre', genre);
+    const res = await apiFetch(`/api/v1/most-played?${params.toString()}`);
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+}
+
+export async function getRecentlyPlayed(limit = 50, offset = 0, genre = '') {
+    const params = new URLSearchParams({ limit, offset });
+    if (genre) params.set('genre', genre);
+    const res = await apiFetch(`/api/v1/recently-played?${params.toString()}`);
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+}

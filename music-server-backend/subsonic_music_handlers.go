@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -26,7 +27,7 @@ import (
 // --- Subsonic Music Handlers ---
 
 func subsonicStream(c *gin.Context) {
-	_ = c.MustGet("user") // Auth is handled by middleware
+	user := c.MustGet("user").(User)
 
 	songID := c.Query("id")
 	var path string
@@ -40,6 +41,23 @@ func subsonicStream(c *gin.Context) {
 		return
 	}
 
+	// Check if user has transcoding enabled
+	var transcodingEnabled int
+	var format string
+	var bitrate int
+	err = db.QueryRow("SELECT enabled, format, bitrate FROM transcoding_settings WHERE user_id = ?", user.ID).
+		Scan(&transcodingEnabled, &format, &bitrate)
+
+	useTranscoding := err == nil && transcodingEnabled == 1
+
+	if useTranscoding {
+		streamWithTranscoding(c, path, format, bitrate)
+	} else {
+		streamDirect(c, path)
+	}
+}
+
+func streamDirect(c *gin.Context, path string) {
 	file, err := os.Open(path)
 	if err != nil {
 		log.Printf("Could not open file for streaming %s: %v", path, err)
@@ -57,9 +75,73 @@ func subsonicStream(c *gin.Context) {
 	http.ServeContent(c.Writer, c.Request, fileInfo.Name(), fileInfo.ModTime(), file)
 }
 
+func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitrate int) {
+	// Map format to FFmpeg codec and file extension
+	codecMap := map[string]string{
+		"mp3":  "libmp3lame",
+		"ogg":  "libvorbis",
+		"aac":  "aac",
+		"opus": "libopus",
+	}
+	extMap := map[string]string{
+		"mp3":  "mp3",
+		"ogg":  "ogg",
+		"aac":  "m4a",
+		"opus": "opus",
+	}
+
+	codec, ok := codecMap[format]
+	if !ok {
+		log.Printf("Unsupported transcoding format: %s", format)
+		streamDirect(c, inputPath)
+		return
+	}
+
+	ext := extMap[format]
+	bitrateStr := strconv.Itoa(bitrate) + "k"
+
+	// Build FFmpeg command
+	args := []string{
+		"-i", inputPath,
+		"-vn", // No video
+		"-acodec", codec,
+		"-b:a", bitrateStr,
+		"-f", ext,
+		"pipe:1", // Output to stdout
+	}
+
+	cmd := exec.Command("ffmpeg", args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Printf("Failed to create FFmpeg stdout pipe: %v", err)
+		streamDirect(c, inputPath)
+		return
+	}
+
+	if err := cmd.Start(); err != nil {
+		log.Printf("Failed to start FFmpeg: %v", err)
+		streamDirect(c, inputPath)
+		return
+	}
+
+	// Set appropriate content type
+	contentTypes := map[string]string{
+		"mp3":  "audio/mpeg",
+		"ogg":  "audio/ogg",
+		"aac":  "audio/aac",
+		"opus": "audio/opus",
+	}
+	c.Header("Content-Type", contentTypes[format])
+	c.Header("Accept-Ranges", "none") // Transcoding doesn't support range requests
+
+	// Stream transcoded output to client
+	io.Copy(c.Writer, stdout)
+
+	cmd.Wait()
+}
+
 func subsonicScrobble(c *gin.Context) {
 	user := c.MustGet("user").(User)
-	_ = user // Auth is handled by middleware
 
 	songID := c.Query("id")
 	if songID == "" {
@@ -67,14 +149,26 @@ func subsonicScrobble(c *gin.Context) {
 		return
 	}
 
+	now := time.Now().Format(time.RFC3339)
+
 	_, err := db.Exec(`
 		UPDATE songs
 		SET play_count = play_count + 1, last_played = ?
 		WHERE id = ?
-	`, time.Now().Format(time.RFC3339), songID)
+	`, now, songID)
 
 	if err != nil {
 		log.Printf("Error updating play count for user '%s' on song '%s': %v", user.Username, songID, err)
+	}
+
+	// Track play history for this user
+	_, err = db.Exec(`
+		INSERT INTO play_history (user_id, song_id, played_at)
+		VALUES (?, ?, ?)
+	`, user.ID, songID, now)
+
+	if err != nil {
+		log.Printf("Error inserting play history for user '%s' on song '%s': %v", user.Username, songID, err)
 	}
 
 	log.Printf("Scrobbled song '%s' for user '%s'", songID, user.Username)
@@ -790,18 +884,18 @@ func subsonicGetGenres(c *gin.Context) {
 // subsonicGetSongsByGenre handles the getSongsByGenre.view API endpoint
 func subsonicGetSongsByGenre(c *gin.Context) {
 	user := c.MustGet("user").(User)
-	
+
 	genre := c.Query("genre")
 	log.Printf("[DEBUG] *** getSongsByGenre ENDPOINT CALLED *** Genre: '%s', User: %d", genre, user.ID)
-	
+
 	if genre == "" {
 		log.Printf("[DEBUG] *** NO GENRE PROVIDED ***")
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter genre is missing."))
 		return
 	}
-	
+
 	log.Printf("[DEBUG] getSongsByGenre: Looking for genre '%s' for user %d", genre, user.ID)
-	
+
 	// Debug: Check what genres actually exist
 	var sampleGenres []string
 	testRows, err := db.Query("SELECT DISTINCT genre FROM songs WHERE genre IS NOT NULL AND genre != '' LIMIT 10")
@@ -815,7 +909,7 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 		testRows.Close()
 		log.Printf("[DEBUG] Sample genres in database: %v", sampleGenres)
 	}
-	
+
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "50"))
 	if size > 500 {
 		size = 500
@@ -824,7 +918,7 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 	if offset < 0 {
 		offset = 0
 	}
-	
+
 	// Simple test: just get any songs with genres first
 	query := `
 		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''),
@@ -835,12 +929,12 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 		ORDER BY s.artist, s.title 
 		LIMIT ? OFFSET ?
 	`
-	
+
 	// Simple pattern - just check if genre contains the search term anywhere
 	genrePattern := "%" + genre + "%"
-	
+
 	log.Printf("[DEBUG] getSongsByGenre: Simple query with pattern: '%s'", genrePattern)
-	
+
 	rows, err := db.Query(query, user.ID, genrePattern, size, offset)
 	if err != nil {
 		log.Printf("[ERROR] getSongsByGenre: Query failed: %v", err)
@@ -848,19 +942,19 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 		return
 	}
 	defer rows.Close()
-	
+
 	var songs []SubsonicSong
 	for rows.Next() {
 		var songFromDb Song
 		var lastPlayed sql.NullString
 		var starred int
-		
-		if err := rows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, 
+
+		if err := rows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album,
 			&songFromDb.Path, &songFromDb.PlayCount, &lastPlayed, &songFromDb.Genre, &starred); err != nil {
 			log.Printf("[ERROR] getSongsByGenre: Scan failed: %v", err)
 			continue
 		}
-		
+
 		subsonicSong := SubsonicSong{
 			ID:        strconv.Itoa(songFromDb.ID),
 			Title:     songFromDb.Title,
@@ -871,25 +965,23 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 			PlayCount: songFromDb.PlayCount,
 			Starred:   starred == 1,
 		}
-		
+
 		log.Printf("[DEBUG] Found song: ID=%d, Title='%s', Genre='%s'", songFromDb.ID, songFromDb.Title, songFromDb.Genre)
-		
+
 		if lastPlayed.Valid {
 			subsonicSong.LastPlayed = lastPlayed.String
 		}
-		
+
 		songs = append(songs, subsonicSong)
 	}
-	
+
 	// Ensure songs is never nil for JSON marshaling
 	if songs == nil {
 		songs = []SubsonicSong{}
 	}
-	
-	log.Printf("[DEBUG] getSongsByGenre: Found %d songs for genre '%s'", len(songs), genre)
-	
 
-	
+	log.Printf("[DEBUG] getSongsByGenre: Found %d songs for genre '%s'", len(songs), genre)
+
 	result := &SubsonicSongsByGenre{Songs: songs}
 	subsonicRespond(c, newSubsonicResponse(result))
 }

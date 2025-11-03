@@ -17,17 +17,21 @@ type User struct {
 }
 
 type Song struct {
-	ID          int    `json:"id"`
-	Title       string `json:"title"`
-	Artist      string `json:"artist"`
-	Album       string `json:"album"`
-	Path        string `json:"-"` // Don't expose path in JSON
-	PlayCount   int    `json:"playCount"`
-	LastPlayed  string `json:"lastPlayed"`
-	DateAdded   string `json:"dateAdded"`
-	DateUpdated string `json:"dateUpdated"`
-	Starred     bool   `json:"starred"`
-	Genre       string `json:"genre"`
+	ID                  int      `json:"id"`
+	Title               string   `json:"title"`
+	Artist              string   `json:"artist"`
+	Album               string   `json:"album"`
+	Path                string   `json:"-"` // Don't expose path in JSON
+	PlayCount           int      `json:"playCount"`
+	LastPlayed          string   `json:"lastPlayed"`
+	DateAdded           string   `json:"dateAdded"`
+	DateUpdated         string   `json:"dateUpdated"`
+	Starred             bool     `json:"starred"`
+	Genre               string   `json:"genre"`
+	ReplayGainTrackGain *float64 `json:"replaygainTrackGain,omitempty"`
+	ReplayGainTrackPeak *float64 `json:"replaygainTrackPeak,omitempty"`
+	ReplayGainAlbumGain *float64 `json:"replaygainAlbumGain,omitempty"`
+	ReplayGainAlbumPeak *float64 `json:"replaygainAlbumPeak,omitempty"`
 }
 
 type Album struct {

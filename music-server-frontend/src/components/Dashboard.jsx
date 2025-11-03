@@ -5,6 +5,7 @@ import SongAlchemy from './SongAlchemy.jsx';
 import Map from './Map.jsx';
 import Playlists from './Playlists.jsx';
 import AdminPanel from './AdminPanel.jsx';
+import UserSettings from './UserSettings.jsx';
 import CustomAudioPlayer from './AudioPlayer.jsx';
 import PlayQueueView from './PlayQueueView.jsx';
 import { subsonicFetch } from '../api';
@@ -310,7 +311,17 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						<NavLink page="playlists" title="Playlists">Playlists</NavLink>
 						{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
 						
-						{/* Keyboard shortcuts help button */}
+					{/* User Settings button */}
+					<button 
+						onClick={() => handleResetNavigation('settings', 'Settings')}
+						title="User Settings"
+						className="px-2 py-2 text-gray-400 hover:text-accent-400 transition-colors rounded-lg"
+					>
+						<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+							<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+						</svg>
+					</button>						{/* Keyboard shortcuts help button */}
 						<button 
 							title="Keyboard Shortcuts: Space (Play/Pause), Ctrl+← (Previous), Ctrl+→ (Next), Ctrl+↑ (Vol+), Ctrl+↓ (Vol-)"
 							className="px-2 py-2 text-gray-400 hover:text-accent-400 transition-colors rounded-lg"
@@ -355,6 +366,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						<NavLink page="map" title="Map">Map</NavLink>
 						<NavLink page="playlists" title="Playlists">Playlists</NavLink>
 						{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
+						<NavLink page="settings" title="Settings">Settings</NavLink>
 						<button 
 							onClick={onLogout} 
 							className="w-full text-left px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold transition-all duration-300"
@@ -390,6 +402,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                     {currentView.page === 'alchemy' && <SongAlchemy onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} />}
                     {currentView.page === 'map' && <Map onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} onRemoveFromQueue={handleRemoveFromQueue} onClearQueue={handleClearQueue} playQueue={playQueue} />}
                     {currentView.page === 'admin' && isAdmin && <AdminPanel onConfigChange={fetchConfig} />}
+                    {currentView.page === 'settings' && <UserSettings credentials={credentials} />}
 				</main>
 
             <CustomAudioPlayer

@@ -73,6 +73,73 @@ func migrateDB() error {
 		log.Printf("migrateDB: ensureColumnExists starred: %v", err)
 	}
 
+	// Ensure songs table has 'date_added' column
+	if err := ensureColumnExists(db, "songs", "date_added", "TEXT"); err != nil {
+		log.Printf("migrateDB: ensureColumnExists date_added: %v", err)
+	}
+
+	// Ensure songs table has 'date_updated' column
+	if err := ensureColumnExists(db, "songs", "date_updated", "TEXT"); err != nil {
+		log.Printf("migrateDB: ensureColumnExists date_updated: %v", err)
+	}
+
+	// Backfill date_added and date_updated for existing songs that don't have them
+	// This is a one-time migration to set current timestamp for older songs
+	// Use strftime to match RFC3339 format used in application code
+	_, err = db.Exec(`UPDATE songs SET date_added = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE date_added IS NULL OR date_added = ''`)
+	if err != nil {
+		log.Printf("migrateDB: failed to backfill date_added: %v", err)
+	}
+	_, err = db.Exec(`UPDATE songs SET date_updated = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE date_updated IS NULL OR date_updated = ''`)
+	if err != nil {
+		log.Printf("migrateDB: failed to backfill date_updated: %v", err)
+	}
+
+	// Add ReplayGain columns
+	if err := ensureColumnExists(db, "songs", "replaygain_track_gain", "REAL"); err != nil {
+		log.Printf("migrateDB: ensureColumnExists replaygain_track_gain: %v", err)
+	}
+	if err := ensureColumnExists(db, "songs", "replaygain_track_peak", "REAL"); err != nil {
+		log.Printf("migrateDB: ensureColumnExists replaygain_track_peak: %v", err)
+	}
+	if err := ensureColumnExists(db, "songs", "replaygain_album_gain", "REAL"); err != nil {
+		log.Printf("migrateDB: ensureColumnExists replaygain_album_gain: %v", err)
+	}
+	if err := ensureColumnExists(db, "songs", "replaygain_album_peak", "REAL"); err != nil {
+		log.Printf("migrateDB: ensureColumnExists replaygain_album_peak: %v", err)
+	}
+
+	// Create play_history table for Recently Played tracking
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS play_history (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		song_id INTEGER NOT NULL,
+		played_at TEXT NOT NULL,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+		FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE
+	);`)
+	if err != nil {
+		log.Printf("migrateDB: failed to create play_history table: %v", err)
+	}
+
+	// Create index for play_history queries
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_play_history_user_played ON play_history (user_id, played_at DESC);`)
+	if err != nil {
+		log.Printf("migrateDB: failed to create play_history index: %v", err)
+	}
+
+	// Create transcoding_settings table
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS transcoding_settings (
+		user_id INTEGER PRIMARY KEY NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 0,
+		format TEXT NOT NULL DEFAULT 'mp3',
+		bitrate INTEGER NOT NULL DEFAULT 128,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	);`)
+	if err != nil {
+		log.Printf("migrateDB: failed to create transcoding_settings table: %v", err)
+	}
+
 	log.Println("migrateDB: completed migrations (idempotent)")
 	return nil
 }
