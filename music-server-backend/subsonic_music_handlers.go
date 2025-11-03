@@ -26,6 +26,160 @@ import (
 
 // --- Subsonic Music Handlers ---
 
+// AudioInfo represents detected audio file information
+type AudioInfo struct {
+	Format  string
+	Bitrate int
+	Codec   string
+}
+
+// detectAudioFormat detects the format and bitrate of an audio file using FFprobe
+func detectAudioFormat(filePath string) (*AudioInfo, error) {
+	info := &AudioInfo{}
+
+	// Detect format from file extension
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".mp3":
+		info.Format = "mp3"
+		info.Codec = "mp3"
+	case ".flac":
+		info.Format = "flac"
+		info.Codec = "flac"
+	case ".m4a", ".aac":
+		info.Format = "aac"
+		info.Codec = "aac"
+	case ".ogg":
+		info.Format = "ogg"
+		info.Codec = "vorbis"
+	case ".opus":
+		info.Format = "opus"
+		info.Codec = "opus"
+	default:
+		info.Format = "unknown"
+	}
+
+	// Use ffprobe to get accurate bitrate
+	// ffprobe -v error -show_entries format=bit_rate -of default=noprint_wrappers=1:nokey=1 file.mp3
+	cmd := exec.Command("ffprobe",
+		"-v", "error",
+		"-show_entries", "format=bit_rate",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		filePath)
+
+	output, err := cmd.Output()
+	if err != nil {
+		log.Printf("⚠️  FFprobe failed for %s: %v (will transcode)", filepath.Base(filePath), err)
+		info.Bitrate = 0 // Unknown bitrate, will transcode
+		return info, nil
+	}
+
+	// Parse bitrate (in bits per second)
+	bitrateStr := strings.TrimSpace(string(output))
+	bitrateBps, err := strconv.Atoi(bitrateStr)
+	if err != nil || bitrateBps == 0 {
+		log.Printf("⚠️  Could not parse bitrate '%s' for %s", bitrateStr, filepath.Base(filePath))
+		info.Bitrate = 0
+		return info, nil
+	}
+
+	// Convert bps to kbps
+	info.Bitrate = bitrateBps / 1000
+	log.Printf("🔍 Detected: %s, %dkbps, codec=%s", info.Format, info.Bitrate, info.Codec)
+
+	return info, nil
+}
+
+// shouldTranscode determines if transcoding is necessary
+func shouldTranscode(sourceInfo *AudioInfo, targetFormat string, targetBitrate int) bool {
+	// Always transcode lossless formats (FLAC) to save bandwidth
+	if sourceInfo.Format == "flac" {
+		log.Printf("🔄 Transcoding needed: source is lossless FLAC")
+		return true
+	}
+
+	// If source format matches target format
+	if sourceInfo.Format == targetFormat {
+		// If we can't determine source bitrate, assume transcoding needed
+		if sourceInfo.Bitrate == 0 {
+			log.Printf("🔄 Transcoding: source format matches but bitrate unknown")
+			return true
+		}
+
+		// If source bitrate is lower or equal to target, no need to transcode
+		if sourceInfo.Bitrate <= targetBitrate {
+			log.Printf("✨ Skipping transcode: source %s %dkbps <= target %dkbps",
+				sourceInfo.Format, sourceInfo.Bitrate, targetBitrate)
+			return false
+		}
+	}
+
+	log.Printf("🔄 Transcoding needed: %s → %s", sourceInfo.Format, targetFormat)
+	return true
+}
+
+// getTranscodingProfile returns optimized FFmpeg parameters based on quality
+func getTranscodingProfile(format string, bitrate int) []string {
+	// Base arguments common to all formats with ULTRA low-latency streaming optimizations
+	baseArgs := []string{
+		"-map", "0:a:0", // Map only first audio stream (skip embedded images/video)
+		"-vn",           // No video processing
+		"-sn",           // No subtitles
+		"-threads", "0", // Auto threads for faster encoding
+		"-v", "error", // Only show errors (reduce log spam)
+		"-fflags", "+flush_packets+nobuffer", // Force immediate packet flushing
+		"-flags", "low_delay", // Low delay mode
+		"-max_delay", "0", // Zero output delay
+		"-probesize", "32", // Minimal probe size for faster start
+		"-analyzeduration", "0", // Skip analysis, start immediately
+		"-avoid_negative_ts", "make_zero", // Handle timestamp issues
+	}
+
+	// Format-specific optimizations
+	// Note: Some encoders like libmp3lame don't support preset parameter
+	// Instead we use compression_level and quality settings for speed optimization
+	switch format {
+	case "mp3":
+		return append(baseArgs,
+			"-acodec", "libmp3lame",
+			"-b:a", fmt.Sprintf("%dk", bitrate),
+			"-compression_level", "0", // FASTEST encoding
+			"-reservoir", "0", // Disable bit reservoir for instant start
+			"-write_xing", "0", // Skip Xing header for immediate streaming
+			"-q:a", "9", // Lowest quality for maximum speed (still acceptable at 192k)
+		)
+	case "ogg":
+		return append(baseArgs,
+			"-acodec", "libvorbis",
+			"-b:a", fmt.Sprintf("%dk", bitrate),
+		)
+	case "aac":
+		return append(baseArgs,
+			"-acodec", "aac",
+			"-b:a", fmt.Sprintf("%dk", bitrate),
+			"-cutoff", "18000", // Frequency cutoff for AAC
+			"-movflags", "+frag_keyframe+empty_moov+faststart", // Fast streaming for AAC/M4A
+		)
+	case "opus":
+		return append(baseArgs,
+			"-acodec", "libopus",
+			"-b:a", fmt.Sprintf("%dk", bitrate),
+			"-vbr", "on", // Variable bitrate
+			"-compression_level", "10", // Opus compression level (0-10, higher = better)
+			"-frame_duration", "20", // Lower frame duration for faster start
+		)
+	default:
+		// Fallback to MP3 for unknown formats
+		return append(baseArgs,
+			"-acodec", "libmp3lame",
+			"-b:a", fmt.Sprintf("%dk", bitrate),
+			"-compression_level", "0",
+			"-reservoir", "0",
+			"-write_xing", "0",
+		)
+	}
+}
+
 func subsonicStream(c *gin.Context) {
 	user := c.MustGet("user").(User)
 
@@ -54,6 +208,14 @@ func subsonicStream(c *gin.Context) {
 		user.Username, filepath.Base(path), useTranscoding, format, bitrate)
 
 	if useTranscoding {
+		// Smart codec detection: check if transcoding is actually needed
+		sourceInfo, err := detectAudioFormat(path)
+		if err == nil && !shouldTranscode(sourceInfo, format, bitrate) {
+			log.Printf("✨ Smart skip: source already optimal, direct streaming")
+			streamDirect(c, path)
+			return
+		}
+
 		streamWithTranscoding(c, path, format, bitrate)
 	} else {
 		log.Printf("📀 Direct stream (no transcoding): %s", filepath.Base(path))
@@ -80,15 +242,10 @@ func streamDirect(c *gin.Context, path string) {
 }
 
 func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitrate int) {
+	startTime := time.Now()
 	log.Printf("🎵 TRANSCODING ACTIVE: format=%s, bitrate=%dkbps, file=%s", format, bitrate, filepath.Base(inputPath))
 
-	// Map format to FFmpeg codec and file extension
-	codecMap := map[string]string{
-		"mp3":  "libmp3lame",
-		"ogg":  "libvorbis",
-		"aac":  "aac",
-		"opus": "libopus",
-	}
+	// Extension mapping
 	extMap := map[string]string{
 		"mp3":  "mp3",
 		"ogg":  "ogg",
@@ -96,27 +253,25 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 		"opus": "opus",
 	}
 
-	codec, ok := codecMap[format]
+	ext, ok := extMap[format]
 	if !ok {
 		log.Printf("❌ Unsupported transcoding format: %s - falling back to direct stream", format)
 		streamDirect(c, inputPath)
 		return
 	}
 
-	ext := extMap[format]
-	bitrateStr := strconv.Itoa(bitrate) + "k"
+	// Get optimized transcoding profile (includes codec, preset, and quality settings)
+	profileArgs := getTranscodingProfile(format, bitrate)
 
-	// Build FFmpeg command
+	// Build complete FFmpeg command with optimized profile
 	args := []string{
 		"-i", inputPath,
 		"-vn", // No video
-		"-acodec", codec,
-		"-b:a", bitrateStr,
-		"-f", ext,
-		"pipe:1", // Output to stdout
 	}
+	args = append(args, profileArgs...)
+	args = append(args, "-f", ext, "pipe:1")
 
-	log.Printf("🔧 FFmpeg command: ffmpeg %s", strings.Join(args, " "))
+	log.Printf("🔧 FFmpeg command (optimized): ffmpeg %s", strings.Join(args, " "))
 
 	cmd := exec.Command("ffmpeg", args...)
 
@@ -160,16 +315,64 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 		"opus": "audio/opus",
 	}
 	contentType := contentTypes[format]
+	bitrateStr := strconv.Itoa(bitrate) + "k"
+
 	c.Header("Content-Type", contentType)
 	c.Header("Accept-Ranges", "none") // Transcoding doesn't support range requests
 	c.Header("X-Transcoded", "true")  // Custom header to indicate transcoding
 	c.Header("X-Transcode-Format", format)
 	c.Header("X-Transcode-Bitrate", bitrateStr)
+	c.Header("Cache-Control", "no-cache, no-store") // Prevent any caching
+	c.Header("Connection", "keep-alive")            // Keep connection open for streaming
+	c.Header("Transfer-Encoding", "chunked")        // Explicit chunked encoding
+	c.Status(http.StatusOK)                         // Send headers immediately
 
-	log.Printf("✅ Streaming transcoded audio: Content-Type=%s, Bitrate=%s", contentType, bitrateStr)
+	// Flush headers to client immediately
+	if flusher, ok := c.Writer.(http.Flusher); ok {
+		flusher.Flush()
+		elapsed := time.Since(startTime).Milliseconds()
+		log.Printf("⚡ Headers flushed at %dms - client should start buffering NOW", elapsed)
+	}
 
-	// Stream transcoded output to client
-	bytesWritten, _ := io.Copy(c.Writer, stdout)
+	log.Printf("⚡ Starting ULTRA low-latency stream: Content-Type=%s, Bitrate=%s", contentType, bitrateStr)
+
+	// Stream transcoded output to client with MINIMAL buffer and AGGRESSIVE flushing
+	buf := make([]byte, 2048) // 2KB buffer for ULTRA low latency (smaller = faster start)
+	bytesWritten := int64(0)
+	chunkCount := 0
+
+	for {
+		n, err := stdout.Read(buf)
+		if n > 0 {
+			written, writeErr := c.Writer.Write(buf[:n])
+			bytesWritten += int64(written)
+			chunkCount++
+
+			// Flush IMMEDIATELY after EVERY write for absolute minimum latency
+			if flusher, ok := c.Writer.(http.Flusher); ok {
+				flusher.Flush()
+			}
+
+			// Log first chunk to verify immediate sending
+			if chunkCount == 1 {
+				elapsed := time.Since(startTime).Milliseconds()
+				log.Printf("🚀 FIRST CHUNK SENT at %dms (%d bytes) - audio should START NOW!", elapsed, written)
+			}
+
+			if writeErr != nil {
+				log.Printf("⚠️  Client disconnected: %v", writeErr)
+				cmd.Process.Kill()
+				break
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Printf("❌ Read error: %v", err)
+			break
+		}
+	}
 
 	cmd.Wait()
 

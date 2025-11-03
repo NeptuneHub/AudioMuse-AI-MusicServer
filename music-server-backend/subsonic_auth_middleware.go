@@ -23,10 +23,11 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 		password := c.Query("p")
 		token := c.Query("t")
 		salt := c.Query("s")
+		jwtToken := c.Query("jwt") // Support JWT token in query string for <audio> elements
 		authHeader := c.GetHeader("Authorization")
 
-		log.Printf("DEBUG: Subsonic auth attempt - URL: %s, apiKey: %t, username: %s, password: %t, token: %t, salt: %t, authHeader: %s",
-			c.Request.URL.Path, apiKey != "", username, password != "", token != "", salt != "", authHeader)
+		log.Printf("DEBUG: Subsonic auth attempt - URL: %s, apiKey: %t, username: %s, password: %t, token: %t, salt: %t, jwt: %t, authHeader: %s",
+			c.Request.URL.Path, apiKey != "", username, password != "", token != "", salt != "", jwtToken != "", authHeader)
 
 		authMethods := 0
 		if apiKey != "" {
@@ -35,7 +36,7 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 		if username != "" && (password != "" || token != "") {
 			authMethods++
 		}
-		if strings.HasPrefix(authHeader, "Bearer ") {
+		if strings.HasPrefix(authHeader, "Bearer ") || jwtToken != "" {
 			authMethods++
 		}
 
@@ -66,8 +67,15 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 		}
 
 		// 2. JWT Bearer token (For Web UI integration)
+		// Support both Authorization header and query parameter (for <audio> src)
+		tokenString := ""
 		if strings.HasPrefix(authHeader, "Bearer ") {
-			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+		} else if jwtToken != "" {
+			tokenString = jwtToken
+		}
+
+		if tokenString != "" {
 			claims, err := parseJWT(tokenString)
 			if err == nil {
 				user := User{ID: claims.UserID, Username: claims.Username, IsAdmin: claims.IsAdmin}

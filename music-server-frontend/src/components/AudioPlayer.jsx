@@ -23,31 +23,36 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
 
         const fetchAndSetAudio = async () => {
             try {
-                // Scrobble the song play
+                // Scrobble the song play (fire and forget)
                 if (credentials) {
                     try {
-                        // Fire-and-forget scrobble using apiFetch which includes Authorization header
                         apiFetch(`/rest/scrobble.view?id=${encodeURIComponent(song.id)}`).catch(() => {});
                     } catch (e) {
                         console.error("Failed to scrobble song:", e);
                     }
                 }
 
-                // Fetch audio stream directly (returns binary)
-                const streamUrl = `${API_BASE}/rest/stream.view?id=${encodeURIComponent(song.id)}&v=1.16.1&c=AudioMuse-AI`;
-                const response = await apiFetch(streamUrl);
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch song: ${response.statusText}`);
+                // Get JWT token from localStorage for direct URL streaming
+                const token = localStorage.getItem('token');
+                if (!token) {
+                    throw new Error('No authentication token found');
                 }
-                const blob = await response.blob();
-                objectUrl = URL.createObjectURL(blob);
-                setAudioSrc(objectUrl);
+
+                // Build stream URL with JWT in query string (for <audio> element direct streaming)
+                // This allows the browser to natively stream without blob buffering
+                const streamUrl = `${API_BASE}/rest/stream.view?id=${encodeURIComponent(song.id)}&v=1.16.1&c=AudioMuse-AI&jwt=${encodeURIComponent(token)}`;
+                
+                console.log('🎵 Setting direct stream URL for immediate playback:', song.title);
+                
+                // Set URL directly - browser will handle progressive streaming natively!
+                setAudioSrc(streamUrl);
                 setError(false);
+                setIsLoading(false);
+                
             } catch (err) {
-                console.error("Error streaming song:", err);
+                console.error("Error setting up audio stream:", err);
                 setError(true);
                 setAudioSrc(null);
-            } finally {
                 setIsLoading(false);
             }
         };
@@ -174,8 +179,11 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                             ref={audioRef}
                             src={audioSrc || ''}
                             controls
+                            preload="auto"
                             onPlay={setupMediaSession}
                             onEnded={onEnded}
+                            onLoadedData={() => console.log('🎵 Audio loadeddata event - ready to play')}
+                            onCanPlay={() => console.log('🎵 Audio canplay event - playback can start')}
                             className="w-full sm:max-w-md flex-1 h-8 sm:h-10"
                             style={{ display: song ? 'block' : 'none' }}
                         />
