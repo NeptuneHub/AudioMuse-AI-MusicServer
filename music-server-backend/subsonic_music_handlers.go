@@ -158,7 +158,7 @@ func getTranscodingProfile(format string, bitrate int) []string {
 			"-acodec", "aac",
 			"-b:a", fmt.Sprintf("%dk", bitrate),
 			"-cutoff", "18000", // Frequency cutoff for AAC
-			"-movflags", "+frag_keyframe+empty_moov+faststart", // Fast streaming for AAC/M4A
+			"-profile:a", "aac_low", // AAC-LC profile for best compatibility
 		)
 	case "opus":
 		return append(baseArgs,
@@ -245,15 +245,15 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 	startTime := time.Now()
 	log.Printf("🎵 TRANSCODING ACTIVE: format=%s, bitrate=%dkbps, file=%s", format, bitrate, filepath.Base(inputPath))
 
-	// Extension mapping
-	extMap := map[string]string{
+	// FFmpeg format mapping (what FFmpeg expects for -f flag)
+	ffmpegFormatMap := map[string]string{
 		"mp3":  "mp3",
 		"ogg":  "ogg",
-		"aac":  "m4a",
+		"aac":  "adts", // AAC uses ADTS format for streaming (not m4a/mp4)
 		"opus": "opus",
 	}
 
-	ext, ok := extMap[format]
+	ffmpegFormat, ok := ffmpegFormatMap[format]
 	if !ok {
 		log.Printf("❌ Unsupported transcoding format: %s - falling back to direct stream", format)
 		streamDirect(c, inputPath)
@@ -269,7 +269,7 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 		"-vn", // No video
 	}
 	args = append(args, profileArgs...)
-	args = append(args, "-f", ext, "pipe:1")
+	args = append(args, "-f", ffmpegFormat, "pipe:1")
 
 	log.Printf("🔧 FFmpeg command (optimized): ffmpeg %s", strings.Join(args, " "))
 
