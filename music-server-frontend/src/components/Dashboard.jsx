@@ -263,58 +263,56 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
         
         console.log('🔀 Toggling play mode from:', playMode, 'currentIndex:', currentTrackIndex);
         
-        setPlayMode(prevMode => {
-            if (prevMode === 'sequential') {
-                // Switch to shuffle - save original order and randomize
-                console.log('🔀 Switching to shuffle mode');
-                setOriginalQueue([...playQueue]);
-                const currentSong = playQueue[currentTrackIndex];
-                console.log('🔀 Current song:', currentSong?.title, 'at index:', currentTrackIndex);
-                
-                // Fisher-Yates shuffle
-                const shuffled = [...playQueue];
-                for (let i = shuffled.length - 1; i > 0; i--) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-                }
-                
-                // Find where current song ended up in shuffled queue
-                const newIndex = shuffled.findIndex(s => s.id === currentSong?.id);
-                console.log('🔀 Current song found at shuffled index:', newIndex, '-> moving to index:', currentTrackIndex);
-                
-                if (newIndex !== -1 && newIndex !== currentTrackIndex) {
-                    // Move current song to keep it at the same index position
-                    const [current] = shuffled.splice(newIndex, 1);
-                    shuffled.splice(currentTrackIndex, 0, current);
-                }
-                
-                setPlayQueue(shuffled);
-                // Don't call setCurrentTrackIndex - keep it the same
-                console.log('🔀 ✅ Shuffled queue, current track stays at index:', currentTrackIndex);
-                return 'shuffle';
-            } else {
-                // Switch back to sequential - restore original order
-                console.log('🔀 Switching back to sequential mode');
-                if (originalQueue.length > 0) {
-                    const currentSong = playQueue[currentTrackIndex];
-                    console.log('🔀 Current song:', currentSong?.title, 'restoring original order');
-                    
-                    // Find current song in original queue
-                    const originalIndex = originalQueue.findIndex(s => s.id === currentSong?.id);
-                    console.log('🔀 Current song in original queue at index:', originalIndex);
-                    
-                    setPlayQueue(originalQueue);
-                    
-                    if (originalIndex !== -1 && originalIndex !== currentTrackIndex) {
-                        console.log('🔀 Updating index from', currentTrackIndex, 'to', originalIndex);
-                        setCurrentTrackIndex(originalIndex);
-                    }
-                    setOriginalQueue([]);
-                    console.log('🔀 ✅ Restored sequential order');
-                }
-                return 'sequential';
+        if (playMode === 'sequential') {
+            // Switch to shuffle - save original order and randomize
+            console.log('🔀 Switching to shuffle mode');
+            setOriginalQueue([...playQueue]);
+            const currentSong = playQueue[currentTrackIndex];
+            console.log('🔀 Current song:', currentSong?.title, 'at index:', currentTrackIndex);
+            
+            // Fisher-Yates shuffle
+            const shuffled = [...playQueue];
+            for (let i = shuffled.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
             }
-        });
+            
+            // Find where current song ended up in shuffled queue
+            const newIndex = shuffled.findIndex(s => s.id === currentSong?.id);
+            console.log('🔀 Current song found at shuffled index:', newIndex, '-> moving to index:', currentTrackIndex);
+            
+            if (newIndex !== -1 && newIndex !== currentTrackIndex) {
+                // Move current song to keep it at the same index position
+                const [current] = shuffled.splice(newIndex, 1);
+                shuffled.splice(currentTrackIndex, 0, current);
+            }
+            
+            setPlayQueue(shuffled);
+            setPlayMode('shuffle');
+            // Don't call setCurrentTrackIndex - keep it the same
+            console.log('🔀 ✅ Shuffled queue, current track stays at index:', currentTrackIndex);
+        } else {
+            // Switch back to sequential - restore original order
+            console.log('🔀 Switching back to sequential mode');
+            if (originalQueue.length > 0) {
+                const currentSong = playQueue[currentTrackIndex];
+                console.log('🔀 Current song:', currentSong?.title, 'restoring original order');
+                
+                // Find current song in original queue
+                const originalIndex = originalQueue.findIndex(s => s.id === currentSong?.id);
+                console.log('🔀 Current song in original queue at index:', originalIndex);
+                
+                setPlayQueue(originalQueue);
+                setPlayMode('sequential');
+                
+                if (originalIndex !== -1 && originalIndex !== currentTrackIndex) {
+                    console.log('🔀 Updating index from', currentTrackIndex, 'to', originalIndex);
+                    setCurrentTrackIndex(originalIndex);
+                }
+                setOriginalQueue([]);
+                console.log('🔀 ✅ Restored sequential order');
+            }
+        }
     }, [playQueue, currentTrackIndex, originalQueue, playMode]);
 
     const handleInstantMix = async (song) => {
