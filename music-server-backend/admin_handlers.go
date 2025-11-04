@@ -145,18 +145,22 @@ func processPath(scanPath string) int64 {
 				if genre == "" {
 					genre = "Unknown"
 				}
+				// Get duration using ffprobe
+				duration := getDuration(path)
+
 				// Use INSERT ... ON CONFLICT to update existing songs or insert new ones
 				// This ensures date_added is set for old songs missing it, and date_updated is always current
-				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, genre, date_added, date_updated) 
-					VALUES (?, ?, ?, ?, ?, ?, ?)
+				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, genre, duration, date_added, date_updated) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
 						artist=excluded.artist, 
 						album=excluded.album, 
 						genre=excluded.genre,
+						duration=excluded.duration,
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated`,
-					meta.Title(), meta.Artist(), meta.Album(), path, genre, currentTime, currentTime)
+					meta.Title(), meta.Artist(), meta.Album(), path, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -215,17 +219,21 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 				if genre == "" {
 					genre = "Unknown"
 				}
+				// Get duration using ffprobe
+				duration := getDuration(path)
+
 				// Use UPSERT to update existing songs or insert new ones
-				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, genre, date_added, date_updated) 
-					VALUES (?, ?, ?, ?, ?, ?, ?)
+				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, genre, duration, date_added, date_updated) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
 						artist=excluded.artist, 
 						album=excluded.album, 
 						genre=excluded.genre,
+						duration=excluded.duration,
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated`,
-					meta.Title(), meta.Artist(), meta.Album(), path, genre, currentTime, currentTime)
+					meta.Title(), meta.Artist(), meta.Album(), path, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -292,23 +300,27 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				artist := meta.Artist()
 				album := meta.Album()
 
+				// Get duration using ffprobe
+				duration := getDuration(path)
+
 				// DEBUG: Log the first few songs being inserted
 				if songsAdded < 3 {
-					log.Printf("DEBUG [processPathWithTracking]: Inserting song #%d: title='%s', date_added='%s', date_updated='%s'",
-						songsAdded+1, title, currentTime, currentTime)
+					log.Printf("DEBUG [processPathWithTracking]: Inserting song #%d: title='%s', duration=%ds, date_added='%s', date_updated='%s'",
+						songsAdded+1, title, duration, currentTime, currentTime)
 				}
 
 				// Use UPSERT to update existing songs or insert new ones
-				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, genre, date_added, date_updated) 
-					VALUES (?, ?, ?, ?, ?, ?, ?)
+				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, genre, duration, date_added, date_updated) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
 						artist=excluded.artist, 
 						album=excluded.album, 
 						genre=excluded.genre,
+						duration=excluded.duration,
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated`,
-					title, artist, album, path, genre, currentTime, currentTime)
+					title, artist, album, path, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -385,23 +397,27 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 				artist := meta.Artist()
 				album := meta.Album()
 
+				// Get duration using ffprobe
+				duration := getDuration(path)
+
 				// DEBUG: Log the first few songs being inserted
 				if *totalSongsAdded < 3 {
-					log.Printf("DEBUG [processPathWithRunningTotalAndTracking]: Inserting song #%d: title='%s', date_added='%s'",
-						*totalSongsAdded+1, title, currentTime)
+					log.Printf("DEBUG [processPathWithRunningTotalAndTracking]: Inserting song #%d: title='%s', duration=%ds, date_added='%s'",
+						*totalSongsAdded+1, title, duration, currentTime)
 				}
 
 				// Use UPSERT to update existing songs or insert new ones
-				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, genre, date_added, date_updated) 
-					VALUES (?, ?, ?, ?, ?, ?, ?)
+				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, genre, duration, date_added, date_updated) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
 						artist=excluded.artist, 
 						album=excluded.album, 
 						genre=excluded.genre,
+						duration=excluded.duration,
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated`,
-					title, artist, album, path, genre, currentTime, currentTime)
+					title, artist, album, path, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil

@@ -95,6 +95,11 @@ func migrateDB() error {
 		log.Printf("migrateDB: failed to backfill date_updated: %v", err)
 	}
 
+	// Ensure songs table has 'duration' column (in seconds)
+	if err := ensureColumnExists(db, "songs", "duration", "INTEGER DEFAULT 0"); err != nil {
+		log.Printf("migrateDB: ensureColumnExists duration: %v", err)
+	}
+
 	// Add ReplayGain columns
 	if err := ensureColumnExists(db, "songs", "replaygain_track_gain", "REAL"); err != nil {
 		log.Printf("migrateDB: ensureColumnExists replaygain_track_gain: %v", err)

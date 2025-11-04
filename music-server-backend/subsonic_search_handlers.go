@@ -113,7 +113,7 @@ func subsonicSearch2(c *gin.Context) {
 		songArgs = append(songArgs, songCount, songOffset)
 
 		songQuery := `
-			SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''),
+			SELECT s.id, s.title, s.artist, s.album, s.path, s.duration, s.play_count, s.last_played, COALESCE(s.genre, ''),
 			       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 			FROM songs s
 			LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
@@ -130,13 +130,14 @@ func subsonicSearch2(c *gin.Context) {
 				var songFromDb Song
 				var lastPlayed sql.NullString
 				var starred int
-				if err := songRows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, &songFromDb.Path, &songFromDb.PlayCount, &lastPlayed, &songFromDb.Genre, &starred); err == nil {
+				if err := songRows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album, &songFromDb.Path, &songFromDb.Duration, &songFromDb.PlayCount, &lastPlayed, &songFromDb.Genre, &starred); err == nil {
 					song := SubsonicSong{
 						ID:        strconv.Itoa(songFromDb.ID),
 						CoverArt:  strconv.Itoa(songFromDb.ID),
 						Title:     songFromDb.Title,
 						Artist:    songFromDb.Artist,
 						Album:     songFromDb.Album,
+						Duration:  songFromDb.Duration,
 						PlayCount: songFromDb.PlayCount,
 						Genre:     songFromDb.Genre,
 						Starred:   starred == 1,

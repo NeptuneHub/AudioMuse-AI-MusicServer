@@ -113,7 +113,7 @@ func subsonicGetSimilarSongs2(c *gin.Context) {
 
 	// Find similar songs by artist or genre, excluding the original song
 	query := `
-		SELECT id, title, artist, album, play_count, last_played, COALESCE(genre, '')
+		SELECT id, title, artist, album, play_count, last_played, COALESCE(genre, ''), duration
 		FROM songs
 		WHERE id != ?
 		  AND (artist = ? OR (genre = ? AND genre != ''))
@@ -140,9 +140,10 @@ func subsonicGetSimilarSongs2(c *gin.Context) {
 		var id int
 		var title, artist, album, genre string
 		var playCount int
+		var duration int
 		var lastPlayed sql.NullString
 
-		if err := rows.Scan(&id, &title, &artist, &album, &playCount, &lastPlayed, &genre); err != nil {
+		if err := rows.Scan(&id, &title, &artist, &album, &playCount, &lastPlayed, &genre, &duration); err != nil {
 			log.Printf("Error scanning similar song: %v", err)
 			continue
 		}
@@ -155,6 +156,7 @@ func subsonicGetSimilarSongs2(c *gin.Context) {
 			Genre:     genre,
 			CoverArt:  strconv.Itoa(id),
 			PlayCount: playCount,
+			Duration:  duration,
 		}
 
 		if lastPlayed.Valid {

@@ -21,7 +21,7 @@ func getSongsByIDs(ids []string) ([]SubsonicSong, error) {
 	// Create placeholders for the IN clause, e.g., (?, ?, ?)
 	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
 	query := fmt.Sprintf(`
-		SELECT id, title, artist, album, path, play_count, last_played
+		SELECT id, title, artist, album, path, play_count, last_played, duration
 		FROM songs WHERE id IN (%s)
 	`, placeholders)
 
@@ -41,10 +41,14 @@ func getSongsByIDs(ids []string) ([]SubsonicSong, error) {
 	songMap := make(map[string]SubsonicSong)
 	for rows.Next() {
 		var song SubsonicSong
-		var lastPlayed, path, playCount interface{} // Use interface{} to handle NULLs gracefully
-		if err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &path, &playCount, &lastPlayed); err != nil {
+		var lastPlayed, path, playCount, duration interface{} // Use interface{} to handle NULLs gracefully
+		if err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &path, &playCount, &lastPlayed, &duration); err != nil {
 			log.Printf("Error scanning song row in getSongsByIDs: %v", err)
 			continue
+		}
+		// Set duration if it's a valid integer
+		if dur, ok := duration.(int64); ok {
+			song.Duration = int(dur)
 		}
 		songMap[song.ID] = song
 	}

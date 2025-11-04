@@ -193,7 +193,7 @@ func getRecentlyAdded(c *gin.Context) {
 	db.QueryRow("SELECT COUNT(*) FROM songs WHERE date_added IS NOT NULL AND date_added != ''").Scan(&songsWithDate)
 	log.Printf("DEBUG [getRecentlyAdded]: Total songs=%d, Songs with date_added=%d", totalSongs, songsWithDate)
 
-	query := "SELECT id, title, artist, album, play_count, last_played, date_added, date_updated, starred, genre FROM songs WHERE date_added IS NOT NULL AND date_added != ''"
+	query := "SELECT id, title, artist, album, duration, play_count, last_played, date_added, date_updated, starred, genre FROM songs WHERE date_added IS NOT NULL AND date_added != ''"
 	args := []interface{}{}
 
 	if genre != "" {
@@ -220,7 +220,7 @@ func getRecentlyAdded(c *gin.Context) {
 		var starred int
 		var lastPlayed, dateAdded, dateUpdated sql.NullString
 
-		err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &song.PlayCount,
+		err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &song.Duration, &song.PlayCount,
 			&lastPlayed, &dateAdded, &dateUpdated, &starred, &song.Genre)
 		if err != nil {
 			log.Printf("DEBUG [getRecentlyAdded]: Row scan error: %v", err)
@@ -247,7 +247,7 @@ func getMostPlayed(c *gin.Context) {
 	limit, _ := strconv.Atoi(limitStr)
 	offset, _ := strconv.Atoi(offsetStr)
 
-	query := "SELECT id, title, artist, album, play_count, last_played, date_added, date_updated, starred, genre FROM songs WHERE play_count > 0"
+	query := "SELECT id, title, artist, album, duration, play_count, last_played, date_added, date_updated, starred, genre FROM songs WHERE play_count > 0"
 	args := []interface{}{}
 
 	if genre != "" {
@@ -271,7 +271,7 @@ func getMostPlayed(c *gin.Context) {
 		var starred int
 		var lastPlayed, dateAdded, dateUpdated sql.NullString
 
-		err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &song.PlayCount,
+		err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &song.Duration, &song.PlayCount,
 			&lastPlayed, &dateAdded, &dateUpdated, &starred, &song.Genre)
 		if err != nil {
 			continue
@@ -303,7 +303,7 @@ func getRecentlyPlayed(c *gin.Context) {
 	limit, _ := strconv.Atoi(limitStr)
 	offset, _ := strconv.Atoi(offsetStr)
 
-	query := `SELECT DISTINCT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, 
+	query := `SELECT DISTINCT s.id, s.title, s.artist, s.album, s.duration, s.play_count, s.last_played, 
 		s.date_added, s.date_updated, s.starred, s.genre, MAX(ph.played_at) as recent_play
 		FROM songs s
 		INNER JOIN play_history ph ON s.id = ph.song_id
@@ -331,7 +331,7 @@ func getRecentlyPlayed(c *gin.Context) {
 		var starred int
 		var lastPlayed, dateAdded, dateUpdated, recentPlay sql.NullString
 
-		err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &song.PlayCount,
+		err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &song.Duration, &song.PlayCount,
 			&lastPlayed, &dateAdded, &dateUpdated, &starred, &song.Genre, &recentPlay)
 		if err != nil {
 			continue

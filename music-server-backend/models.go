@@ -21,7 +21,8 @@ type Song struct {
 	Title               string   `json:"title"`
 	Artist              string   `json:"artist"`
 	Album               string   `json:"album"`
-	Path                string   `json:"-"` // Don't expose path in JSON
+	Path                string   `json:"-"`        // Don't expose path in JSON
+	Duration            int      `json:"duration"` // Duration in seconds
 	PlayCount           int      `json:"playCount"`
 	LastPlayed          string   `json:"lastPlayed"`
 	DateAdded           string   `json:"dateAdded"`
@@ -119,6 +120,7 @@ type SubsonicSong struct {
 	Artist     string   `xml:"artist,attr" json:"artist"`
 	Album      string   `xml:"album,attr" json:"album"`
 	Path       string   `xml:"path,attr,omitempty" json:"path,omitempty"`
+	Duration   int      `xml:"duration,attr,omitempty" json:"duration,omitempty"` // Duration in seconds
 	PlayCount  int      `xml:"playCount,attr,omitempty" json:"playCount,omitempty"`
 	LastPlayed string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
 	Starred    bool     `xml:"starred,attr,omitempty" json:"starred,omitempty"`
@@ -301,6 +303,7 @@ type SubsonicDirectoryChild struct {
 	Artist     string   `xml:"artist,attr,omitempty" json:"artist,omitempty"`
 	IsDir      bool     `xml:"isDir,attr" json:"isDir"`
 	CoverArt   string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	Duration   int      `xml:"duration,attr,omitempty" json:"duration,omitempty"` // Duration in seconds
 	Genre      string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
 	PlayCount  int      `xml:"playCount,attr,omitempty" json:"playCount,omitempty"`
 	LastPlayed string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`

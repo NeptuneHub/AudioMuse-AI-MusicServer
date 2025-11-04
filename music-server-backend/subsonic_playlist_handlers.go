@@ -73,7 +73,7 @@ func subsonicGetPlaylist(c *gin.Context) {
 	}
 
 	query := `
-		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played
+		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, s.duration
 		FROM songs s
 		JOIN playlist_songs ps ON s.id = ps.song_id
 		WHERE ps.playlist_id = ?
@@ -90,13 +90,15 @@ func subsonicGetPlaylist(c *gin.Context) {
 	for rows.Next() {
 		var s SubsonicSong
 		var songId int
+		var duration int
 		var lastPlayed sql.NullString
-		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed); err != nil {
+		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &duration); err != nil {
 			log.Printf("Error scanning playlist song row: %v", err)
 			continue
 		}
 		s.ID = strconv.Itoa(songId)
 		s.CoverArt = s.ID
+		s.Duration = duration
 		if lastPlayed.Valid {
 			s.LastPlayed = lastPlayed.String
 		}

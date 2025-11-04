@@ -8,7 +8,13 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
     const [error, setError] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [volume, setVolume] = useState(1.0);
+    const [isMuted, setIsMuted] = useState(false);
     const audioRef = useRef(null);
+    const playPromiseRef = useRef(null);
+    const seekingRef = useRef(false);
+    const isDraggingRef = useRef(false);
 
     // Effect for fetching audio data and scrobbling
     useEffect(() => {
@@ -16,7 +22,17 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
             setAudioSrc(null);
             setError(false);
             setIsLoading(false);
+            setDuration(0);
             return;
+        }
+        
+        // Use song.duration from metadata immediately (duration is in seconds)
+        // This ensures the progress bar shows correct duration even before stream loads
+        if (song.duration && !isNaN(song.duration) && song.duration > 0) {
+            setDuration(song.duration);
+        } else {
+            // If no duration in metadata, reset to 0 and wait for stream
+            setDuration(0);
         }
 
         setIsLoading(true);
@@ -105,36 +121,93 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
     
     useEffect(() => {
         if (audioSrc && audioRef.current) {
+            // Cancel any pending play promise before loading new audio
+            if (playPromiseRef.current) {
+                playPromiseRef.current.catch(() => {
+                    // Suppress the abort error - it's expected when switching songs
+                });
+                playPromiseRef.current = null;
+            }
+
+            // If we have a valid duration from metadata, try to help the browser understand it
+            // This won't override the actual duration once loaded, but helps initial display
+            if (duration > 0 && audioRef.current.duration === Infinity) {
+                // Note: We can't actually set duration on audio element, but we can load metadata faster
+                audioRef.current.load();
+            }
+            
             // Check if this song was added from Map - if so, don't auto-play
             if (window._mapAddedSong) {
                 console.log('Map song detected - skipping auto-play');
                 window._mapAddedSong = false;
                 return;
             }
-            audioRef.current.play().catch(e => console.error("Autoplay was prevented:", e));
+            
+            // Store the play promise and handle it properly
+            playPromiseRef.current = audioRef.current.play();
+            playPromiseRef.current
+                .then(() => {
+                    playPromiseRef.current = null;
+                })
+                .catch(e => {
+                    // Only log if it's not an abort error (which happens when switching songs)
+                    if (e.name !== 'AbortError') {
+                        console.error("Autoplay was prevented:", e);
+                    }
+                    playPromiseRef.current = null;
+                });
         }
-    }, [audioSrc]);
+    }, [audioSrc, duration]);
+    
+    // Separate effect to handle volume/mute changes without restarting playback
+    useEffect(() => {
+        if (audioRef.current) {
+            audioRef.current.volume = volume;
+            audioRef.current.muted = isMuted;
+        }
+    }, [volume, isMuted]);
 
     return (
         <div className="fixed bottom-0 left-0 right-0 glass border-t border-dark-600 z-50 shadow-2xl">
             {/* Mobile-only progress bar at the very top */}
-            {song && duration > 0 && (
+            {song && (
                 <div className="sm:hidden">
-                    <input
-                        type="range"
-                        min="0"
-                        max={duration}
-                        value={currentTime}
-                        onChange={(e) => {
-                            if (audioRef.current) {
-                                audioRef.current.currentTime = parseFloat(e.target.value);
-                            }
-                        }}
-                        className="w-full h-2 bg-dark-700 appearance-none cursor-pointer"
-                        style={{
-                            background: `linear-gradient(to right, #14b8a6 0%, #14b8a6 ${(currentTime / duration * 100) || 0}%, #374151 ${(currentTime / duration * 100) || 0}%, #374151 100%)`
-                        }}
-                    />
+                    <div className="flex items-center gap-2 px-2 py-1 bg-dark-800/50">
+                        <span className="text-[10px] text-gray-400 whitespace-nowrap font-mono">
+                            {Math.floor(currentTime / 60)}:{String(Math.floor(currentTime % 60)).padStart(2, '0')}
+                        </span>
+                        <input
+                            type="range"
+                            min="0"
+                            max={duration || 100}
+                            value={currentTime}
+                            onPointerDown={() => {
+                                isDraggingRef.current = true;
+                            }}
+                            onPointerUp={() => {
+                                isDraggingRef.current = false;
+                            }}
+                            onInput={(e) => {
+                                // Update visual immediately while dragging
+                                const newTime = parseFloat(e.target.value);
+                                setCurrentTime(newTime);
+                            }}
+                            onChange={(e) => {
+                                // Apply the actual seek when interaction ends
+                                if (audioRef.current) {
+                                    const newTime = parseFloat(e.target.value);
+                                    audioRef.current.currentTime = newTime;
+                                }
+                            }}
+                            className="flex-1 h-2 bg-dark-700 appearance-none cursor-pointer"
+                            style={{
+                                background: `linear-gradient(to right, #14b8a6 0%, #14b8a6 ${duration > 0 ? (currentTime / duration * 100) : 0}%, #374151 ${duration > 0 ? (currentTime / duration * 100) : 0}%, #374151 100%)`
+                            }}
+                        />
+                        <span className="text-[10px] text-gray-400 whitespace-nowrap font-mono">
+                            {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}
+                        </span>
+                    </div>
                 </div>
             )}
             <div className="container mx-auto px-2 sm:px-6 py-2 sm:py-3">
@@ -186,44 +259,200 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
 
                     {/* Playback Controls - Centered (Desktop & Mobile) - << Play >> layout */}
                     <div className="flex items-center justify-center gap-1 sm:gap-2 flex-1">
-                        {hasQueue && (
-                            <button 
-                                onClick={onPlayPrevious} 
-                                className="text-gray-300 hover:text-white p-2 rounded-full hover:bg-dark-700 transition-all group" 
-                                title="Previous"
-                            >
-                                <svg className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 20 20">
-                                    <path d="M8.445 14.832A1 1 0 0010 14v-2.798l5.445 3.63A1 1 0 0017 14V6a1 1 0 00-1.555-.832L10 8.798V6a1 1 0 00-1.555-.832l-6 4a1 1 0 000 1.664l6 4z"></path>
-                                </svg>
-                            </button>
-                        )}
                         <audio
                             ref={audioRef}
                             src={audioSrc || ''}
-                            controls
                             preload="metadata"
-                            onPlay={setupMediaSession}
+                            onPlay={() => {
+                                setupMediaSession();
+                                setIsPlaying(true);
+                            }}
+                            onPause={() => setIsPlaying(false)}
                             onEnded={onEnded}
-                            onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)}
-                            onDurationChange={(e) => setDuration(e.target.duration)}
-                            onLoadedData={() => console.log('🎵 Audio loadeddata event - ready to play')}
-                            onCanPlay={() => console.log('🎵 Audio canplay event - playback can start')}
-                            onSeeking={() => console.log('🎵 Seeking...')}
-                            onSeeked={() => console.log('🎵 Seeked - ready to play')}
-                            className="w-full sm:max-w-md flex-1 h-8 sm:h-10"
-                            style={{ display: song ? 'block' : 'none' }}
+                            onSeeking={() => {
+                                seekingRef.current = true;
+                            }}
+                            onSeeked={() => {
+                                seekingRef.current = false;
+                                // Force update currentTime after seek completes
+                                if (audioRef.current) {
+                                    setCurrentTime(audioRef.current.currentTime);
+                                }
+                            }}
+                            onTimeUpdate={(e) => {
+                                // Don't update time while user is dragging to avoid jitter
+                                if (!isDraggingRef.current) {
+                                    const time = e.target.currentTime;
+                                    setCurrentTime(time);
+                                }
+                                
+                                const dur = e.target.duration;
+                                // Only update duration if stream provides valid duration AND we don't have metadata duration
+                                // This prevents overwriting our database duration with Infinity
+                                if (dur && !isNaN(dur) && dur !== Infinity && dur > 0) {
+                                    // Use stream duration if it's more accurate (has decimals)
+                                    setDuration(dur);
+                                }
+                                // If duration is still 0 or invalid, keep using metadata duration from state
+                            }}
+                            onDurationChange={(e) => {
+                                // Only update if stream provides valid duration
+                                if (e.target.duration && !isNaN(e.target.duration) && e.target.duration !== Infinity && e.target.duration > 0) {
+                                    setDuration(e.target.duration);
+                                }
+                                // Otherwise keep using metadata duration from database
+                            }}
+                            onLoadedMetadata={(e) => {
+                                // Only update if stream metadata has valid duration
+                                if (e.target.duration && !isNaN(e.target.duration) && e.target.duration !== Infinity && e.target.duration > 0) {
+                                    setDuration(e.target.duration);
+                                }
+                                // Otherwise keep using metadata duration from database
+                            }}
+                            style={{ display: 'none' }}
                         />
-                        {hasQueue && (
-                            <button 
-                                onClick={onPlayNext} 
-                                className="text-gray-300 hover:text-white p-2 rounded-full hover:bg-dark-700 transition-all group" 
-                                title="Next"
-                            >
-                                <svg className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 20 20">
-                                    <path d="M10 5.99v8.02a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4A1 1 0 0010 5.99z"></path>
-                                    <path d="M3 5.99v8.02a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4A1 1 0 003 5.99z"></path>
-                                </svg>
-                            </button>
+                        {song && (
+                            <>
+                                {/* Playback Control Buttons Group - Previous, Play/Pause, Next */}
+                                <div className="flex items-center gap-1">
+                                    {/* Previous Button */}
+                                    <button 
+                                        onClick={onPlayPrevious}
+                                        disabled={!hasQueue}
+                                        className={`p-2 rounded-full transition-all group ${hasQueue ? 'text-gray-300 hover:text-white hover:bg-dark-700' : 'text-gray-600 cursor-not-allowed opacity-50'}`}
+                                        title="Previous"
+                                    >
+                                        <svg className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M8.445 14.832A1 1 0 0010 14v-2.798l5.445 3.63A1 1 0 0017 14V6a1 1 0 00-1.555-.832L10 8.798V6a1 1 0 00-1.555-.832l-6 4a1 1 0 000 1.664l6 4z"></path>
+                                        </svg>
+                                    </button>
+                                    
+                                    {/* Play/Pause Button */}
+                                    <button 
+                                        onClick={() => {
+                                            if (audioRef.current) {
+                                                if (audioRef.current.paused) {
+                                                    audioRef.current.play().catch(e => console.error("Playback error:", e));
+                                                } else {
+                                                    audioRef.current.pause();
+                                                }
+                                            }
+                                        }} 
+                                        className="text-white hover:text-accent-400 p-2 rounded-full hover:bg-dark-700 transition-all group" 
+                                        title={isPlaying ? "Pause" : "Play"}
+                                    >
+                                        {isPlaying ? (
+                                            <svg className="w-6 h-6 sm:w-8 sm:h-8" fill="currentColor" viewBox="0 0 20 20">
+                                                <path d="M5.75 3a.75.75 0 00-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75V3.75A.75.75 0 007.25 3h-1.5zM12.75 3a.75.75 0 00-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75V3.75a.75.75 0 00-.75-.75h-1.5z"></path>
+                                            </svg>
+                                        ) : (
+                                            <svg className="w-6 h-6 sm:w-8 sm:h-8" fill="currentColor" viewBox="0 0 20 20">
+                                                <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
+                                            </svg>
+                                        )}
+                                    </button>
+                                    
+                                    {/* Next Button */}
+                                    <button 
+                                        onClick={onPlayNext}
+                                        disabled={!hasQueue}
+                                        className={`p-2 rounded-full transition-all group ${hasQueue ? 'text-gray-300 hover:text-white hover:bg-dark-700' : 'text-gray-600 cursor-not-allowed opacity-50'}`}
+                                        title="Next"
+                                    >
+                                        <svg className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M10 5.99v8.02a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4A1 1 0 0010 5.99z"></path>
+                                            <path d="M3 5.99v8.02a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4A1 1 0 003 5.99z"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                                {/* Desktop Timeline Slider */}
+                                <div className="hidden sm:flex items-center gap-2 flex-1 max-w-md">
+                                    <span className="text-xs text-gray-400 whitespace-nowrap">
+                                        {Math.floor(currentTime / 60)}:{String(Math.floor(currentTime % 60)).padStart(2, '0')}
+                                    </span>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max={duration || 100}
+                                        value={currentTime}
+                                        onPointerDown={() => {
+                                            isDraggingRef.current = true;
+                                        }}
+                                        onPointerUp={() => {
+                                            isDraggingRef.current = false;
+                                        }}
+                                        onInput={(e) => {
+                                            // Update visual immediately while dragging
+                                            const newTime = parseFloat(e.target.value);
+                                            setCurrentTime(newTime);
+                                        }}
+                                        onChange={(e) => {
+                                            // Apply the actual seek when interaction ends
+                                            if (audioRef.current) {
+                                                const newTime = parseFloat(e.target.value);
+                                                audioRef.current.currentTime = newTime;
+                                            }
+                                        }}
+                                        className="flex-1 h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer"
+                                        style={{
+                                            background: `linear-gradient(to right, #14b8a6 0%, #14b8a6 ${duration > 0 ? (currentTime / duration * 100) : 0}%, #374151 ${duration > 0 ? (currentTime / duration * 100) : 0}%, #374151 100%)`
+                                        }}
+                                    />
+                                    <span className="text-xs text-gray-400 whitespace-nowrap">
+                                        {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}
+                                    </span>
+                                </div>
+                                {/* Volume Control - Desktop Only */}
+                                <div className="hidden sm:flex items-center gap-2 ml-2">
+                                    <button
+                                        onClick={() => {
+                                            if (audioRef.current) {
+                                                const newMuted = !isMuted;
+                                                audioRef.current.muted = newMuted;
+                                                setIsMuted(newMuted);
+                                            }
+                                        }}
+                                        className="text-gray-300 hover:text-white p-1 rounded transition-all"
+                                        title={isMuted ? "Unmute" : "Mute"}
+                                    >
+                                        {isMuted || volume === 0 ? (
+                                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z" clipRule="evenodd"></path>
+                                            </svg>
+                                        ) : volume < 0.5 ? (
+                                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14 8a1 1 0 011 1v2a1 1 0 11-2 0V9a1 1 0 011-1z" clipRule="evenodd"></path>
+                                            </svg>
+                                        ) : (
+                                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clipRule="evenodd"></path>
+                                            </svg>
+                                        )}
+                                    </button>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="1"
+                                        step="0.01"
+                                        value={isMuted ? 0 : volume}
+                                        onChange={(e) => {
+                                            const newVolume = parseFloat(e.target.value);
+                                            setVolume(newVolume);
+                                            if (audioRef.current) {
+                                                audioRef.current.volume = newVolume;
+                                                if (newVolume > 0 && isMuted) {
+                                                    audioRef.current.muted = false;
+                                                    setIsMuted(false);
+                                                }
+                                            }
+                                        }}
+                                        className="w-20 h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer"
+                                        style={{
+                                            background: `linear-gradient(to right, #14b8a6 0%, #14b8a6 ${(isMuted ? 0 : volume) * 100}%, #374151 ${(isMuted ? 0 : volume) * 100}%, #374151 100%)`
+                                        }}
+                                    />
+                                </div>
+                            </>
                         )}
                     </div>
 

@@ -197,7 +197,7 @@ func getArtistDirectory(c *gin.Context, artistName string) {
 // getAlbumDirectory returns all songs in an album
 func getAlbumDirectory(c *gin.Context, user User, albumID int, albumName, artistName string) {
 	query := `
-		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, COALESCE(s.genre, ''),
+		SELECT s.id, s.title, s.artist, s.album, s.duration, s.play_count, s.last_played, COALESCE(s.genre, ''),
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
@@ -217,11 +217,11 @@ func getAlbumDirectory(c *gin.Context, user User, albumID int, albumName, artist
 	for rows.Next() {
 		var songID int
 		var title, artist, album, genre string
-		var playCount int
+		var duration, playCount int
 		var lastPlayed sql.NullString
 		var starred int
 
-		if err := rows.Scan(&songID, &title, &artist, &album, &playCount, &lastPlayed, &genre, &starred); err != nil {
+		if err := rows.Scan(&songID, &title, &artist, &album, &duration, &playCount, &lastPlayed, &genre, &starred); err != nil {
 			log.Printf("Error scanning song: %v", err)
 			continue
 		}
@@ -233,6 +233,7 @@ func getAlbumDirectory(c *gin.Context, user User, albumID int, albumName, artist
 			Album:     album,
 			IsDir:     false,
 			CoverArt:  strconv.Itoa(albumID),
+			Duration:  duration,
 			Genre:     genre,
 			PlayCount: playCount,
 			Starred:   starred == 1,

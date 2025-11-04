@@ -67,7 +67,7 @@ func getSongs(c *gin.Context) {
 	albumFilter := c.Query("album")
 	artistFilter := c.Query("artist") // Used to disambiguate albums with the same name
 
-	query := "SELECT id, title, artist, album FROM songs"
+	query := "SELECT id, title, artist, album, duration, play_count, last_played, date_added, date_updated, starred, genre FROM songs"
 	conditions := []string{}
 	args := []interface{}{}
 
@@ -95,10 +95,19 @@ func getSongs(c *gin.Context) {
 	var songs []Song
 	for rows.Next() {
 		var song Song
-		if err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album); err != nil {
+		var starred int
+		var lastPlayed, dateAdded, dateUpdated sql.NullString
+
+		if err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &song.Duration,
+			&song.PlayCount, &lastPlayed, &dateAdded, &dateUpdated, &starred, &song.Genre); err != nil {
 			log.Printf("Error scanning song row: %v", err)
 			continue
 		}
+
+		song.LastPlayed = lastPlayed.String
+		song.DateAdded = dateAdded.String
+		song.DateUpdated = dateUpdated.String
+		song.Starred = starred == 1
 		songs = append(songs, song)
 	}
 	c.JSON(http.StatusOK, songs)

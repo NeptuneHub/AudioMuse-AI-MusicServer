@@ -28,9 +28,36 @@ import (
 
 // AudioInfo represents detected audio file information
 type AudioInfo struct {
-	Format  string
-	Bitrate int
-	Codec   string
+	Format   string
+	Bitrate  int
+	Codec    string
+	Duration int // Duration in seconds
+}
+
+// getDuration extracts the duration of an audio file using ffprobe
+func getDuration(filePath string) int {
+	cmd := exec.Command("ffprobe",
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		filePath)
+
+	output, err := cmd.Output()
+	if err != nil {
+		log.Printf("⚠️  FFprobe duration failed for %s: %v", filepath.Base(filePath), err)
+		return 0
+	}
+
+	// Parse duration (in seconds, may have decimal)
+	durationStr := strings.TrimSpace(string(output))
+	durationFloat, err := strconv.ParseFloat(durationStr, 64)
+	if err != nil {
+		log.Printf("⚠️  Could not parse duration '%s' for %s", durationStr, filepath.Base(filePath))
+		return 0
+	}
+
+	// Round to nearest integer
+	return int(durationFloat + 0.5)
 }
 
 // detectAudioFormat detects the format and bitrate of an audio file using FFprobe
@@ -185,7 +212,8 @@ func subsonicStream(c *gin.Context) {
 
 	songID := c.Query("id")
 	var path string
-	err := db.QueryRow("SELECT path FROM songs WHERE id = ?", songID).Scan(&path)
+	var duration int
+	err := db.QueryRow("SELECT path, duration FROM songs WHERE id = ?", songID).Scan(&path, &duration)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))
@@ -193,6 +221,12 @@ func subsonicStream(c *gin.Context) {
 		}
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
 		return
+	}
+
+	// Set X-Content-Duration header (like Navidrome does) so browser knows duration immediately
+	// This is critical for HTML5 audio controls to show correct timeline
+	if duration > 0 {
+		c.Header("X-Content-Duration", strconv.Itoa(duration))
 	}
 
 	// Check if user has transcoding enabled
@@ -204,8 +238,8 @@ func subsonicStream(c *gin.Context) {
 
 	useTranscoding := err == nil && transcodingEnabled == 1
 
-	log.Printf("🎧 Stream request: user=%s, song=%s, transcoding_enabled=%v, format=%s, bitrate=%d",
-		user.Username, filepath.Base(path), useTranscoding, format, bitrate)
+	log.Printf("🎧 Stream request: user=%s, song=%s, duration=%ds, transcoding_enabled=%v, format=%s, bitrate=%d",
+		user.Username, filepath.Base(path), duration, useTranscoding, format, bitrate)
 
 	if useTranscoding {
 		// Smart codec detection: check if transcoding is actually needed
@@ -238,6 +272,12 @@ func streamDirect(c *gin.Context, path string) {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Could not read file info."))
 		return
 	}
+
+	// Explicitly set Content-Length to help browser determine duration faster
+	// http.ServeContent should do this, but let's be explicit
+	c.Header("Content-Length", strconv.FormatInt(fileInfo.Size(), 10))
+	c.Header("Accept-Ranges", "bytes")
+
 	http.ServeContent(c.Writer, c.Request, fileInfo.Name(), fileInfo.ModTime(), file)
 }
 
@@ -564,7 +604,7 @@ func subsonicGetAlbum(c *gin.Context) {
 	}
 
 	query := `
-		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, COALESCE(s.genre, ''), 
+		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, COALESCE(s.genre, ''), s.duration,
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
@@ -584,13 +624,15 @@ func subsonicGetAlbum(c *gin.Context) {
 		var s SubsonicSong
 		var lastPlayed sql.NullString
 		var songId int
+		var duration int
 		var starred int
-		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &s.Genre, &starred); err != nil {
+		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &s.Genre, &duration, &starred); err != nil {
 			log.Printf("Error scanning song in getAlbum: %v", err)
 			continue
 		}
 		s.ID = strconv.Itoa(songId)
 		s.CoverArt = albumSongId
+		s.Duration = duration
 		s.Starred = starred == 1
 		if lastPlayed.Valid {
 			s.LastPlayed = lastPlayed.String
@@ -621,11 +663,12 @@ func subsonicGetSong(c *gin.Context) {
 	var s SubsonicSong
 	var lastPlayed sql.NullString
 	var songId int
+	var duration int
 
 	// Get the song details from the database
 	err := db.QueryRow(`
-		SELECT id, title, artist, album, play_count, last_played
-		FROM songs WHERE id = ?`, songID).Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed)
+		SELECT id, title, artist, album, play_count, last_played, duration
+		FROM songs WHERE id = ?`, songID).Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &duration)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -638,6 +681,7 @@ func subsonicGetSong(c *gin.Context) {
 	}
 
 	s.ID = strconv.Itoa(songId)
+	s.Duration = duration
 	if lastPlayed.Valid {
 		s.LastPlayed = lastPlayed.String
 	}
@@ -654,7 +698,7 @@ func subsonicGetRandomSongs(c *gin.Context) {
 		size = 500
 	}
 
-	rows, err := db.Query("SELECT id, title, artist, album, play_count, last_played FROM songs ORDER BY RANDOM() LIMIT ?", size)
+	rows, err := db.Query("SELECT id, title, artist, album, play_count, last_played, duration FROM songs ORDER BY RANDOM() LIMIT ?", size)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching random songs."))
 		return
@@ -665,13 +709,15 @@ func subsonicGetRandomSongs(c *gin.Context) {
 	for rows.Next() {
 		var s SubsonicSong
 		var songId int
+		var duration int
 		var lastPlayed sql.NullString
-		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed); err != nil {
+		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &duration); err != nil {
 			log.Printf("Error scanning random song: %v", err)
 			continue
 		}
 		s.ID = strconv.Itoa(songId)
 		s.CoverArt = s.ID
+		s.Duration = duration
 		if lastPlayed.Valid {
 			s.LastPlayed = lastPlayed.String
 		}
@@ -1176,7 +1222,7 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 
 	// Simple test: just get any songs with genres first
 	query := `
-		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''),
+		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''), s.duration,
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
@@ -1205,7 +1251,7 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 		var starred int
 
 		if err := rows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album,
-			&songFromDb.Path, &songFromDb.PlayCount, &lastPlayed, &songFromDb.Genre, &starred); err != nil {
+			&songFromDb.Path, &songFromDb.PlayCount, &lastPlayed, &songFromDb.Genre, &songFromDb.Duration, &starred); err != nil {
 			log.Printf("[ERROR] getSongsByGenre: Scan failed: %v", err)
 			continue
 		}
@@ -1218,6 +1264,7 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 			Genre:     songFromDb.Genre,
 			CoverArt:  strconv.Itoa(songFromDb.ID),
 			PlayCount: songFromDb.PlayCount,
+			Duration:  songFromDb.Duration,
 			Starred:   starred == 1,
 		}
 
