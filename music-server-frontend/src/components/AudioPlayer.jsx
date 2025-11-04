@@ -6,6 +6,8 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
     const [audioSrc, setAudioSrc] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(false);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
     const audioRef = useRef(null);
 
     // Effect for fetching audio data and scrobbling
@@ -115,10 +117,30 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
 
     return (
         <div className="fixed bottom-0 left-0 right-0 glass border-t border-dark-600 z-50 shadow-2xl">
+            {/* Mobile-only progress bar at the very top */}
+            {song && duration > 0 && (
+                <div className="sm:hidden">
+                    <input
+                        type="range"
+                        min="0"
+                        max={duration}
+                        value={currentTime}
+                        onChange={(e) => {
+                            if (audioRef.current) {
+                                audioRef.current.currentTime = parseFloat(e.target.value);
+                            }
+                        }}
+                        className="w-full h-2 bg-dark-700 appearance-none cursor-pointer"
+                        style={{
+                            background: `linear-gradient(to right, #14b8a6 0%, #14b8a6 ${(currentTime / duration * 100) || 0}%, #374151 ${(currentTime / duration * 100) || 0}%, #374151 100%)`
+                        }}
+                    />
+                </div>
+            )}
             <div className="container mx-auto px-2 sm:px-6 py-2 sm:py-3">
                 <div className="flex items-center gap-2 sm:gap-6">
-                    {/* Album Art & Song Info - Mobile optimized */}
-                    <div className="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto max-w-[180px] sm:max-w-xs">
+                    {/* Album Art & Song Info - Fixed width on desktop to prevent layout shift */}
+                    <div className="flex items-center gap-2 flex-shrink-0 w-full sm:w-64 max-w-[180px] sm:max-w-none overflow-hidden">
                         {song && song.coverArt && credentials?.username && credentials?.password ? (
                             <div className="relative group">
                                 <img 
@@ -179,11 +201,15 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                             ref={audioRef}
                             src={audioSrc || ''}
                             controls
-                            preload="auto"
+                            preload="metadata"
                             onPlay={setupMediaSession}
                             onEnded={onEnded}
+                            onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)}
+                            onDurationChange={(e) => setDuration(e.target.duration)}
                             onLoadedData={() => console.log('🎵 Audio loadeddata event - ready to play')}
                             onCanPlay={() => console.log('🎵 Audio canplay event - playback can start')}
+                            onSeeking={() => console.log('🎵 Seeking...')}
+                            onSeeked={() => console.log('🎵 Seeked - ready to play')}
                             className="w-full sm:max-w-md flex-1 h-8 sm:h-10"
                             style={{ display: song ? 'block' : 'none' }}
                         />

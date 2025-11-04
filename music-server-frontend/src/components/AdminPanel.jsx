@@ -8,14 +8,12 @@ import ApiKeyManagement from './admin/ApiKeyManagement';
 
 export default function AdminPanel({ onConfigChange }) {
 	return (
-		<div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-            <div className="space-y-8">
-                 <LibraryManagement onConfigChange={onConfigChange} />
-                 <SonicAnalysisPanel />
-                 <AutoScanManagement onConfigChange={onConfigChange} />
-                 <AIConfigManagement onConfigChange={onConfigChange} />
-                 <ApiKeyManagement />
-            </div>
+		<div className="space-y-8">
+            <LibraryManagement onConfigChange={onConfigChange} />
+            <SonicAnalysisPanel />
+            <AutoScanManagement onConfigChange={onConfigChange} />
+            <AIConfigManagement onConfigChange={onConfigChange} />
+            <ApiKeyManagement />
             <UserManagement />
         </div>
 	);
