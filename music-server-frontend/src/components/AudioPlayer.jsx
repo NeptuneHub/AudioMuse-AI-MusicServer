@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE, apiFetch } from '../api';
 
-function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevious, hasQueue, onToggleQueueView, queueCount = 0 }) {
+function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevious, hasQueue, onToggleQueueView, queueCount = 0, playMode = 'sequential', onTogglePlayMode }) {
     const [audioSrc, setAudioSrc] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(false);
@@ -15,6 +15,37 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
     const playPromiseRef = useRef(null);
     const seekingRef = useRef(false);
     const isDraggingRef = useRef(false);
+    const previousSongIdRef = useRef(null);
+
+    // Immediate seek function - no debounce to avoid visual flicker
+    const performSeek = useCallback((newTime) => {
+        if (audioRef.current && !seekingRef.current) {
+            const audio = audioRef.current;
+            
+            // Ensure audio is ready for seeking (has loaded metadata)
+            if (audio.readyState >= 1) { // HAVE_METADATA or better
+                try {
+                    // Clamp to valid range
+                    const clampedTime = Math.max(0, Math.min(newTime, audio.duration || duration));
+                    audio.currentTime = clampedTime;
+                } catch (e) {
+                    console.warn('Seek failed:', e);
+                }
+            } else {
+                // If not ready yet, wait for metadata and try again
+                const handleCanSeek = () => {
+                    try {
+                        const clampedTime = Math.max(0, Math.min(newTime, audio.duration || duration));
+                        audio.currentTime = clampedTime;
+                    } catch (e) {
+                        console.warn('Delayed seek failed:', e);
+                    }
+                    audio.removeEventListener('loadedmetadata', handleCanSeek);
+                };
+                audio.addEventListener('loadedmetadata', handleCanSeek, { once: true });
+            }
+        }
+    }, [duration]);
 
     // Effect for fetching audio data and scrobbling
     useEffect(() => {
@@ -23,15 +54,29 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
             setError(false);
             setIsLoading(false);
             setDuration(0);
+            setCurrentTime(0);
+            previousSongIdRef.current = null;
             return;
+        }
+        
+        // Check if this is actually a NEW song (not just a re-render)
+        const isNewSong = previousSongIdRef.current !== song.id;
+        
+        if (isNewSong) {
+            console.log('🎵 NEW SONG:', song.title, '(id:', song.id, ')');
+            // Reset current time ONLY for new songs
+            setCurrentTime(0);
+            previousSongIdRef.current = song.id;
         }
         
         // Use song.duration from metadata immediately (duration is in seconds)
         // This ensures the progress bar shows correct duration even before stream loads
         if (song.duration && !isNaN(song.duration) && song.duration > 0) {
+            console.log('⏱️ Setting duration from song metadata:', song.duration, 'seconds');
             setDuration(song.duration);
         } else {
             // If no duration in metadata, reset to 0 and wait for stream
+            console.log('⏱️ No duration in song metadata, waiting for stream');
             setDuration(0);
         }
 
@@ -57,8 +102,39 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                 }
 
                 // Build stream URL with JWT in query string (for <audio> element direct streaming)
-                // This allows the browser to natively stream without blob buffering
                 const streamUrl = `${API_BASE}/rest/stream.view?id=${encodeURIComponent(song.id)}&v=1.16.1&c=AudioMuse-AI&jwt=${encodeURIComponent(token)}`;
+                
+                // Fetch X-Content-Duration header from stream (if no duration in metadata)
+                if (!song.duration || song.duration === 0) {
+                    try {
+                        console.log('⏱️ Fetching duration from stream headers...');
+                        const response = await fetch(streamUrl, { 
+                            method: 'GET',
+                            headers: {
+                                'Authorization': `Bearer ${token}`,
+                                'Range': 'bytes=0-0' // Request only 1 byte to get headers quickly
+                            }
+                        });
+                        
+                        const xContentDuration = response.headers.get('X-Content-Duration');
+                        console.log('⏱️ X-Content-Duration header value:', xContentDuration);
+                        
+                        if (xContentDuration) {
+                            const durationSeconds = parseInt(xContentDuration, 10);
+                            if (!isNaN(durationSeconds) && durationSeconds > 0) {
+                                console.log('⏱️ ✅ Got duration from X-Content-Duration header:', durationSeconds, 'seconds');
+                                setDuration(durationSeconds);
+                            }
+                        } else {
+                            console.warn('⏱️ ❌ No X-Content-Duration header in response');
+                        }
+                        
+                        // Abort the response body to avoid downloading the full file
+                        response.body?.cancel();
+                    } catch (e) {
+                        console.warn('⏱️ Could not fetch X-Content-Duration header:', e);
+                    }
+                }
                 
                 console.log('🎵 Setting direct stream URL for immediate playback:', song.title);
                 
@@ -121,6 +197,8 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
     
     useEffect(() => {
         if (audioSrc && audioRef.current) {
+            console.log('🎵 audioSrc changed, loading new audio');
+            
             // Cancel any pending play promise before loading new audio
             if (playPromiseRef.current) {
                 playPromiseRef.current.catch(() => {
@@ -129,13 +207,6 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                 playPromiseRef.current = null;
             }
 
-            // If we have a valid duration from metadata, try to help the browser understand it
-            // This won't override the actual duration once loaded, but helps initial display
-            if (duration > 0 && audioRef.current.duration === Infinity) {
-                // Note: We can't actually set duration on audio element, but we can load metadata faster
-                audioRef.current.load();
-            }
-            
             // Check if this song was added from Map - if so, don't auto-play
             if (window._mapAddedSong) {
                 console.log('Map song detected - skipping auto-play');
@@ -147,6 +218,7 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
             playPromiseRef.current = audioRef.current.play();
             playPromiseRef.current
                 .then(() => {
+                    console.log('🎵 Playback started successfully');
                     playPromiseRef.current = null;
                 })
                 .catch(e => {
@@ -157,7 +229,7 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                     playPromiseRef.current = null;
                 });
         }
-    }, [audioSrc, duration]);
+    }, [audioSrc]);
     
     // Separate effect to handle volume/mute changes without restarting playback
     useEffect(() => {
@@ -184,20 +256,16 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                             onPointerDown={() => {
                                 isDraggingRef.current = true;
                             }}
-                            onPointerUp={() => {
+                            onPointerUp={(e) => {
+                                const newTime = parseFloat(e.target.value);
                                 isDraggingRef.current = false;
+                                // Apply seek when user releases using debounced function
+                                performSeek(newTime);
                             }}
                             onInput={(e) => {
                                 // Update visual immediately while dragging
                                 const newTime = parseFloat(e.target.value);
                                 setCurrentTime(newTime);
-                            }}
-                            onChange={(e) => {
-                                // Apply the actual seek when interaction ends
-                                if (audioRef.current) {
-                                    const newTime = parseFloat(e.target.value);
-                                    audioRef.current.currentTime = newTime;
-                                }
                             }}
                             className="flex-1 h-2 bg-dark-700 appearance-none cursor-pointer"
                             style={{
@@ -268,20 +336,24 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                 setIsPlaying(true);
                             }}
                             onPause={() => setIsPlaying(false)}
-                            onEnded={onEnded}
+                            onEnded={() => {
+                                console.log('🎵 Song ended, calling onEnded');
+                                setIsPlaying(false);
+                                onEnded();
+                            }}
                             onSeeking={() => {
                                 seekingRef.current = true;
                             }}
                             onSeeked={() => {
                                 seekingRef.current = false;
-                                // Force update currentTime after seek completes
-                                if (audioRef.current) {
+                                // Force update currentTime after seek completes to ensure accuracy
+                                if (audioRef.current && !isDraggingRef.current) {
                                     setCurrentTime(audioRef.current.currentTime);
                                 }
                             }}
                             onTimeUpdate={(e) => {
-                                // Don't update time while user is dragging to avoid jitter
-                                if (!isDraggingRef.current) {
+                                // Don't update time while user is dragging or seeking to avoid jitter
+                                if (!isDraggingRef.current && !seekingRef.current) {
                                     const time = e.target.currentTime;
                                     setCurrentTime(time);
                                 }
@@ -296,18 +368,24 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                 // If duration is still 0 or invalid, keep using metadata duration from state
                             }}
                             onDurationChange={(e) => {
+                                console.log('⏱️ onDurationChange - duration:', e.target.duration);
                                 // Only update if stream provides valid duration
                                 if (e.target.duration && !isNaN(e.target.duration) && e.target.duration !== Infinity && e.target.duration > 0) {
+                                    console.log('⏱️ Setting duration from stream:', e.target.duration);
                                     setDuration(e.target.duration);
+                                } else {
+                                    console.log('⏱️ Stream duration invalid, keeping metadata duration:', duration);
                                 }
-                                // Otherwise keep using metadata duration from database
                             }}
                             onLoadedMetadata={(e) => {
+                                console.log('⏱️ onLoadedMetadata - duration:', e.target.duration, 'current duration state:', duration);
                                 // Only update if stream metadata has valid duration
                                 if (e.target.duration && !isNaN(e.target.duration) && e.target.duration !== Infinity && e.target.duration > 0) {
+                                    console.log('⏱️ Setting duration from metadata:', e.target.duration);
                                     setDuration(e.target.duration);
+                                } else {
+                                    console.log('⏱️ Metadata duration invalid, keeping existing:', duration);
                                 }
-                                // Otherwise keep using metadata duration from database
                             }}
                             style={{ display: 'none' }}
                         />
@@ -378,20 +456,16 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                         onPointerDown={() => {
                                             isDraggingRef.current = true;
                                         }}
-                                        onPointerUp={() => {
+                                        onPointerUp={(e) => {
+                                            const newTime = parseFloat(e.target.value);
                                             isDraggingRef.current = false;
+                                            // Apply seek when user releases using debounced function
+                                            performSeek(newTime);
                                         }}
                                         onInput={(e) => {
                                             // Update visual immediately while dragging
                                             const newTime = parseFloat(e.target.value);
                                             setCurrentTime(newTime);
-                                        }}
-                                        onChange={(e) => {
-                                            // Apply the actual seek when interaction ends
-                                            if (audioRef.current) {
-                                                const newTime = parseFloat(e.target.value);
-                                                audioRef.current.currentTime = newTime;
-                                            }
                                         }}
                                         className="flex-1 h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer"
                                         style={{
@@ -454,6 +528,33 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                 </div>
                             </>
                         )}
+                    </div>
+
+                    {/* Play Mode Button - Desktop & Mobile */}
+                    <div className="flex-shrink-0">
+                        <button 
+                            onClick={onTogglePlayMode}
+                            className={`p-1.5 sm:p-3 rounded-lg transition-all ${
+                                playMode === 'sequential' ? 'text-gray-400 hover:text-white hover:bg-dark-700' :
+                                'text-accent-400 hover:text-accent-300 hover:bg-accent-500/10'
+                            }`}
+                            title={
+                                playMode === 'sequential' ? 'Sequential Play (Click for Shuffle)' :
+                                'Shuffle Mode (Click for Sequential)'
+                            }
+                        >
+                            {playMode === 'sequential' ? (
+                                // Sequential icon - right arrow (-->)
+                                <svg className="w-4 h-4 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+                                </svg>
+                            ) : (
+                                // Shuffle icon - crossing arrows
+                                <svg className="w-4 h-4 sm:w-6 sm:h-6" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd"></path>
+                                </svg>
+                            )}
+                        </button>
                     </div>
 
                     {/* Queue Button - Desktop & Mobile */}

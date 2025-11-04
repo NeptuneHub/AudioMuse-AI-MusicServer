@@ -1061,7 +1061,7 @@ func subsonicGetStarred(c *gin.Context) {
 	}
 
 	query := `
-		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, COALESCE(s.genre, '') as genre
+		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, COALESCE(s.genre, '') as genre, COALESCE(s.duration, 0) as duration
 		FROM songs s
 		INNER JOIN starred_songs ss ON s.id = ss.song_id
 		WHERE ss.user_id = ?
@@ -1081,7 +1081,7 @@ func subsonicGetStarred(c *gin.Context) {
 	for rows.Next() {
 		var s SubsonicSong
 		var lastPlayed sql.NullString
-		err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &s.Genre)
+		err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &s.Genre, &s.Duration)
 		if err != nil {
 			log.Printf("Error scanning starred song: %v", err)
 			continue

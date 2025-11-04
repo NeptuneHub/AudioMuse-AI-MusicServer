@@ -37,6 +37,8 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     });
     const [playQueue, setPlayQueue] = useState([]);
     const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+    const [playMode, setPlayMode] = useState('sequential'); // 'sequential' or 'shuffle'
+    const [originalQueue, setOriginalQueue] = useState([]); // Store original order for unshuffle
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isQueueViewOpen, setQueueViewOpen] = useState(false);
     const [audioMuseUrl, setAudioMuseUrl] = useState('');
@@ -45,7 +47,13 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     const [isAudioPlaying, setIsAudioPlaying] = useState(false);
     
     const currentView = useMemo(() => navigation[navigation.length - 1], [navigation]);
-    const currentSong = useMemo(() => playQueue.length > 0 ? playQueue[currentTrackIndex] : null, [playQueue, currentTrackIndex]);
+    const currentSong = useMemo(() => {
+        const song = playQueue.length > 0 ? playQueue[currentTrackIndex] : null;
+        if (song) {
+            console.log('📀 currentSong changed:', song.title, '(id:', song.id, ') index:', currentTrackIndex, 'queue length:', playQueue.length);
+        }
+        return song;
+    }, [playQueue, currentTrackIndex]);
 
     const fetchConfig = useCallback(async () => {
         try {
@@ -181,10 +189,12 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     }, []);
 
     const handlePlayNext = useCallback(async () => {
+        console.log('🎵 handlePlayNext called - currentTrackIndex:', currentTrackIndex, 'queueLength:', playQueue.length);
         if (playQueue.length === 0) return;
 
         const currentSong = playQueue[currentTrackIndex];
         const isLastSong = currentTrackIndex === playQueue.length - 1;
+        console.log('🎵 isLastSong:', isLastSong, 'currentSong:', currentSong?.title);
 
         // If on last song of a radio station, auto-rerun the alchemy
         if (isLastSong && currentSong?._isRadioSong && currentSong?._radioId) {
@@ -237,13 +247,75 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
             }
         }
 
-        // Normal next behavior - loop back to beginning
-        setCurrentTrackIndex(prev => (prev + 1) % playQueue.length);
+        // Normal next behavior - advance to next track if not at end
+        // If at last song, loop back to beginning (continuous playback)
+        const nextIndex = (currentTrackIndex + 1) % playQueue.length;
+        console.log('🎵 Moving to next track - nextIndex:', nextIndex);
+        setCurrentTrackIndex(nextIndex);
     }, [playQueue, currentTrackIndex]);
 
     const handlePlayPrevious = useCallback(() => {
         if (playQueue.length > 0) setCurrentTrackIndex(prev => (prev - 1 + playQueue.length) % playQueue.length);
     }, [playQueue.length]);
+
+    const handleTogglePlayMode = useCallback(() => {
+        if (playQueue.length === 0) return;
+        
+        console.log('🔀 Toggling play mode from:', playMode, 'currentIndex:', currentTrackIndex);
+        
+        setPlayMode(prevMode => {
+            if (prevMode === 'sequential') {
+                // Switch to shuffle - save original order and randomize
+                console.log('🔀 Switching to shuffle mode');
+                setOriginalQueue([...playQueue]);
+                const currentSong = playQueue[currentTrackIndex];
+                console.log('🔀 Current song:', currentSong?.title, 'at index:', currentTrackIndex);
+                
+                // Fisher-Yates shuffle
+                const shuffled = [...playQueue];
+                for (let i = shuffled.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                }
+                
+                // Find where current song ended up in shuffled queue
+                const newIndex = shuffled.findIndex(s => s.id === currentSong?.id);
+                console.log('🔀 Current song found at shuffled index:', newIndex, '-> moving to index:', currentTrackIndex);
+                
+                if (newIndex !== -1 && newIndex !== currentTrackIndex) {
+                    // Move current song to keep it at the same index position
+                    const [current] = shuffled.splice(newIndex, 1);
+                    shuffled.splice(currentTrackIndex, 0, current);
+                }
+                
+                setPlayQueue(shuffled);
+                // Don't call setCurrentTrackIndex - keep it the same
+                console.log('🔀 ✅ Shuffled queue, current track stays at index:', currentTrackIndex);
+                return 'shuffle';
+            } else {
+                // Switch back to sequential - restore original order
+                console.log('🔀 Switching back to sequential mode');
+                if (originalQueue.length > 0) {
+                    const currentSong = playQueue[currentTrackIndex];
+                    console.log('🔀 Current song:', currentSong?.title, 'restoring original order');
+                    
+                    // Find current song in original queue
+                    const originalIndex = originalQueue.findIndex(s => s.id === currentSong?.id);
+                    console.log('🔀 Current song in original queue at index:', originalIndex);
+                    
+                    setPlayQueue(originalQueue);
+                    
+                    if (originalIndex !== -1 && originalIndex !== currentTrackIndex) {
+                        console.log('🔀 Updating index from', currentTrackIndex, 'to', originalIndex);
+                        setCurrentTrackIndex(originalIndex);
+                    }
+                    setOriginalQueue([]);
+                    console.log('🔀 ✅ Restored sequential order');
+                }
+                return 'sequential';
+            }
+        });
+    }, [playQueue, currentTrackIndex, originalQueue, playMode]);
 
     const handleInstantMix = async (song) => {
         if (!audioMuseUrl) return;
@@ -471,6 +543,8 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                 hasQueue={playQueue.length > 1}
                 onToggleQueueView={() => setQueueViewOpen(true)}
                 queueCount={playQueue.length}
+                playMode={playMode}
+                onTogglePlayMode={handleTogglePlayMode}
             />
 
             <PlayQueueView
