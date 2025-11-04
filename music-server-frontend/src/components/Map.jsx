@@ -861,18 +861,18 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
   return (
     <div className="text-gray-100">
       <div className="mb-2 flex gap-1.5 sm:gap-2 items-center flex-wrap">
-        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search..." className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 text-sm w-32 sm:w-48 md:w-64" />
-        <div className="flex gap-2 items-center">
-          <label className="text-gray-400 text-xs sm:text-sm flex items-center">Size:</label>
-          <select value={percent} onChange={e => setPercent(Number(e.target.value))} className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 text-sm">
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search..." className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 text-sm w-32 sm:w-40 md:w-48" />
+        <div className="flex gap-1 items-center">
+          <label className="text-gray-400 text-xs flex items-center">Size:</label>
+          <select value={percent} onChange={e => setPercent(Number(e.target.value))} className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 text-xs">
             <option value={10}>10%</option>
             <option value={25}>25%</option>
             <option value={50}>50%</option>
             <option value={100}>100%</option>
           </select>
         </div>
-        <div id="map-status" className="text-gray-300 text-xs sm:text-sm ml-1 sm:ml-4">Selected: {selectedIds.length}</div>
-        <button onClick={handleRefresh} className="border-2 border-gray-500 text-gray-400 bg-gray-500/10 hover:bg-gray-500/20 hover:scale-105 transition-all px-2 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm" title="Clear overlays and selection">
+        <div id="map-status" className="text-gray-300 text-xs">Selected: {selectedIds.length}</div>
+        <button onClick={handleRefresh} className="border-2 border-gray-500 text-gray-400 bg-gray-500/10 hover:bg-gray-500/20 hover:scale-105 transition-all px-2 py-1 rounded-lg text-xs" title="Clear overlays and selection">
           🔄 <span className="hidden sm:inline">Refresh</span>
         </button>
         {selectedIds.length >= 2 && (
@@ -880,8 +880,8 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
             onClick={selectedIds.length <= 10 ? handleCreatePath : undefined} 
             disabled={selectedIds.length > 10}
             className={selectedIds.length <= 10 
-              ? "border-2 border-yellow-500 text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20 hover:scale-105 transition-all px-2 sm:px-4 py-1.5 rounded-lg font-semibold cursor-pointer text-xs sm:text-sm" 
-              : "border-2 border-gray-600 text-gray-500 bg-gray-600/10 px-2 sm:px-4 py-1.5 rounded-lg font-semibold cursor-not-allowed opacity-50 text-xs sm:text-sm"
+              ? "border-2 border-yellow-500 text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20 hover:scale-105 transition-all px-2 py-1 rounded-lg font-semibold cursor-pointer text-xs" 
+              : "border-2 border-gray-600 text-gray-500 bg-gray-600/10 px-2 py-1 rounded-lg font-semibold cursor-not-allowed opacity-50 text-xs"
             }
             title={selectedIds.length > 10 ? "Maximum 10 songs allowed for path creation" : "Create path between selected songs"}
           >
@@ -889,7 +889,7 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
           </button>
         )}
         {selectedIds.length > 0 && (
-          <button onClick={handlePlaySelection} className="border-2 border-green-500 text-green-400 bg-green-500/10 hover:bg-green-500/20 hover:scale-105 transition-all px-2 sm:px-4 py-1.5 rounded-lg font-semibold text-xs sm:text-sm">
+          <button onClick={handlePlaySelection} className="border-2 border-green-500 text-green-400 bg-green-500/10 hover:bg-green-500/20 hover:scale-105 transition-all px-2 py-1 rounded-lg font-semibold text-xs">
             ▶ <span className="hidden sm:inline">Play</span> ({selectedIds.length})
           </button>
         )}
@@ -908,28 +908,28 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
 
       {!loading && !error && (
         <div key={`map-${percent}-${mountKey}`}>
-          <div id="map-plot" ref={plotDivRef} style={{ width: '100%', height: '400px', minHeight: '400px', backgroundColor: '#1f2937', border: '1px solid #374151' }} className="sm:!h-[450px] md:!h-[calc(100vh-28rem)] lg:!h-[calc(100vh-26rem)]" />
+          <div id="map-plot" ref={plotDivRef} style={{ width: '100%', height: '300px', minHeight: '300px', backgroundColor: '#1f2937', border: '1px solid #374151' }} className="sm:!h-[500px] md:!h-[calc(100vh-22rem)] lg:!h-[calc(100vh-20rem)] xl:!h-[calc(100vh-19rem)]" />
           
           {/* Interactive genre legend with show/hide controls */}
-          <div className="mt-3 p-2 sm:p-3 bg-gray-800 border border-gray-700 rounded">
-            <div className="flex items-center gap-1.5 sm:gap-4 mb-2 flex-wrap">
-              <span className="font-semibold text-gray-300 text-xs sm:text-sm">Genres:</span>
-              <button onClick={showAllGenres} className="text-xs px-1.5 sm:px-2 py-1.5 border-2 border-gray-500 text-gray-400 bg-gray-500/10 hover:bg-gray-500/20 hover:scale-105 transition-all rounded-lg">
+          <div className="mt-2 bg-gray-800 border border-gray-700 rounded mb-4">
+            <div className="flex items-center gap-1.5 p-2 flex-wrap border-b border-gray-700 bg-gray-800">
+              <span className="font-semibold text-gray-300 text-xs">Genres:</span>
+              <button onClick={showAllGenres} className="text-xs px-1.5 py-0.5 border border-gray-500 text-gray-400 bg-gray-500/10 hover:bg-gray-500/20 transition-all rounded">
                 Show All
               </button>
-              <button onClick={hideAllGenres} className="text-xs px-1.5 sm:px-2 py-1.5 border-2 border-gray-500 text-gray-400 bg-gray-500/10 hover:bg-gray-500/20 hover:scale-105 transition-all rounded-lg">
+              <button onClick={hideAllGenres} className="text-xs px-1.5 py-0.5 border border-gray-500 text-gray-400 bg-gray-500/10 hover:bg-gray-500/20 transition-all rounded">
                 Hide All
               </button>
               
               {/* Overlay toggles */}
-              <span className="text-gray-500 mx-1 sm:mx-2">|</span>
+              <span className="text-gray-500 mx-1">|</span>
               <span className="text-gray-400 text-xs">Overlays:</span>
               <button 
                 onClick={() => {
                   setShowSearchHighlight(!showSearchHighlight);
                   toggleOverlay('search-highlight', !showSearchHighlight);
                 }}
-                className={`text-xs px-2 py-1.5 rounded-lg border-2 transition-all hover:scale-105 ${showSearchHighlight ? 'border-yellow-500 text-yellow-400 bg-yellow-500/10' : 'border-gray-600 text-gray-500 bg-gray-600/10 hover:border-yellow-500 hover:text-yellow-400'}`}
+                className={`text-xs px-1.5 py-0.5 rounded border transition-all ${showSearchHighlight ? 'border-yellow-500 text-yellow-400 bg-yellow-500/10' : 'border-gray-600 text-gray-500 bg-gray-600/10 hover:border-yellow-500 hover:text-yellow-400'}`}
                 title={showSearchHighlight ? 'Hide search highlight' : 'Show search highlight'}
               >
                 {showSearchHighlight ? '👁' : '👁‍🗨'} Search
@@ -939,7 +939,7 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
                   setShowPathLine(!showPathLine);
                   toggleOverlay('path-line', !showPathLine);
                 }}
-                className={`text-xs px-2 py-1.5 rounded-lg border-2 transition-all hover:scale-105 ${showPathLine ? 'border-blue-500 text-blue-400 bg-blue-500/10' : 'border-gray-600 text-gray-500 bg-gray-600/10 hover:border-blue-500 hover:text-blue-400'}`}
+                className={`text-xs px-1.5 py-0.5 rounded border transition-all ${showPathLine ? 'border-blue-500 text-blue-400 bg-blue-500/10' : 'border-gray-600 text-gray-500 bg-gray-600/10 hover:border-blue-500 hover:text-blue-400'}`}
                 title={showPathLine ? 'Hide path line' : 'Show path line'}
               >
                 {showPathLine ? '👁' : '👁‍🗨'} Path Line
@@ -949,13 +949,13 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
                   setShowPathPoints(!showPathPoints);
                   toggleOverlay('path-point', !showPathPoints);
                 }}
-                className={`text-xs px-2 py-1.5 rounded-lg border-2 transition-all hover:scale-105 ${showPathPoints ? 'border-red-500 text-red-400 bg-red-500/10' : 'border-gray-600 text-gray-500 bg-gray-600/10 hover:border-red-500 hover:text-red-400'}`}
+                className={`text-xs px-1.5 py-0.5 rounded border transition-all ${showPathPoints ? 'border-red-500 text-red-400 bg-red-500/10' : 'border-gray-600 text-gray-500 bg-gray-600/10 hover:border-red-500 hover:text-red-400'}`}
                 title={showPathPoints ? 'Hide path points' : 'Show path points'}
               >
                 {showPathPoints ? '👁' : '👁‍🗨'} Path Points
               </button>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5 p-2">
               {genres.slice(0, 50).map(genre => {
                 const colorMap = window._colorMap || {};
                 const color = colorMap[genre] || '#888';
