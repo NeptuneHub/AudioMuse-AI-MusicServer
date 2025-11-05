@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,6 +59,128 @@ func getDuration(filePath string) int {
 
 	// Round to nearest integer
 	return int(durationFloat + 0.5)
+}
+
+// extractTitleFromFilename extracts title from filename (like Navidrome's BaseName)
+// Removes extension and common prefixes like track numbers
+func extractTitleFromFilename(filePath string) string {
+	// Get base filename without path
+	filename := filepath.Base(filePath)
+
+	// Remove extension
+	ext := filepath.Ext(filename)
+	title := strings.TrimSuffix(filename, ext)
+
+	// Remove track number patterns: "01 - ", "01. ", "01-", "1-", etc.
+	trackNumRegex := regexp.MustCompile(`^(\d{1,3})[\s.\-_]+`)
+	title = trackNumRegex.ReplaceAllString(title, "")
+
+	// Try to extract artist - title pattern: "Artist - Title"
+	if parts := strings.SplitN(title, " - ", 2); len(parts) == 2 {
+		title = strings.TrimSpace(parts[1])
+	} else if parts := strings.SplitN(title, "-", 2); len(parts) == 2 {
+		title = strings.TrimSpace(parts[1])
+	}
+
+	// Clean up underscores and multiple spaces
+	title = strings.ReplaceAll(title, "_", " ")
+	title = regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
+	title = strings.TrimSpace(title)
+
+	if title == "" {
+		return "Unknown Title"
+	}
+	return title
+}
+
+// extractArtistFromPath extracts artist from folder structure or filename
+// Common patterns: /Music/Artist/Album/Song.mp3 or /Music/Artist - Album/Song.mp3
+func extractArtistFromPath(filePath string) string {
+	// Try to get artist from folder structure (parent or grandparent folder)
+	dir := filepath.Dir(filePath)
+	parts := strings.Split(filepath.Clean(dir), string(filepath.Separator))
+
+	// Try grandparent folder first (typical: /Music/Artist/Album/song.mp3)
+	if len(parts) >= 2 {
+		artist := parts[len(parts)-2]
+		// Clean up common patterns
+		artist = cleanMetadataString(artist)
+		if artist != "" && !isCommonFolderName(artist) {
+			return artist
+		}
+	}
+
+	// Try filename pattern: "Artist - Title.mp3"
+	filename := filepath.Base(filePath)
+	ext := filepath.Ext(filename)
+	nameWithoutExt := strings.TrimSuffix(filename, ext)
+
+	// Remove track numbers first
+	trackNumRegex := regexp.MustCompile(`^(\d{1,3})[\s.\-_]+`)
+	nameWithoutExt = trackNumRegex.ReplaceAllString(nameWithoutExt, "")
+
+	if parts := strings.SplitN(nameWithoutExt, " - ", 2); len(parts) == 2 {
+		artist := strings.TrimSpace(parts[0])
+		artist = cleanMetadataString(artist)
+		if artist != "" {
+			return artist
+		}
+	}
+
+	return "Unknown Artist"
+}
+
+// extractAlbumFromPath extracts album name from folder structure
+// Typically the parent folder: /Music/Artist/Album/song.mp3
+func extractAlbumFromPath(filePath string) string {
+	// Get parent folder name
+	dir := filepath.Dir(filePath)
+	albumName := filepath.Base(dir)
+
+	// Clean up common patterns
+	albumName = cleanMetadataString(albumName)
+
+	if albumName != "" && !isCommonFolderName(albumName) {
+		return albumName
+	}
+
+	return "Unknown Album"
+}
+
+// cleanMetadataString removes unwanted characters and patterns from extracted metadata
+func cleanMetadataString(s string) string {
+	// Remove year patterns: [2020], (2020), - 2020, etc.
+	yearRegex := regexp.MustCompile(`[\[\(]?\d{4}[\]\)]?`)
+	s = yearRegex.ReplaceAllString(s, "")
+
+	// Remove common tags: [320kbps], (Remastered), etc.
+	tagRegex := regexp.MustCompile(`[\[\(][^\]\)]+[\]\)]`)
+	s = tagRegex.ReplaceAllString(s, "")
+
+	// Clean up underscores, hyphens at edges, multiple spaces
+	s = strings.ReplaceAll(s, "_", " ")
+	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
+	s = strings.Trim(s, " -")
+
+	return strings.TrimSpace(s)
+}
+
+// isCommonFolderName checks if a folder name is too generic to be useful metadata
+func isCommonFolderName(name string) bool {
+	commonNames := []string{
+		"music", "audio", "songs", "tracks", "albums", "downloads",
+		"mp3", "flac", "m4a", "ogg", "media", "library", "collection",
+		"unknown", "various", "compilation",
+	}
+
+	lowerName := strings.ToLower(name)
+	for _, common := range commonNames {
+		if lowerName == common {
+			return true
+		}
+	}
+
+	return false
 }
 
 // detectAudioFormat detects the format and bitrate of an audio file using FFprobe

@@ -300,6 +300,24 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				artist := meta.Artist()
 				album := meta.Album()
 
+				// Fallback to filename parsing if metadata is empty (like Navidrome does)
+				if title == "" {
+					title = extractTitleFromFilename(path)
+					log.Printf("No title metadata, using filename: %s -> %s", path, title)
+				}
+				if artist == "" {
+					artist = extractArtistFromPath(path)
+					if artist != "" {
+						log.Printf("No artist metadata, extracted from path: %s", artist)
+					}
+				}
+				if album == "" {
+					album = extractAlbumFromPath(path)
+					if album != "" {
+						log.Printf("No album metadata, extracted from path: %s", album)
+					}
+				}
+
 				// Get duration using ffprobe
 				duration := getDuration(path)
 
@@ -396,6 +414,24 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 				title := meta.Title()
 				artist := meta.Artist()
 				album := meta.Album()
+
+				// Fallback to filename parsing if metadata is empty (like Navidrome does)
+				if title == "" {
+					title = extractTitleFromFilename(path)
+					log.Printf("No title metadata, using filename: %s -> %s", path, title)
+				}
+				if artist == "" {
+					artist = extractArtistFromPath(path)
+					if artist != "" {
+						log.Printf("No artist metadata, extracted from path: %s", artist)
+					}
+				}
+				if album == "" {
+					album = extractAlbumFromPath(path)
+					if album != "" {
+						log.Printf("No album metadata, extracted from path: %s", album)
+					}
+				}
 
 				// Get duration using ffprobe
 				duration := getDuration(path)

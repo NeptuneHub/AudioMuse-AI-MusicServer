@@ -278,16 +278,16 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                     </div>
                 </div>
             )}
-            <div className="container mx-auto px-2 sm:px-6 py-2 sm:py-3">
-                <div className="flex items-center gap-2 sm:gap-6">
-                    {/* Album Art & Song Info - Fixed width on desktop to prevent layout shift */}
-                    <div className="flex items-center gap-2 flex-shrink-0 w-full sm:w-64 max-w-[180px] sm:max-w-none overflow-hidden">
+            <div className="container mx-auto px-1 sm:px-6 py-2 sm:py-3">
+                <div className="flex items-center gap-1 sm:gap-6">
+                    {/* Album Art & Song Info - More compact on mobile */}
+                    <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 w-full sm:w-64 max-w-[140px] sm:max-w-none overflow-hidden">
                         {song && song.coverArt && credentials?.username && credentials?.password ? (
                             <div className="relative group">
                                 <img 
                                     src={`${API_BASE}/rest/getCoverArt.view?id=${encodeURIComponent(song.coverArt)}&size=60&v=1.16.1&c=AudioMuse-AI&u=${encodeURIComponent(credentials.username)}&p=${encodeURIComponent(credentials.password)}`}
                                     alt={song.title}
-                                    className="w-10 h-10 sm:w-14 sm:h-14 rounded-lg shadow-lg object-cover"
+                                    className="w-9 h-9 sm:w-14 sm:h-14 rounded-lg shadow-lg object-cover"
                                 />
                                 {isLoading && (
                                     <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center">
@@ -299,9 +299,9 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                 )}
                             </div>
                         ) : (
-                            <div className="w-10 h-10 sm:w-14 sm:h-14 bg-dark-700 rounded-lg shadow-lg flex items-center justify-center flex-shrink-0">
+                            <div className="w-9 h-9 sm:w-14 sm:h-14 bg-dark-700 rounded-lg shadow-lg flex items-center justify-center flex-shrink-0">
                                 {/* Generic music icon placeholder */}
-                                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                                <svg className="w-4 h-4 sm:w-6 sm:h-6 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
                                     <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" />
                                 </svg>
                             </div>
@@ -309,24 +309,24 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                         
                         <div className="overflow-hidden flex-1 min-w-0">
                             {isLoading && !error && (
-                                <div className="space-y-2">
-                                    <div className="h-4 bg-dark-700 rounded skeleton w-3/4"></div>
-                                    <div className="h-3 bg-dark-700 rounded skeleton w-1/2"></div>
+                                <div className="space-y-1">
+                                    <div className="h-3 bg-dark-700 rounded skeleton w-3/4"></div>
+                                    <div className="h-2 bg-dark-700 rounded skeleton w-1/2"></div>
                                 </div>
                             )}
-                            {error && <p className="font-semibold truncate text-sm text-red-400">Error Loading Track</p>}
+                            {error && <p className="font-semibold truncate text-xs sm:text-sm text-red-400">Error Loading Track</p>}
                             {!isLoading && !error && song && (
                                 <>
-                                    <p className="font-semibold truncate text-xs sm:text-base text-white">{song.title}</p>
-                                    <p className="text-[10px] sm:text-sm text-gray-400 truncate">{song.artist}</p>
+                                    <p className="font-semibold truncate text-[11px] sm:text-base text-white leading-tight">{song.title}</p>
+                                    <p className="text-[9px] sm:text-sm text-gray-400 truncate leading-tight">{song.artist}</p>
                                 </>
                             )}
-                            {!song && <div className="text-gray-500 text-xs sm:text-sm">Select a song to play</div>}
+                            {!song && <div className="text-gray-500 text-[10px] sm:text-sm">Select a song</div>}
                         </div>
                     </div>
 
                     {/* Playback Controls - Centered (Desktop & Mobile) - << Play >> layout */}
-                    <div className="flex items-center justify-center gap-1 sm:gap-2 flex-1">
+                    <div className="flex items-center justify-center gap-0.5 sm:gap-2 flex-1">
                         <audio
                             ref={audioRef}
                             src={audioSrc || ''}
@@ -392,12 +392,12 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                         {song && (
                             <>
                                 {/* Playback Control Buttons Group - Previous, Play/Pause, Next */}
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-0.5 sm:gap-1">
                                     {/* Previous Button */}
                                     <button 
                                         onClick={onPlayPrevious}
                                         disabled={!hasQueue}
-                                        className={`p-2 rounded-full transition-all group ${hasQueue ? 'text-gray-300 hover:text-white hover:bg-dark-700' : 'text-gray-600 cursor-not-allowed opacity-50'}`}
+                                        className={`p-1.5 sm:p-2 rounded-full transition-all group ${hasQueue ? 'text-gray-300 hover:text-white hover:bg-dark-700' : 'text-gray-600 cursor-not-allowed opacity-50'}`}
                                         title="Previous"
                                     >
                                         <svg className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 20 20">
@@ -416,15 +416,15 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                                 }
                                             }
                                         }} 
-                                        className="text-white hover:text-accent-400 p-2 rounded-full hover:bg-dark-700 transition-all group" 
+                                        className="text-white hover:text-accent-400 p-1.5 sm:p-2 rounded-full hover:bg-dark-700 transition-all group" 
                                         title={isPlaying ? "Pause" : "Play"}
                                     >
                                         {isPlaying ? (
-                                            <svg className="w-6 h-6 sm:w-8 sm:h-8" fill="currentColor" viewBox="0 0 20 20">
+                                            <svg className="w-5 h-5 sm:w-8 sm:h-8" fill="currentColor" viewBox="0 0 20 20">
                                                 <path d="M5.75 3a.75.75 0 00-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75V3.75A.75.75 0 007.25 3h-1.5zM12.75 3a.75.75 0 00-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75V3.75a.75.75 0 00-.75-.75h-1.5z"></path>
                                             </svg>
                                         ) : (
-                                            <svg className="w-6 h-6 sm:w-8 sm:h-8" fill="currentColor" viewBox="0 0 20 20">
+                                            <svg className="w-5 h-5 sm:w-8 sm:h-8" fill="currentColor" viewBox="0 0 20 20">
                                                 <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
                                             </svg>
                                         )}
@@ -434,7 +434,7 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                     <button 
                                         onClick={onPlayNext}
                                         disabled={!hasQueue}
-                                        className={`p-2 rounded-full transition-all group ${hasQueue ? 'text-gray-300 hover:text-white hover:bg-dark-700' : 'text-gray-600 cursor-not-allowed opacity-50'}`}
+                                        className={`p-1.5 sm:p-2 rounded-full transition-all group ${hasQueue ? 'text-gray-300 hover:text-white hover:bg-dark-700' : 'text-gray-600 cursor-not-allowed opacity-50'}`}
                                         title="Next"
                                     >
                                         <svg className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 20 20">
@@ -530,11 +530,12 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                         )}
                     </div>
 
-                    {/* Play Mode Button - Desktop & Mobile */}
-                    <div className="flex-shrink-0">
+                    {/* Right Controls Group - Play Mode & Queue Buttons - Compact on mobile */}
+                    <div className="flex-shrink-0 flex items-center gap-0.5 sm:gap-2">
+                        {/* Play Mode Button */}
                         <button 
                             onClick={onTogglePlayMode}
-                            className={`p-1.5 sm:p-3 rounded-lg transition-all ${
+                            className={`p-1 sm:p-2.5 rounded-lg transition-all ${
                                 playMode === 'sequential' ? 'text-gray-400 hover:text-white hover:bg-dark-700' :
                                 'text-accent-400 hover:text-accent-300 hover:bg-accent-500/10'
                             }`}
@@ -545,34 +546,33 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                         >
                             {playMode === 'sequential' ? (
                                 // Sequential icon - right arrow (-->)
-                                <svg className="w-4 h-4 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
                                 </svg>
                             ) : (
                                 // Shuffle icon - crossing arrows
-                                <svg className="w-4 h-4 sm:w-6 sm:h-6" fill="currentColor" viewBox="0 0 20 20">
+                                <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 20 20">
                                     <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd"></path>
                                 </svg>
                             )}
                         </button>
-                    </div>
 
-                    {/* Queue Button - Desktop & Mobile */}
-                    <div className="flex-shrink-0 relative">
+                        {/* Queue Button with badge */}
                         <button 
                             onClick={onToggleQueueView} 
-                            className={`p-1.5 sm:p-3 rounded-lg transition-all ${queueCount > 0 ? 'text-accent-400 hover:bg-accent-500/10' : 'text-gray-400 hover:bg-dark-700'}`}
+                            className={`p-1 sm:p-2.5 rounded-lg transition-all relative ${queueCount > 0 ? 'text-accent-400 hover:bg-accent-500/10' : 'text-gray-400 hover:bg-dark-700'}`}
                             title={`Queue (${queueCount} songs)`}
                         >
-                            <svg className="w-4 h-4 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path>
                             </svg>
+                            {/* Queue count badge - only show on mobile when > 0 */}
+                            {queueCount > 0 && (
+                                <span className="absolute -top-0.5 -right-0.5 sm:-top-1 sm:-right-1 bg-accent-500 text-white text-[8px] sm:text-[10px] font-bold rounded-full min-w-[14px] h-[14px] sm:min-w-[16px] sm:h-[16px] flex items-center justify-center px-0.5">
+                                    {queueCount > 99 ? '99+' : queueCount}
+                                </span>
+                            )}
                         </button>
-                        {queueCount > 0 && (
-                            <span className="absolute -top-1 -right-1 bg-accent-500 text-white text-[10px] sm:text-xs font-bold rounded-full min-w-[16px] sm:min-w-[20px] h-4 sm:h-5 flex items-center justify-center px-1 shadow-glow animate-scale-in">
-                                {queueCount > 99 ? '99+' : queueCount}
-                            </span>
-                        )}
                     </div>
                 </div>
             </div>
