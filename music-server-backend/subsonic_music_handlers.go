@@ -61,56 +61,45 @@ func getDuration(filePath string) int {
 	return int(durationFloat + 0.5)
 }
 
-// extractTitleFromFilename extracts title from filename (like Navidrome's BaseName)
-// Removes extension and common prefixes like track numbers
+// extractTitleFromFilename extracts title from filename with proper priority
+// Priority: 1. Metadata, 2. Filename parsing, 3. Folder structure
 func extractTitleFromFilename(filePath string) string {
-	// Get base filename without path
 	filename := filepath.Base(filePath)
-
-	// Remove extension
 	ext := filepath.Ext(filename)
-	title := strings.TrimSuffix(filename, ext)
+	nameWithoutExt := strings.TrimSuffix(filename, ext)
 
-	// Remove track number patterns: "01 - ", "01. ", "01-", "1-", etc.
+	// Remove track number patterns: "01 - ", "01. ", "01 ", etc.
 	trackNumRegex := regexp.MustCompile(`^(\d{1,3})[\s.\-_]+`)
-	title = trackNumRegex.ReplaceAllString(title, "")
+	nameWithoutExt = trackNumRegex.ReplaceAllString(nameWithoutExt, "")
 
-	// Try to extract artist - title pattern: "Artist - Title"
-	if parts := strings.SplitN(title, " - ", 2); len(parts) == 2 {
-		title = strings.TrimSpace(parts[1])
-	} else if parts := strings.SplitN(title, "-", 2); len(parts) == 2 {
-		title = strings.TrimSpace(parts[1])
-	}
-
-	// Clean up underscores and multiple spaces
-	title = strings.ReplaceAll(title, "_", " ")
-	title = regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
-	title = strings.TrimSpace(title)
-
-	if title == "" {
-		return "Unknown Title"
-	}
-	return title
-}
-
-// extractArtistFromPath extracts artist from folder structure or filename
-// Common patterns: /Music/Artist/Album/Song.mp3 or /Music/Artist - Album/Song.mp3
-func extractArtistFromPath(filePath string) string {
-	// Try to get artist from folder structure (parent or grandparent folder)
-	dir := filepath.Dir(filePath)
-	parts := strings.Split(filepath.Clean(dir), string(filepath.Separator))
-
-	// Try grandparent folder first (typical: /Music/Artist/Album/song.mp3)
-	if len(parts) >= 2 {
-		artist := parts[len(parts)-2]
-		// Clean up common patterns
-		artist = cleanMetadataString(artist)
-		if artist != "" && !isCommonFolderName(artist) {
-			return artist
+	// Priority 2a: Try "Artist - Title" pattern in filename (with " - " separator)
+	if parts := strings.SplitN(nameWithoutExt, " - ", 2); len(parts) == 2 {
+		title := cleanMetadataString(parts[1])
+		if title != "" {
+			return title
 		}
 	}
 
-	// Try filename pattern: "Artist - Title.mp3"
+	// Priority 2b: Try "Artist_Title" pattern (underscore separator)
+	if parts := strings.SplitN(nameWithoutExt, "_", 2); len(parts) == 2 {
+		title := cleanMetadataString(parts[1])
+		if title != "" && !isCommonFolderName(parts[0]) {
+			return title
+		}
+	}
+
+	// Priority 2c: Use entire filename as title (after removing track number)
+	title := cleanMetadataString(nameWithoutExt)
+	if title != "" {
+		return title
+	}
+
+	return "Unknown Title"
+}
+
+// extractArtistFromPath extracts artist with proper priority
+// Priority: 1. Metadata, 2. Filename "Artist - Title", 3. Folder structure
+func extractArtistFromPath(filePath string) string {
 	filename := filepath.Base(filePath)
 	ext := filepath.Ext(filename)
 	nameWithoutExt := strings.TrimSuffix(filename, ext)
@@ -119,10 +108,29 @@ func extractArtistFromPath(filePath string) string {
 	trackNumRegex := regexp.MustCompile(`^(\d{1,3})[\s.\-_]+`)
 	nameWithoutExt = trackNumRegex.ReplaceAllString(nameWithoutExt, "")
 
+	// Priority 2a: Try "Artist - Title" pattern in FILENAME FIRST (with " - " separator)
 	if parts := strings.SplitN(nameWithoutExt, " - ", 2); len(parts) == 2 {
-		artist := strings.TrimSpace(parts[0])
-		artist = cleanMetadataString(artist)
-		if artist != "" {
+		artist := cleanMetadataString(parts[0])
+		if artist != "" && !isCommonFolderName(artist) {
+			return artist
+		}
+	}
+
+	// Priority 2b: Try "Artist_Title" pattern (underscore separator)
+	if parts := strings.SplitN(nameWithoutExt, "_", 2); len(parts) == 2 {
+		artist := cleanMetadataString(parts[0])
+		if artist != "" && !isCommonFolderName(artist) {
+			return artist
+		}
+	}
+
+	// Priority 3: Fall back to folder structure (grandparent = Artist folder)
+	dir := filepath.Dir(filePath)
+	pathParts := strings.Split(filepath.Clean(dir), string(filepath.Separator))
+
+	if len(pathParts) >= 2 {
+		artist := cleanMetadataString(pathParts[len(pathParts)-2])
+		if artist != "" && !isCommonFolderName(artist) {
 			return artist
 		}
 	}
@@ -130,14 +138,45 @@ func extractArtistFromPath(filePath string) string {
 	return "Unknown Artist"
 }
 
-// extractAlbumFromPath extracts album name from folder structure
-// Typically the parent folder: /Music/Artist/Album/song.mp3
-func extractAlbumFromPath(filePath string) string {
-	// Get parent folder name
+// extractAlbumFromPath extracts album name with proper priority
+// Priority: 1. Metadata, 2. Filename patterns, 3. Parent folder name
+// artistName parameter is used to remove redundant "Artist - Album" patterns
+func extractAlbumFromPath(filePath string, artistName string) string {
+	// Priority 2: Could check filename for "Artist - Album - Title" patterns
+	// but this is extremely rare, so we skip directly to folder-based extraction
+
+	// Priority 3: Use parent folder as album name (most common pattern)
 	dir := filepath.Dir(filePath)
 	albumName := filepath.Base(dir)
 
-	// Clean up common patterns
+	// Remove artist prefix if present: "SUPERARE - Rich Party People" -> "Rich Party People"
+	if artistName != "" && artistName != "Unknown Artist" {
+		// Try exact match with " - " separator
+		dashPrefix := artistName + " - "
+		if strings.HasPrefix(albumName, dashPrefix) {
+			albumName = strings.TrimPrefix(albumName, dashPrefix)
+		} else {
+			// Try case-insensitive match with " - "
+			dashPrefixLower := strings.ToLower(dashPrefix)
+			if strings.HasPrefix(strings.ToLower(albumName), dashPrefixLower) {
+				albumName = albumName[len(dashPrefix):]
+			}
+		}
+
+		// Also try underscore separator: "SUPERARE_Rich Party People" -> "Rich Party People"
+		underscorePrefix := artistName + "_"
+		if strings.HasPrefix(albumName, underscorePrefix) {
+			albumName = strings.TrimPrefix(albumName, underscorePrefix)
+		} else {
+			// Try case-insensitive match with "_"
+			underscorePrefixLower := strings.ToLower(underscorePrefix)
+			if strings.HasPrefix(strings.ToLower(albumName), underscorePrefixLower) {
+				albumName = albumName[len(underscorePrefix):]
+			}
+		}
+	}
+
+	// Clean up common patterns in album name
 	albumName = cleanMetadataString(albumName)
 
 	if albumName != "" && !isCommonFolderName(albumName) {

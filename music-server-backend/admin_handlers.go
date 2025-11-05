@@ -301,20 +301,22 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				album := meta.Album()
 
 				// Fallback to filename parsing if metadata is empty (like Navidrome does)
+				// Priority: 1. Metadata tags, 2. Filename parsing, 3. Folder structure
 				if title == "" {
 					title = extractTitleFromFilename(path)
-					log.Printf("No title metadata, using filename: %s -> %s", path, title)
+					log.Printf("📝 No title metadata, parsed from filename: '%s' from %s", title, filepath.Base(path))
 				}
 				if artist == "" {
 					artist = extractArtistFromPath(path)
 					if artist != "" {
-						log.Printf("No artist metadata, extracted from path: %s", artist)
+						log.Printf("🎤 No artist metadata, parsed: '%s' from %s", artist, filepath.Base(path))
 					}
 				}
 				if album == "" {
-					album = extractAlbumFromPath(path)
+					// Pass artist to remove redundant "Artist - Album" patterns
+					album = extractAlbumFromPath(path, artist)
 					if album != "" {
-						log.Printf("No album metadata, extracted from path: %s", album)
+						log.Printf("💿 No album metadata, parsed: '%s' from folder: %s", album, filepath.Base(filepath.Dir(path)))
 					}
 				}
 
@@ -323,8 +325,8 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 
 				// DEBUG: Log the first few songs being inserted
 				if songsAdded < 3 {
-					log.Printf("DEBUG [processPathWithTracking]: Inserting song #%d: title='%s', duration=%ds, date_added='%s', date_updated='%s'",
-						songsAdded+1, title, duration, currentTime, currentTime)
+					log.Printf("DEBUG [processPathWithTracking]: Inserting song #%d: title='%s', artist='%s', album='%s', duration=%ds",
+						songsAdded+1, title, artist, album, duration)
 				}
 
 				// Use UPSERT to update existing songs or insert new ones
@@ -416,20 +418,22 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 				album := meta.Album()
 
 				// Fallback to filename parsing if metadata is empty (like Navidrome does)
+				// Priority: 1. Metadata tags, 2. Filename parsing, 3. Folder structure
 				if title == "" {
 					title = extractTitleFromFilename(path)
-					log.Printf("No title metadata, using filename: %s -> %s", path, title)
+					log.Printf("📝 No title metadata, parsed from filename: '%s' from %s", title, filepath.Base(path))
 				}
 				if artist == "" {
 					artist = extractArtistFromPath(path)
 					if artist != "" {
-						log.Printf("No artist metadata, extracted from path: %s", artist)
+						log.Printf("🎤 No artist metadata, parsed: '%s' from %s", artist, filepath.Base(path))
 					}
 				}
 				if album == "" {
-					album = extractAlbumFromPath(path)
+					// Pass artist to remove redundant "Artist - Album" patterns
+					album = extractAlbumFromPath(path, artist)
 					if album != "" {
-						log.Printf("No album metadata, extracted from path: %s", album)
+						log.Printf("💿 No album metadata, parsed: '%s' from folder: %s", album, filepath.Base(filepath.Dir(path)))
 					}
 				}
 
@@ -438,8 +442,8 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 
 				// DEBUG: Log the first few songs being inserted
 				if *totalSongsAdded < 3 {
-					log.Printf("DEBUG [processPathWithRunningTotalAndTracking]: Inserting song #%d: title='%s', duration=%ds, date_added='%s'",
-						*totalSongsAdded+1, title, duration, currentTime)
+					log.Printf("DEBUG [processPathWithRunningTotalAndTracking]: Inserting song #%d: title='%s', artist='%s', album='%s', duration=%ds",
+						*totalSongsAdded+1, title, artist, album, duration)
 				}
 
 				// Use UPSERT to update existing songs or insert new ones
