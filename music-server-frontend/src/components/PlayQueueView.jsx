@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { subsonicFetch } from '../api';
+import { subsonicFetch, starSong, unstarSong } from '../api';
 
 const SaveAsPlaylistModal = ({ isOpen, onClose, queue, onSuccess }) => {
     const [playlistName, setPlaylistName] = useState('');
@@ -116,7 +116,7 @@ const SaveAsPlaylistModal = ({ isOpen, onClose, queue, onSuccess }) => {
     );
 };
 
-const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, onClose, onSetStart, onSetEnd, positionStyle }) => {
+const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, onClose, onSetStart, onSetEnd, onToggleStar, positionStyle }) => {
     const menuRef = useRef(null);
 
     useEffect(() => {
@@ -143,6 +143,12 @@ const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, on
                 <button onClick={() => { onSetEnd(song.id); onClose(); }} className="block w-full text-left px-4 py-2 text-sm border-2 border-purple-500 text-purple-400 bg-purple-500/10 hover:bg-purple-500/20 transition-all rounded-lg mb-1">Set as Path end</button>
                 <button onClick={() => { onAddToPlaylist(song); onClose(); }} className="block w-full text-left px-4 py-2 text-sm border-2 border-teal-500 text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 transition-all rounded-lg mb-1">Add to Playlist</button>
                 <button
+                    onClick={() => { onToggleStar(song); onClose(); }}
+                    className="block w-full text-left px-4 py-2 text-sm border-2 border-amber-500 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 transition-all rounded-lg mb-1"
+                >
+                    {song.starred ? '★ Remove from Favorites' : '☆ Add to Favorites'}
+                </button>
+                <button
                     onClick={() => { onInstantMix(song); onClose(); }}
                     disabled={!audioMuseUrl}
                     className="block w-full text-left px-4 py-2 text-sm border-2 border-yellow-500 text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20 transition-all rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
@@ -158,13 +164,30 @@ const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, on
 /**
  * A modal component to display and manage the current play queue.
  */
-function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelect, onTogglePlayPause, onAddToPlaylist, onInstantMix, audioMuseUrl, onClearQueue, onReorder, onCreateSongPath }) {
+function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelect, onTogglePlayPause, onAddToPlaylist, onInstantMix, audioMuseUrl, onClearQueue, onReorder, onCreateSongPath, onQueueUpdate }) {
     const [activeMenu, setActiveMenu] = useState({ index: null, style: {} });
     const [startSongId, setStartSongId] = useState(null);
     const [endSongId, setEndSongId] = useState(null);
     const [visibleCount, setVisibleCount] = useState(50);
     const [showSaveAsPlaylist, setShowSaveAsPlaylist] = useState(false);
     const queueListRef = useRef(null);
+
+    // Handle star/unstar toggle
+    const handleToggleStar = async (song) => {
+        try {
+            if (song.starred) {
+                await unstarSong(song.id);
+            } else {
+                await starSong(song.id);
+            }
+            // Trigger queue update to refresh the starred status
+            if (onQueueUpdate) {
+                onQueueUpdate();
+            }
+        } catch (err) {
+            console.error('Failed to toggle star:', err);
+        }
+    };
 
     useEffect(() => {
         if (queue.length !== 2) {
@@ -380,6 +403,7 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                                                 onClose={() => setActiveMenu({ index: null, style: {} })}
                                                 onSetStart={setStartSongId}
                                                 onSetEnd={setEndSongId}
+                                                onToggleStar={handleToggleStar}
                                                 positionStyle={activeMenu.style}
                                             />
                                         )}

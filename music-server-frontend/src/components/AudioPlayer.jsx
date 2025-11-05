@@ -165,9 +165,9 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
         if (song && 'mediaSession' in navigator) {
             // Only include artwork if song has coverArt and credentials are available
             const artwork = [];
-            if (song.coverArt && credentials?.username && credentials?.password) {
+            if ((song.coverArt || song.id) && credentials?.username && credentials?.password) {
                 const params = new URLSearchParams({ 
-                    id: song.coverArt, 
+                    id: song.coverArt || song.id, 
                     v: '1.16.1', 
                     c: 'AudioMuse-AI',
                     u: credentials.username,
@@ -241,11 +241,11 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
 
     return (
         <div className="fixed bottom-0 left-0 right-0 glass border-t border-dark-600 z-50 shadow-2xl">
-            {/* Mobile-only progress bar at the very top */}
+            {/* Mobile Timeline - At the very top on mobile only */}
             {song && (
-                <div className="sm:hidden">
-                    <div className="flex items-center gap-2 px-2 py-1 bg-dark-800/50">
-                        <span className="text-[10px] text-gray-400 whitespace-nowrap font-mono">
+                <div className="sm:hidden px-2 py-1.5 bg-dark-800/30">
+                    <div className="flex items-center gap-1">
+                        <span className="text-[9px] text-gray-400 whitespace-nowrap flex-shrink-0 w-8 text-right">
                             {Math.floor(currentTime / 60)}:{String(Math.floor(currentTime % 60)).padStart(2, '0')}
                         </span>
                         <input
@@ -253,26 +253,21 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                             min="0"
                             max={duration || 100}
                             value={currentTime}
-                            onPointerDown={() => {
-                                isDraggingRef.current = true;
-                            }}
-                            onPointerUp={(e) => {
-                                const newTime = parseFloat(e.target.value);
-                                isDraggingRef.current = false;
-                                // Apply seek when user releases using debounced function
-                                performSeek(newTime);
-                            }}
-                            onInput={(e) => {
-                                // Update visual immediately while dragging
+                            onChange={(e) => {
                                 const newTime = parseFloat(e.target.value);
                                 setCurrentTime(newTime);
+                                isDraggingRef.current = true;
+                                performSeek(newTime);
+                                setTimeout(() => {
+                                    isDraggingRef.current = false;
+                                }, 100);
                             }}
-                            className="flex-1 h-2 bg-dark-700 appearance-none cursor-pointer"
+                            className="flex-1 h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer"
                             style={{
                                 background: `linear-gradient(to right, #14b8a6 0%, #14b8a6 ${duration > 0 ? (currentTime / duration * 100) : 0}%, #374151 ${duration > 0 ? (currentTime / duration * 100) : 0}%, #374151 100%)`
                             }}
                         />
-                        <span className="text-[10px] text-gray-400 whitespace-nowrap font-mono">
+                        <span className="text-[9px] text-gray-400 whitespace-nowrap flex-shrink-0 w-8">
                             {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}
                         </span>
                     </div>
@@ -280,14 +275,19 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
             )}
             <div className="container mx-auto px-1 sm:px-6 py-2 sm:py-3">
                 <div className="flex items-center gap-1 sm:gap-6">
-                    {/* Album Art & Song Info - More compact on mobile */}
-                    <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 w-full sm:w-64 max-w-[140px] sm:max-w-none overflow-hidden">
-                        {song && song.coverArt && credentials?.username && credentials?.password ? (
-                            <div className="relative group">
+                    {/* Song Info - More compact on mobile */}
+                    <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 w-32 sm:w-64 overflow-hidden">
+                        {/* Album art only on desktop */}
+                        {song && (song.coverArt || song.id) && credentials?.username && credentials?.password && (
+                            <div className="hidden sm:block relative group">
                                 <img 
-                                    src={`${API_BASE}/rest/getCoverArt.view?id=${encodeURIComponent(song.coverArt)}&size=60&v=1.16.1&c=AudioMuse-AI&u=${encodeURIComponent(credentials.username)}&p=${encodeURIComponent(credentials.password)}`}
+                                    src={`${API_BASE}/rest/getCoverArt.view?id=${encodeURIComponent(song.coverArt || song.id)}&size=60&v=1.16.1&c=AudioMuse-AI&u=${encodeURIComponent(credentials.username)}&p=${encodeURIComponent(credentials.password)}`}
                                     alt={song.title}
-                                    className="w-9 h-9 sm:w-14 sm:h-14 rounded-lg shadow-lg object-cover"
+                                    className="w-14 h-14 rounded-lg shadow-lg object-cover"
+                                    onError={(e) => {
+                                        // Hide image if it fails to load
+                                        e.target.style.display = 'none';
+                                    }}
                                 />
                                 {isLoading && (
                                     <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center">
@@ -297,13 +297,6 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                         </svg>
                                     </div>
                                 )}
-                            </div>
-                        ) : (
-                            <div className="w-9 h-9 sm:w-14 sm:h-14 bg-dark-700 rounded-lg shadow-lg flex items-center justify-center flex-shrink-0">
-                                {/* Generic music icon placeholder */}
-                                <svg className="w-4 h-4 sm:w-6 sm:h-6 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
-                                    <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" />
-                                </svg>
                             </div>
                         )}
                         
