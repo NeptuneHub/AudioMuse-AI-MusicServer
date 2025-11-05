@@ -622,7 +622,7 @@ func subsonicGetArtists(c *gin.Context) {
 	query := `
 		SELECT
 			s.artist,
-			COUNT(DISTINCT s.album)
+			COUNT(DISTINCT s.album_path)
 		FROM songs s
 		WHERE s.artist != ''
 		GROUP BY s.artist
@@ -678,10 +678,12 @@ func subsonicGetArtists(c *gin.Context) {
 
 func subsonicGetAlbumList2(c *gin.Context) {
 	_ = c.MustGet("user") // Auth is handled by middleware
-	// Respect size/offset params and return empty list when offset exceeds total (Navidrome-like behavior)
+
+	// Get parameters
 	sizeParam := c.DefaultQuery("size", "500")
 	offsetParam := c.DefaultQuery("offset", "0")
 	genreParam := c.Query("genre")
+	listType := c.DefaultQuery("type", "alphabeticalByArtist") // Required by Subsonic API spec
 
 	size, err := strconv.Atoi(sizeParam)
 	if err != nil || size <= 0 {
@@ -695,6 +697,8 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		offset = 0
 	}
 
+	log.Printf("getAlbumList2: type=%s, size=%d, offset=%d, genre=%s", listType, size, offset, genreParam)
+
 	// Build query with optional genre filter
 	whereClause := "WHERE album != ''"
 	var args []interface{}
@@ -703,9 +707,40 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		args = append(args, genreParam)
 	}
 
-	// Count distinct albums
+	// Determine ORDER BY clause based on list type
+	var orderByClause string
+	switch listType {
+	case "newest":
+		// Recently added albums - sort by the most recent date_added of songs in each album
+		orderByClause = "ORDER BY MAX(date_added) DESC, artist, album"
+	case "recent":
+		// Recently played albums - sort by most recent last_played
+		orderByClause = "ORDER BY MAX(last_played) DESC, artist, album"
+	case "frequent":
+		// Most frequently played albums
+		orderByClause = "ORDER BY SUM(play_count) DESC, artist, album"
+	case "random":
+		// Random albums
+		orderByClause = "ORDER BY RANDOM()"
+	case "alphabeticalByName":
+		// Sorted by album name
+		orderByClause = "ORDER BY album COLLATE NOCASE, artist"
+	case "alphabeticalByArtist":
+		// Sorted by artist then album (default)
+		orderByClause = "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE"
+	default:
+		// Unknown type - default to alphabetical by artist
+		log.Printf("Warning: Unknown album list type '%s', defaulting to alphabeticalByArtist", listType)
+		orderByClause = "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE"
+	}
+
+	// Count distinct albums by folder path - 1 folder = 1 album
 	var totalAlbums int
-	countQuery := fmt.Sprintf("SELECT COUNT(DISTINCT album || '~~' || artist) FROM songs %s", whereClause)
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(DISTINCT album_path) 
+		FROM songs 
+		%s
+	`, whereClause)
 	err = db.QueryRow(countQuery, args...).Scan(&totalAlbums)
 	if err != nil {
 		log.Printf("Error counting albums for pagination: %v", err)
@@ -721,11 +756,22 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		return
 	}
 
-	// Query with LIMIT/OFFSET for pagination
-	query := fmt.Sprintf("SELECT album, artist, COALESCE(genre, ''), MIN(id) FROM songs %s GROUP BY album, artist ORDER BY artist, album LIMIT ? OFFSET ?", whereClause)
+	// Query albums grouped by album_path (directory) ONLY
+	// SIMPLE: 1 folder = 1 album, regardless of metadata differences
+	// Takes album/artist name from first song in each folder
+	query := fmt.Sprintf(`
+		SELECT album, artist, COALESCE(genre, '') as genre, MIN(id) as album_id
+		FROM songs 
+		%s
+		GROUP BY album_path
+		%s 
+		LIMIT ? OFFSET ?
+	`, whereClause, orderByClause)
+
 	args = append(args, size, offset)
 	rows, err := db.Query(query, args...)
 	if err != nil {
+		log.Printf("Error querying albums: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying albums."))
 		return
 	}
@@ -736,13 +782,15 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		var album SubsonicAlbum
 		var albumId int
 		if err := rows.Scan(&album.Name, &album.Artist, &album.Genre, &albumId); err != nil {
-			log.Printf("Error scanning album row for subsonicGetAlbumList2: %v", err)
+			log.Printf("Error scanning album row: %v", err)
 			continue
 		}
 		album.ID = strconv.Itoa(albumId)
-		album.CoverArt = album.ID
+		album.CoverArt = strconv.Itoa(albumId)
 		albums = append(albums, album)
 	}
+
+	log.Printf("getAlbumList2: Returning %d albums (total=%d)", len(albums), totalAlbums)
 
 	responseBody := &SubsonicAlbumList2{Albums: albums}
 	response := newSubsonicResponse(responseBody)
@@ -758,23 +806,32 @@ func subsonicGetAlbum(c *gin.Context) {
 		return
 	}
 
-	var albumName, artistName, albumGenre string
-	err := db.QueryRow("SELECT album, artist, COALESCE(genre, '') FROM songs WHERE id = ?", albumSongId).Scan(&albumName, &artistName, &albumGenre)
+	var albumName, artistName, albumGenre, albumPath string
+	err := db.QueryRow("SELECT album, artist, COALESCE(genre, ''), path FROM songs WHERE id = ?", albumSongId).Scan(&albumName, &artistName, &albumGenre, &albumPath)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Album not found."))
 		return
 	}
 
+	// Extract the album's directory path (parent directory of the song file)
+	// This ensures we only return songs from the SAME physical album location
+	albumDir := filepath.Dir(albumPath)
+	log.Printf("getAlbum: Fetching songs for album='%s', artist='%s', albumId=%s, albumDir='%s'", albumName, artistName, albumSongId, albumDir)
+
+	// Query songs that match album/artist AND are in the same directory
+	// This prevents duplicate albums from different library paths from mixing together
 	query := `
-		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, COALESCE(s.genre, ''), s.duration,
+		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''), s.duration,
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
-		WHERE s.album = ? AND s.artist = ? 
+		WHERE s.album = ? AND s.artist = ? AND s.path LIKE ?
 		ORDER BY s.title
 	`
 
-	rows, err := db.Query(query, user.ID, albumName, artistName)
+	// Use LIKE with the album directory to match all songs in the same folder
+	pathPattern := albumDir + string(filepath.Separator) + "%"
+	rows, err := db.Query(query, user.ID, albumName, artistName, pathPattern)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Error querying for songs in album."))
 		return
@@ -788,7 +845,8 @@ func subsonicGetAlbum(c *gin.Context) {
 		var songId int
 		var duration int
 		var starred int
-		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &s.Genre, &duration, &starred); err != nil {
+		var songPath string
+		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &songPath, &s.PlayCount, &lastPlayed, &s.Genre, &duration, &starred); err != nil {
 			log.Printf("Error scanning song in getAlbum: %v", err)
 			continue
 		}
@@ -800,7 +858,14 @@ func subsonicGetAlbum(c *gin.Context) {
 			s.LastPlayed = lastPlayed.String
 		}
 		songs = append(songs, s)
+
+		// Log potential duplicates
+		if len(songs) <= 20 {
+			log.Printf("  Song %d: id=%d, title='%s', path='%s'", len(songs), songId, s.Title, songPath)
+		}
 	}
+
+	log.Printf("getAlbum: Returning %d songs for album '%s'", len(songs), albumName)
 
 	responseBody := &SubsonicAlbumWithSongs{
 		ID:        albumSongId,
@@ -1296,7 +1361,7 @@ func subsonicGetGenres(c *gin.Context) {
 	}
 
 	query := `
-		SELECT COALESCE(genre, 'Unknown') as genre, COUNT(*) as song_count, COUNT(DISTINCT album) as album_count
+		SELECT COALESCE(genre, 'Unknown') as genre, COUNT(*) as song_count, COUNT(DISTINCT album_path) as album_count
 		FROM songs 
 		GROUP BY COALESCE(genre, 'Unknown')
 		ORDER BY genre COLLATE NOCASE

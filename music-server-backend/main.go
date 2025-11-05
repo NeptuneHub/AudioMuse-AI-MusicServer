@@ -321,6 +321,36 @@ func initDB() {
 		log.Printf("Note: Could not add genre column (may already exist): %v", err)
 	}
 
+	// Add album_path column if it doesn't exist - stores directory path for grouping
+	_, err = db.Exec(`ALTER TABLE songs ADD COLUMN album_path TEXT DEFAULT '';`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		log.Printf("Note: Could not add album_path column (may already exist): %v", err)
+	}
+
+	// Populate album_path for existing songs that don't have it set
+	log.Println("Updating album_path for existing songs...")
+	rows, err := db.Query("SELECT id, path FROM songs WHERE album_path = '' OR album_path IS NULL")
+	if err == nil {
+		defer rows.Close()
+		updateStmt, _ := db.Prepare("UPDATE songs SET album_path = ? WHERE id = ?")
+		if updateStmt != nil {
+			defer updateStmt.Close()
+			updateCount := 0
+			for rows.Next() {
+				var id int
+				var path string
+				if err := rows.Scan(&id, &path); err == nil {
+					albumPath := filepath.Dir(path)
+					updateStmt.Exec(albumPath, id)
+					updateCount++
+				}
+			}
+			if updateCount > 0 {
+				log.Printf("Updated album_path for %d existing songs", updateCount)
+			}
+		}
+	}
+
 	// Create starred_songs table for user-specific stars
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS starred_songs (
 		user_id INTEGER NOT NULL,

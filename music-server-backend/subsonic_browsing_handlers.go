@@ -4,6 +4,7 @@ package main
 import (
 	"database/sql"
 	"log"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -46,11 +47,11 @@ func subsonicGetIndexes(c *gin.Context) {
 		}
 	}
 
-	// Query all artists with album counts
+	// Query all artists with album counts (by folder path)
 	query := `
 		SELECT
 			s.artist,
-			COUNT(DISTINCT s.album)
+			COUNT(DISTINCT s.album_path)
 		FROM songs s
 		WHERE s.artist != ''
 		GROUP BY s.artist
@@ -145,11 +146,12 @@ func subsonicGetMusicDirectory(c *gin.Context) {
 
 // getArtistDirectory returns all albums by an artist
 func getArtistDirectory(c *gin.Context, artistName string) {
+	// Group by album_path (directory) ONLY - 1 folder = 1 album
 	query := `
 		SELECT album, MIN(id) as album_id, COUNT(*) as song_count, COALESCE(genre, '') as genre
 		FROM songs
 		WHERE artist = ?
-		GROUP BY album
+		GROUP BY album_path
 		ORDER BY album COLLATE NOCASE
 	`
 
@@ -196,16 +198,29 @@ func getArtistDirectory(c *gin.Context, artistName string) {
 
 // getAlbumDirectory returns all songs in an album
 func getAlbumDirectory(c *gin.Context, user User, albumID int, albumName, artistName string) {
+	// Get the album's directory path from the albumID song
+	var albumPath string
+	err := db.QueryRow("SELECT path FROM songs WHERE id = ?", albumID).Scan(&albumPath)
+	if err != nil {
+		log.Printf("Error getting album path for ID %d: %v", albumID, err)
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Album not found."))
+		return
+	}
+
+	// Extract the album's directory to prevent mixing duplicate albums from different paths
+	albumDir := filepath.Dir(albumPath)
+
 	query := `
 		SELECT s.id, s.title, s.artist, s.album, s.duration, s.play_count, s.last_played, COALESCE(s.genre, ''),
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
-		WHERE s.album = ? AND s.artist = ?
+		WHERE s.album = ? AND s.artist = ? AND s.path LIKE ?
 		ORDER BY s.title COLLATE NOCASE
 	`
 
-	rows, err := db.Query(query, user.ID, albumName, artistName)
+	pathPattern := albumDir + string(filepath.Separator) + "%"
+	rows, err := db.Query(query, user.ID, albumName, artistName, pathPattern)
 	if err != nil {
 		log.Printf("Error querying songs for album %s: %v", albumName, err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
@@ -270,11 +285,12 @@ func subsonicGetArtist(c *gin.Context) {
 	log.Printf("getArtist called with ID: %s", artistName)
 
 	// Get albums by this artist
+	// Group by album_path (directory) ONLY - 1 folder = 1 album
 	query := `
 		SELECT album, MIN(id) as album_id, COUNT(*) as song_count, COALESCE(genre, '') as genre
 		FROM songs
 		WHERE artist = ?
-		GROUP BY album
+		GROUP BY album_path
 		ORDER BY album COLLATE NOCASE
 	`
 

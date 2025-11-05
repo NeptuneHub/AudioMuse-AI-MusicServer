@@ -120,8 +120,8 @@ func getMusicCounts(c *gin.Context) {
 	}
 	db.QueryRow(artistQuery, args...).Scan(&counts.Artists)
 
-	// Count albums
-	albumQuery := "SELECT COUNT(DISTINCT artist || '|' || album) FROM songs WHERE album != ''"
+	// Count albums by folder path - 1 folder = 1 album
+	albumQuery := "SELECT COUNT(DISTINCT album_path) FROM songs WHERE album_path != ''"
 	args = []interface{}{}
 	if genre != "" {
 		albumQuery += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"

@@ -35,14 +35,15 @@ func getArtists(c *gin.Context) {
 
 func getAlbums(c *gin.Context) {
 	artistFilter := c.Query("artist")
-	query := "SELECT DISTINCT album, artist FROM songs WHERE album != ''"
+	// Group by album_path (directory) ONLY - 1 folder = 1 album
+	query := "SELECT album, artist, MIN(id) FROM songs WHERE album != ''"
 	args := []interface{}{}
 
 	if artistFilter != "" {
 		query += " AND artist = ?"
 		args = append(args, artistFilter)
 	}
-	query += " ORDER BY artist, album"
+	query += " GROUP BY album_path ORDER BY artist, album"
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -54,7 +55,8 @@ func getAlbums(c *gin.Context) {
 	var albums []Album
 	for rows.Next() {
 		var album Album
-		if err := rows.Scan(&album.Name, &album.Artist); err != nil {
+		var minID int
+		if err := rows.Scan(&album.Name, &album.Artist, &minID); err != nil {
 			log.Printf("Error scanning album row: %v", err)
 			continue
 		}

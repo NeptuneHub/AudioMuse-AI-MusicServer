@@ -81,7 +81,8 @@ func subsonicSearch2(c *gin.Context) {
 			albumArgs = append(albumArgs, likeWord, likeWord)
 		}
 		albumArgs = append(albumArgs, albumCount, albumOffset)
-		albumQuery := "SELECT album, artist, COALESCE(genre, ''), MIN(id) as albumId FROM songs WHERE " + strings.Join(albumConditions, " AND ") + " GROUP BY album, artist ORDER BY album LIMIT ? OFFSET ?"
+		// Group by album_path (directory) ONLY - 1 folder = 1 album
+		albumQuery := "SELECT album, artist, COALESCE(genre, ''), MIN(id) as albumId FROM songs WHERE " + strings.Join(albumConditions, " AND ") + " GROUP BY album_path ORDER BY album LIMIT ? OFFSET ?"
 		albumRows, err := db.Query(albumQuery, albumArgs...)
 		if err != nil {
 			log.Printf("[ERROR] subsonicSearch2: Album query failed: %v", err)
