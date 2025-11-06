@@ -445,11 +445,11 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     }, [filter, searchTerm, allSongs, isLoading, hasMore, selectedGenre, credentials?.username, discoveryView]);
 
     useEffect(() => {
-        if (songs.length === 0 && hasMore && (searchTerm.length >= 3 || filter || selectedGenre || discoveryView !== 'all')) {
+        if (songs.length === 0 && hasMore && !isStarredFilter && (searchTerm.length >= 3 || filter || selectedGenre || discoveryView !== 'all')) {
             const timer = setTimeout(() => loadMoreSongs(), 300);
             return () => clearTimeout(timer);
         }
-    }, [songs.length, hasMore, loadMoreSongs, searchTerm, filter, selectedGenre, discoveryView]);
+    }, [songs.length, hasMore, loadMoreSongs, searchTerm, filter, selectedGenre, discoveryView, isStarredFilter]);
 
     const lastSongElementRef = useCallback(() => {
         // Infinite scroll disabled - all songs load at once now
@@ -547,6 +547,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 setAllSongs([]);
                                 setHasMore(true);
                                 setSearchTerm('');
+                                setIsStarredFilter(false); // Reset starred filter
                             }}
                             className={`px-3 sm:px-4 py-2 rounded-lg font-semibold whitespace-nowrap transition-all ${
                                 discoveryView === 'all'
@@ -569,6 +570,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 setAllSongs([]);
                                 setIsLoading(true);
                                 setHasMore(false);  // No pagination for discovery views
+                                setIsStarredFilter(false); // Reset starred filter
                                 try {
                                     const newSongs = await getRecentlyAdded(DISCOVERY_LOAD_SIZE, 0, selectedGenre);
                                     const songsArray = newSongs || [];
@@ -601,6 +603,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 setAllSongs([]);
                                 setIsLoading(true);
                                 setHasMore(false);  // No pagination for discovery views
+                                setIsStarredFilter(false); // Reset starred filter
                                 try {
                                     const newSongs = await getMostPlayed(DISCOVERY_LOAD_SIZE, 0, selectedGenre);
                                     const songsArray = newSongs || [];
@@ -633,6 +636,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 setAllSongs([]);
                                 setIsLoading(true);
                                 setHasMore(false);  // No pagination for discovery views
+                                setIsStarredFilter(false); // Reset starred filter
                                 try {
                                     const newSongs = await getRecentlyPlayed(DISCOVERY_LOAD_SIZE, 0, selectedGenre);
                                     const songsArray = newSongs || [];
@@ -735,10 +739,10 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             setSelectedGenre('');
                             setHasMore(false);
                             setIsStarredFilter(true);
-                            setDiscoveryView('all');  // Reset to 'all' view to show star column
+                            setDiscoveryView('all'); // Switch to "All Songs" tab
                             
                             const data = await getStarredSongs();
-                            const starredSongs = data.starred?.song;
+                            const starredSongs = data.starred2?.song;
                             
                             // Handle empty/missing starred songs properly
                             let songList = [];
@@ -749,8 +753,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             }
                             
                             setAllSongs(songList);
-                            setSongs(songList);  // Show ALL starred songs immediately
-                            setHasMore(false);  // No pagination for starred songs
+                            setSongs(songList.slice(0, PAGE_SIZE));
+                            setHasMore(songList.length > PAGE_SIZE);
                         } catch (err) {
                             setError('Failed to load starred songs: ' + err.message);
                             setIsStarredFilter(false);
