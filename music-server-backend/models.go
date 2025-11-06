@@ -17,7 +17,7 @@ type User struct {
 }
 
 type Song struct {
-	ID                  int      `json:"id"`
+	ID                  string   `json:"id"`
 	Title               string   `json:"title"`
 	Artist              string   `json:"artist"`
 	Album               string   `json:"album"`
@@ -29,6 +29,7 @@ type Song struct {
 	DateUpdated         string   `json:"dateUpdated"`
 	Starred             bool     `json:"starred"`
 	Genre               string   `json:"genre"`
+	Cancelled           bool     `json:"cancelled"`
 	ReplayGainTrackGain *float64 `json:"replaygainTrackGain,omitempty"`
 	ReplayGainTrackPeak *float64 `json:"replaygainTrackPeak,omitempty"`
 	ReplayGainAlbumGain *float64 `json:"replaygainAlbumGain,omitempty"`

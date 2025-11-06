@@ -2,6 +2,7 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"log"
 	"net/http"
@@ -148,11 +149,28 @@ func processPath(scanPath string) int64 {
 				// Get duration using ffprobe
 				duration := getDuration(path)
 
+				// Check if song already exists (by path) to reuse UUID
+				var existingID string
+				err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
+
+				var songID string
+				if err == sql.ErrNoRows {
+					// New song - generate UUID
+					songID = GenerateBase62UUID()
+				} else if err != nil {
+					log.Printf("Error checking for existing song: %v", err)
+					return nil
+				} else {
+					// Existing song - reuse UUID
+					songID = existingID
+				}
+
 				// Use INSERT ... ON CONFLICT to update existing songs or insert new ones
 				// This ensures date_added is set for old songs missing it, and date_updated is always current
+				// Mark as not cancelled when re-adding
 				albumPath := filepath.Dir(path) // Store directory path for grouping
-				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, album_path, genre, duration, date_added, date_updated) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
 						artist=excluded.artist, 
@@ -161,8 +179,9 @@ func processPath(scanPath string) int64 {
 						genre=excluded.genre,
 						duration=excluded.duration,
 						date_added=COALESCE(songs.date_added, excluded.date_added),
-						date_updated=excluded.date_updated`,
-					meta.Title(), meta.Artist(), meta.Album(), path, albumPath, genre, duration, currentTime, currentTime)
+						date_updated=excluded.date_updated,
+						cancelled=0`,
+					songID, meta.Title(), meta.Artist(), meta.Album(), path, albumPath, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -224,10 +243,26 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 				// Get duration using ffprobe
 				duration := getDuration(path)
 
+				// Check if song already exists (by path) to reuse UUID
+				var existingID string
+				err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
+
+				var songID string
+				if err == sql.ErrNoRows {
+					// New song - generate UUID
+					songID = GenerateBase62UUID()
+				} else if err != nil {
+					log.Printf("Error checking for existing song: %v", err)
+					return nil
+				} else {
+					// Existing song - reuse UUID
+					songID = existingID
+				}
+
 				// Use UPSERT to update existing songs or insert new ones
 				albumPath := filepath.Dir(path) // Store directory path for grouping
-				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, album_path, genre, duration, date_added, date_updated) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
 						artist=excluded.artist, 
@@ -236,8 +271,9 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 						genre=excluded.genre,
 						duration=excluded.duration,
 						date_added=COALESCE(songs.date_added, excluded.date_added),
-						date_updated=excluded.date_updated`,
-					meta.Title(), meta.Artist(), meta.Album(), path, albumPath, genre, duration, currentTime, currentTime)
+						date_updated=excluded.date_updated,
+						cancelled=0`,
+					songID, meta.Title(), meta.Artist(), meta.Album(), path, albumPath, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -333,10 +369,26 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 						songsAdded+1, title, artist, album, duration)
 				}
 
+				// Check if song already exists (by path) to reuse UUID
+				var existingID string
+				err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
+
+				var songID string
+				if err == sql.ErrNoRows {
+					// New song - generate UUID
+					songID = GenerateBase62UUID()
+				} else if err != nil {
+					log.Printf("Error checking for existing song: %v", err)
+					return nil
+				} else {
+					// Existing song - reuse UUID
+					songID = existingID
+				}
+
 				// Use UPSERT to update existing songs or insert new ones
 				albumPath := filepath.Dir(path) // Store directory path for grouping
-				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, album_path, genre, duration, date_added, date_updated) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
 						artist=excluded.artist, 
@@ -345,8 +397,9 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 						genre=excluded.genre,
 						duration=excluded.duration,
 						date_added=COALESCE(songs.date_added, excluded.date_added),
-						date_updated=excluded.date_updated`,
-					title, artist, album, path, albumPath, genre, duration, currentTime, currentTime)
+						date_updated=excluded.date_updated,
+						cancelled=0`,
+					songID, title, artist, album, path, albumPath, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -452,10 +505,26 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 						*totalSongsAdded+1, title, artist, album, duration)
 				}
 
+				// Check if song already exists (by path) to reuse UUID
+				var existingID string
+				err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
+
+				var songID string
+				if err == sql.ErrNoRows {
+					// New song - generate UUID
+					songID = GenerateBase62UUID()
+				} else if err != nil {
+					log.Printf("Error checking for existing song: %v", err)
+					return nil
+				} else {
+					// Existing song - reuse UUID
+					songID = existingID
+				}
+
 				// Use UPSERT to update existing songs or insert new ones
 				albumPath := filepath.Dir(path) // Store directory path for grouping
-				res, err := db.Exec(`INSERT INTO songs (title, artist, album, path, album_path, genre, duration, date_added, date_updated) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
 						artist=excluded.artist, 
@@ -464,8 +533,9 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 						genre=excluded.genre,
 						duration=excluded.duration,
 						date_added=COALESCE(songs.date_added, excluded.date_added),
-						date_updated=excluded.date_updated`,
-					title, artist, album, path, albumPath, genre, duration, currentTime, currentTime)
+						date_updated=excluded.date_updated,
+						cancelled=0`,
+					songID, title, artist, album, path, albumPath, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -508,17 +578,17 @@ func removeMissingSongsFromPath(libraryPath string, scannedPaths map[string]bool
 
 	log.Printf("Checking for missing songs in path: %s", libraryPath)
 
-	// Get all songs from database that belong to this library path
-	rows, err := db.Query("SELECT id, path FROM songs WHERE path LIKE ?", likePath)
+	// Get all songs from database that belong to this library path and are not cancelled
+	rows, err := db.Query("SELECT id, path FROM songs WHERE path LIKE ? AND cancelled = 0", likePath)
 	if err != nil {
 		log.Printf("Error querying songs for cleanup: %v", err)
 		return
 	}
 	defer rows.Close()
 
-	var songsToDelete []int
+	var songsToCancel []string
 	for rows.Next() {
-		var songID int
+		var songID string
 		var songPath string
 		if err := rows.Scan(&songID, &songPath); err != nil {
 			log.Printf("Error scanning song row for cleanup: %v", err)
@@ -527,36 +597,24 @@ func removeMissingSongsFromPath(libraryPath string, scannedPaths map[string]bool
 
 		// If this song's path wasn't in our scanned paths, it no longer exists
 		if !scannedPaths[songPath] {
-			songsToDelete = append(songsToDelete, songID)
-			log.Printf("Song file not found, will delete: %s (ID: %d)", songPath, songID)
+			songsToCancel = append(songsToCancel, songID)
+			log.Printf("Song file not found, will mark as cancelled: %s (ID: %s)", songPath, songID)
 		}
 	}
 
-	// Delete missing songs
-	if len(songsToDelete) > 0 {
-		log.Printf("Removing %d missing songs from database", len(songsToDelete))
+	// Mark missing songs as cancelled (soft delete)
+	if len(songsToCancel) > 0 {
+		log.Printf("Marking %d missing songs as cancelled", len(songsToCancel))
 
-		for _, songID := range songsToDelete {
-			// Remove from playlists
-			_, err := db.Exec("DELETE FROM playlist_songs WHERE song_id = ?", songID)
+		for _, songID := range songsToCancel {
+			// Mark the song as cancelled instead of deleting
+			_, err := db.Exec("UPDATE songs SET cancelled = 1 WHERE id = ?", songID)
 			if err != nil {
-				log.Printf("Error removing song %d from playlists: %v", songID, err)
-			}
-
-			// Remove from starred songs
-			_, err = db.Exec("DELETE FROM starred_songs WHERE song_id = ?", songID)
-			if err != nil {
-				log.Printf("Error removing song %d from starred: %v", songID, err)
-			}
-
-			// Remove the song itself
-			_, err = db.Exec("DELETE FROM songs WHERE id = ?", songID)
-			if err != nil {
-				log.Printf("Error deleting song %d: %v", songID, err)
+				log.Printf("Error marking song %s as cancelled: %v", songID, err)
 			}
 		}
 
-		log.Printf("Successfully removed %d missing songs", len(songsToDelete))
+		log.Printf("Successfully marked %d missing songs as cancelled", len(songsToCancel))
 	} else {
 		log.Printf("No missing songs found in path: %s", libraryPath)
 	}
@@ -565,17 +623,17 @@ func removeMissingSongsFromPath(libraryPath string, scannedPaths map[string]bool
 func removeOrphanedSongs(activePaths []LibraryPath) {
 	log.Println("Checking for orphaned songs (songs not belonging to any current library path)...")
 
-	// Get all songs from database
-	rows, err := db.Query("SELECT id, path FROM songs")
+	// Get all songs from database that are not already cancelled
+	rows, err := db.Query("SELECT id, path FROM songs WHERE cancelled = 0")
 	if err != nil {
 		log.Printf("Error querying all songs for orphan cleanup: %v", err)
 		return
 	}
 	defer rows.Close()
 
-	var orphanedSongs []int
+	var orphanedSongs []string
 	for rows.Next() {
-		var songID int
+		var songID string
 		var songPath string
 		if err := rows.Scan(&songID, &songPath); err != nil {
 			log.Printf("Error scanning song row for orphan cleanup: %v", err)
@@ -596,38 +654,26 @@ func removeOrphanedSongs(activePaths []LibraryPath) {
 			}
 		}
 
-		// If song doesn't belong to any active library, mark for deletion
+		// If song doesn't belong to any active library, mark for cancellation
 		if !belongsToActiveLibrary {
 			orphanedSongs = append(orphanedSongs, songID)
-			log.Printf("Orphaned song found (no matching library path): %s (ID: %d)", songPath, songID)
+			log.Printf("Orphaned song found (no matching library path): %s (ID: %s)", songPath, songID)
 		}
 	}
 
-	// Delete orphaned songs
+	// Mark orphaned songs as cancelled (soft delete)
 	if len(orphanedSongs) > 0 {
-		log.Printf("Removing %d orphaned songs from database", len(orphanedSongs))
+		log.Printf("Marking %d orphaned songs as cancelled", len(orphanedSongs))
 
 		for _, songID := range orphanedSongs {
-			// Remove from playlists
-			_, err := db.Exec("DELETE FROM playlist_songs WHERE song_id = ?", songID)
+			// Mark the song as cancelled instead of deleting
+			_, err := db.Exec("UPDATE songs SET cancelled = 1 WHERE id = ?", songID)
 			if err != nil {
-				log.Printf("Error removing orphaned song %d from playlists: %v", songID, err)
-			}
-
-			// Remove from starred songs
-			_, err = db.Exec("DELETE FROM starred_songs WHERE song_id = ?", songID)
-			if err != nil {
-				log.Printf("Error removing orphaned song %d from starred: %v", songID, err)
-			}
-
-			// Remove the song itself
-			_, err = db.Exec("DELETE FROM songs WHERE id = ?", songID)
-			if err != nil {
-				log.Printf("Error deleting orphaned song %d: %v", songID, err)
+				log.Printf("Error marking orphaned song %s as cancelled: %v", songID, err)
 			}
 		}
 
-		log.Printf("Successfully removed %d orphaned songs", len(orphanedSongs))
+		log.Printf("Successfully marked %d orphaned songs as cancelled", len(orphanedSongs))
 	} else {
 		log.Println("No orphaned songs found")
 	}
@@ -643,7 +689,8 @@ func updateSongCountForPath(path string, pathId int) {
 	likePath := searchPath + "%"
 
 	log.Printf("DEBUG: Counting songs for path '%s' using pattern '%s'", path, likePath)
-	err := db.QueryRow("SELECT COUNT(*) FROM songs WHERE path LIKE ?", likePath).Scan(&count)
+	// Only count non-cancelled songs
+	err := db.QueryRow("SELECT COUNT(*) FROM songs WHERE path LIKE ? AND cancelled = 0", likePath).Scan(&count)
 	if err != nil {
 		log.Printf("Error counting songs for path %s: %v", path, err)
 		return

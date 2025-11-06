@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"log"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -53,7 +52,7 @@ func subsonicGetIndexes(c *gin.Context) {
 			s.artist,
 			COUNT(DISTINCT s.album_path)
 		FROM songs s
-		WHERE s.artist != ''
+		WHERE s.artist != '' AND s.cancelled = 0
 		GROUP BY s.artist
 		ORDER BY s.artist COLLATE NOCASE
 	`
@@ -124,23 +123,16 @@ func subsonicGetMusicDirectory(c *gin.Context) {
 
 	log.Printf("getMusicDirectory called with ID: %s", id)
 
-	// Try to parse ID as integer (album/song ID)
-	if songID, err := strconv.Atoi(id); err == nil {
-		// Numeric ID - could be a song ID representing an album
-		var albumName, artistName string
-		err := db.QueryRow("SELECT album, artist FROM songs WHERE id = ?", songID).Scan(&albumName, &artistName)
-		if err != nil {
-			log.Printf("Song/Album not found for ID %d: %v", songID, err)
-			subsonicRespond(c, newSubsonicErrorResponse(70, "Directory not found."))
-			return
-		}
-
-		// Return songs in this album
-		getAlbumDirectory(c, user, songID, albumName, artistName)
+	// Check if ID exists as a song ID (representing an album)
+	var albumName, artistName string
+	err := db.QueryRow("SELECT album, artist FROM songs WHERE id = ?", id).Scan(&albumName, &artistName)
+	if err == nil {
+		// Found song - return songs in this album
+		getAlbumDirectory(c, user, id, albumName, artistName)
 		return
 	}
 
-	// Non-numeric ID - treat as artist name
+	// Not a song ID - treat as artist name
 	getArtistDirectory(c, id)
 }
 
@@ -166,7 +158,8 @@ func getArtistDirectory(c *gin.Context, artistName string) {
 	var children []SubsonicDirectoryChild
 	for rows.Next() {
 		var albumName string
-		var albumID, songCount int
+		var albumID string
+		var songCount int
 		var genre string
 
 		if err := rows.Scan(&albumName, &albumID, &songCount, &genre); err != nil {
@@ -175,12 +168,12 @@ func getArtistDirectory(c *gin.Context, artistName string) {
 		}
 
 		child := SubsonicDirectoryChild{
-			ID:       strconv.Itoa(albumID),
+			ID:       albumID,
 			Title:    albumName,
 			Album:    albumName,
 			Artist:   artistName,
 			IsDir:    true,
-			CoverArt: strconv.Itoa(albumID),
+			CoverArt: albumID,
 			Genre:    genre,
 		}
 		children = append(children, child)
@@ -197,12 +190,12 @@ func getArtistDirectory(c *gin.Context, artistName string) {
 }
 
 // getAlbumDirectory returns all songs in an album
-func getAlbumDirectory(c *gin.Context, user User, albumID int, albumName, artistName string) {
+func getAlbumDirectory(c *gin.Context, user User, albumID string, albumName, artistName string) {
 	// Get the album's directory path from the albumID song
 	var albumPath string
 	err := db.QueryRow("SELECT path FROM songs WHERE id = ?", albumID).Scan(&albumPath)
 	if err != nil {
-		log.Printf("Error getting album path for ID %d: %v", albumID, err)
+		log.Printf("Error getting album path for ID %s: %v", albumID, err)
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Album not found."))
 		return
 	}
@@ -215,7 +208,7 @@ func getAlbumDirectory(c *gin.Context, user User, albumID int, albumName, artist
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
-		WHERE s.album = ? AND s.artist = ? AND s.path LIKE ?
+		WHERE s.album = ? AND s.artist = ? AND s.path LIKE ? AND s.cancelled = 0
 		ORDER BY s.title COLLATE NOCASE
 	`
 
@@ -230,7 +223,7 @@ func getAlbumDirectory(c *gin.Context, user User, albumID int, albumName, artist
 
 	var children []SubsonicDirectoryChild
 	for rows.Next() {
-		var songID int
+		var songID string
 		var title, artist, album, genre string
 		var duration, playCount int
 		var lastPlayed sql.NullString
@@ -242,12 +235,12 @@ func getAlbumDirectory(c *gin.Context, user User, albumID int, albumName, artist
 		}
 
 		child := SubsonicDirectoryChild{
-			ID:        strconv.Itoa(songID),
+			ID:        songID,
 			Title:     title,
 			Artist:    artist,
 			Album:     album,
 			IsDir:     false,
-			CoverArt:  strconv.Itoa(albumID),
+			CoverArt:  albumID,
 			Duration:  duration,
 			Genre:     genre,
 			PlayCount: playCount,
@@ -262,7 +255,7 @@ func getAlbumDirectory(c *gin.Context, user User, albumID int, albumName, artist
 	}
 
 	dir := &SubsonicMusicDirectory{
-		ID:       strconv.Itoa(albumID),
+		ID:       albumID,
 		Parent:   artistName,
 		Name:     albumName,
 		Children: children,
@@ -305,7 +298,8 @@ func subsonicGetArtist(c *gin.Context) {
 	var albums []SubsonicAlbum
 	for rows.Next() {
 		var albumName string
-		var albumID, songCount int
+		var albumID string
+		var songCount int
 		var genre string
 
 		if err := rows.Scan(&albumName, &albumID, &songCount, &genre); err != nil {
@@ -314,10 +308,10 @@ func subsonicGetArtist(c *gin.Context) {
 		}
 
 		album := SubsonicAlbum{
-			ID:       strconv.Itoa(albumID),
+			ID:       albumID,
 			Name:     albumName,
 			Artist:   artistName,
-			CoverArt: strconv.Itoa(albumID),
+			CoverArt: albumID,
 			Genre:    genre,
 		}
 		albums = append(albums, album)

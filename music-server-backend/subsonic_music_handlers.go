@@ -780,13 +780,11 @@ func subsonicGetAlbumList2(c *gin.Context) {
 	var albums []SubsonicAlbum
 	for rows.Next() {
 		var album SubsonicAlbum
-		var albumId int
-		if err := rows.Scan(&album.Name, &album.Artist, &album.Genre, &albumId); err != nil {
+		if err := rows.Scan(&album.Name, &album.Artist, &album.Genre, &album.ID); err != nil {
 			log.Printf("Error scanning album row: %v", err)
 			continue
 		}
-		album.ID = strconv.Itoa(albumId)
-		album.CoverArt = strconv.Itoa(albumId)
+		album.CoverArt = album.ID
 		albums = append(albums, album)
 	}
 
@@ -825,7 +823,7 @@ func subsonicGetAlbum(c *gin.Context) {
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
-		WHERE s.album = ? AND s.artist = ? AND s.path LIKE ?
+		WHERE s.album = ? AND s.artist = ? AND s.path LIKE ? AND s.cancelled = 0
 		ORDER BY s.title
 	`
 
@@ -842,15 +840,13 @@ func subsonicGetAlbum(c *gin.Context) {
 	for rows.Next() {
 		var s SubsonicSong
 		var lastPlayed sql.NullString
-		var songId int
 		var duration int
 		var starred int
 		var songPath string
-		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &songPath, &s.PlayCount, &lastPlayed, &s.Genre, &duration, &starred); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &songPath, &s.PlayCount, &lastPlayed, &s.Genre, &duration, &starred); err != nil {
 			log.Printf("Error scanning song in getAlbum: %v", err)
 			continue
 		}
-		s.ID = strconv.Itoa(songId)
 		s.CoverArt = albumSongId
 		s.Duration = duration
 		s.Starred = starred == 1
@@ -861,7 +857,7 @@ func subsonicGetAlbum(c *gin.Context) {
 
 		// Log potential duplicates
 		if len(songs) <= 20 {
-			log.Printf("  Song %d: id=%d, title='%s', path='%s'", len(songs), songId, s.Title, songPath)
+			log.Printf("  Song %d: id=%s, title='%s', path='%s'", len(songs), s.ID, s.Title, songPath)
 		}
 	}
 
@@ -889,13 +885,12 @@ func subsonicGetSong(c *gin.Context) {
 
 	var s SubsonicSong
 	var lastPlayed sql.NullString
-	var songId int
 	var duration int
 
 	// Get the song details from the database
 	err := db.QueryRow(`
 		SELECT id, title, artist, album, play_count, last_played, duration
-		FROM songs WHERE id = ?`, songID).Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &duration)
+		FROM songs WHERE id = ?`, songID).Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &duration)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -907,7 +902,6 @@ func subsonicGetSong(c *gin.Context) {
 		return
 	}
 
-	s.ID = strconv.Itoa(songId)
 	s.Duration = duration
 	if lastPlayed.Valid {
 		s.LastPlayed = lastPlayed.String
@@ -925,7 +919,7 @@ func subsonicGetRandomSongs(c *gin.Context) {
 		size = 500
 	}
 
-	rows, err := db.Query("SELECT id, title, artist, album, play_count, last_played, duration FROM songs ORDER BY RANDOM() LIMIT ?", size)
+	rows, err := db.Query("SELECT id, title, artist, album, play_count, last_played, duration FROM songs WHERE cancelled = 0 ORDER BY RANDOM() LIMIT ?", size)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching random songs."))
 		return
@@ -935,14 +929,12 @@ func subsonicGetRandomSongs(c *gin.Context) {
 	var songs []SubsonicSong
 	for rows.Next() {
 		var s SubsonicSong
-		var songId int
 		var duration int
 		var lastPlayed sql.NullString
-		if err := rows.Scan(&songId, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &duration); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &duration); err != nil {
 			log.Printf("Error scanning random song: %v", err)
 			continue
 		}
-		s.ID = strconv.Itoa(songId)
 		s.CoverArt = s.ID
 		s.Duration = duration
 		if lastPlayed.Valid {
@@ -972,7 +964,10 @@ func subsonicGetCoverArt(c *gin.Context) {
 		size = 512 // Default on parse error
 	}
 
-	if _, err := strconv.Atoi(id); err == nil {
+	// Check if ID exists in songs table (song/album ID), otherwise treat as artist name
+	var exists int
+	err = db.QueryRow("SELECT COUNT(*) FROM songs WHERE id = ?", id).Scan(&exists)
+	if err == nil && exists > 0 {
 		handleAlbumArt(c, id, size)
 	} else {
 		handleArtistArt(c, id, size)
@@ -1030,7 +1025,7 @@ func handleArtistArt(c *gin.Context, artistName string, size int) {
 	}
 
 	var songPath string
-	err := db.QueryRow("SELECT path FROM songs WHERE artist = ? LIMIT 1", artistName).Scan(&songPath)
+	err := db.QueryRow("SELECT path FROM songs WHERE artist = ? AND cancelled = 0 LIMIT 1", artistName).Scan(&songPath)
 	if err == nil {
 		artistDir := filepath.Dir(songPath)
 		if imagePath, ok := findLocalImage(artistDir); ok {
@@ -1353,7 +1348,7 @@ func subsonicGetGenres(c *gin.Context) {
 
 	// First, let's check if we have any songs at all
 	var totalSongs int
-	err := db.QueryRow("SELECT COUNT(*) FROM songs").Scan(&totalSongs)
+	err := db.QueryRow("SELECT COUNT(*) FROM songs WHERE cancelled = 0").Scan(&totalSongs)
 	if err != nil {
 		log.Printf("Error counting total songs: %v", err)
 	} else {
@@ -1426,7 +1421,7 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 
 	// Debug: Check what genres actually exist
 	var sampleGenres []string
-	testRows, err := db.Query("SELECT DISTINCT genre FROM songs WHERE genre IS NOT NULL AND genre != '' LIMIT 10")
+	testRows, err := db.Query("SELECT DISTINCT genre FROM songs WHERE genre IS NOT NULL AND genre != '' AND cancelled = 0 LIMIT 10")
 	if err == nil {
 		for testRows.Next() {
 			var g string
@@ -1484,18 +1479,18 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 		}
 
 		subsonicSong := SubsonicSong{
-			ID:        strconv.Itoa(songFromDb.ID),
+			ID:        songFromDb.ID,
 			Title:     songFromDb.Title,
 			Artist:    songFromDb.Artist,
 			Album:     songFromDb.Album,
 			Genre:     songFromDb.Genre,
-			CoverArt:  strconv.Itoa(songFromDb.ID),
+			CoverArt:  songFromDb.ID,
 			PlayCount: songFromDb.PlayCount,
 			Duration:  songFromDb.Duration,
 			Starred:   starred == 1,
 		}
 
-		log.Printf("[DEBUG] Found song: ID=%d, Title='%s', Genre='%s'", songFromDb.ID, songFromDb.Title, songFromDb.Genre)
+		log.Printf("[DEBUG] Found song: ID=%s, Title='%s', Genre='%s'", songFromDb.ID, songFromDb.Title, songFromDb.Genre)
 
 		if lastPlayed.Valid {
 			subsonicSong.LastPlayed = lastPlayed.String

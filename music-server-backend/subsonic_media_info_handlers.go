@@ -49,7 +49,7 @@ func subsonicGetTopSongs(c *gin.Context) {
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var songID int
+		var songID string
 		var title, artist, album, genre string
 		var playCount int
 		var lastPlayed sql.NullString
@@ -60,12 +60,12 @@ func subsonicGetTopSongs(c *gin.Context) {
 		}
 
 		song := SubsonicSong{
-			ID:        strconv.Itoa(songID),
+			ID:        songID,
 			Title:     title,
 			Artist:    artist,
 			Album:     album,
 			Genre:     genre,
-			CoverArt:  strconv.Itoa(songID),
+			CoverArt:  songID,
 			PlayCount: playCount,
 		}
 
@@ -137,7 +137,7 @@ func subsonicGetSimilarSongs2(c *gin.Context) {
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var id int
+		var id string
 		var title, artist, album, genre string
 		var playCount int
 		var duration int
@@ -149,12 +149,12 @@ func subsonicGetSimilarSongs2(c *gin.Context) {
 		}
 
 		song := SubsonicSong{
-			ID:        strconv.Itoa(id),
+			ID:        id,
 			Title:     title,
 			Artist:    artist,
 			Album:     album,
 			Genre:     genre,
-			CoverArt:  strconv.Itoa(id),
+			CoverArt:  id,
 			PlayCount: playCount,
 			Duration:  duration,
 		}
@@ -187,17 +187,9 @@ func subsonicDownload(c *gin.Context) {
 
 	log.Printf("download called for ID: %s", id)
 
-	// Try to parse as numeric ID (song/album)
-	songID, err := strconv.Atoi(id)
-	if err != nil {
-		// Non-numeric ID - not supported
-		subsonicRespond(c, newSubsonicErrorResponse(70, "Invalid ID format."))
-		return
-	}
-
 	// Check if this is a single song or an album reference
 	var path, albumName, artistName string
-	err = db.QueryRow("SELECT path, album, artist FROM songs WHERE id = ?", songID).Scan(&path, &albumName, &artistName)
+	err := db.QueryRow("SELECT path, album, artist FROM songs WHERE id = ?", id).Scan(&path, &albumName, &artistName)
 	if err != nil {
 		log.Printf("Song not found for download: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))

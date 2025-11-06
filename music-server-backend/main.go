@@ -293,9 +293,9 @@ func initDB() {
 	}
 	db.Exec(`INSERT OR IGNORE INTO scan_status (id, is_scanning, songs_added) VALUES (1, 0, 0);`)
 
-	// Songs table
+	// Songs table - use TEXT for id to support UUID base62
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS songs (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id TEXT PRIMARY KEY NOT NULL,
 		title TEXT,
 		artist TEXT,
 		album TEXT,
@@ -303,7 +303,8 @@ func initDB() {
 		play_count INTEGER NOT NULL DEFAULT 0,
 		last_played TEXT,
 		date_added TEXT,
-		date_updated TEXT
+		date_updated TEXT,
+		cancelled INTEGER NOT NULL DEFAULT 0
 	);`)
 	if err != nil {
 		log.Fatalf("Failed to create songs table: %v", err)
@@ -337,7 +338,7 @@ func initDB() {
 			defer updateStmt.Close()
 			updateCount := 0
 			for rows.Next() {
-				var id int
+				var id string
 				var path string
 				if err := rows.Scan(&id, &path); err == nil {
 					albumPath := filepath.Dir(path)
@@ -354,7 +355,7 @@ func initDB() {
 	// Create starred_songs table for user-specific stars
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS starred_songs (
 		user_id INTEGER NOT NULL,
-		song_id INTEGER NOT NULL,
+		song_id TEXT NOT NULL,
 		starred_at TEXT NOT NULL,
 		PRIMARY KEY (user_id, song_id),
 		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -378,7 +379,7 @@ func initDB() {
 	// Playlist songs table
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS playlist_songs (
 		playlist_id INTEGER NOT NULL,
-		song_id INTEGER NOT NULL,
+		song_id TEXT NOT NULL,
 		position INTEGER NOT NULL,
 		FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
 		FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE

@@ -14,7 +14,7 @@ import (
 // --- Music Library Handlers (JSON API) ---
 
 func getArtists(c *gin.Context) {
-	rows, err := db.Query("SELECT DISTINCT artist FROM songs WHERE artist != '' ORDER BY artist")
+	rows, err := db.Query("SELECT DISTINCT artist FROM songs WHERE artist != '' AND cancelled = 0 ORDER BY artist")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query artists"})
 		return
@@ -36,7 +36,7 @@ func getArtists(c *gin.Context) {
 func getAlbums(c *gin.Context) {
 	artistFilter := c.Query("artist")
 	// Group by album_path (directory) ONLY - 1 folder = 1 album
-	query := "SELECT album, artist, MIN(id) FROM songs WHERE album != ''"
+	query := "SELECT album, artist, MIN(id) FROM songs WHERE album != '' AND cancelled = 0"
 	args := []interface{}{}
 
 	if artistFilter != "" {
@@ -55,7 +55,7 @@ func getAlbums(c *gin.Context) {
 	var albums []Album
 	for rows.Next() {
 		var album Album
-		var minID int
+		var minID string
 		if err := rows.Scan(&album.Name, &album.Artist, &minID); err != nil {
 			log.Printf("Error scanning album row: %v", err)
 			continue
@@ -70,7 +70,7 @@ func getSongs(c *gin.Context) {
 	artistFilter := c.Query("artist") // Used to disambiguate albums with the same name
 
 	query := "SELECT id, title, artist, album, duration, play_count, last_played, date_added, date_updated, starred, genre FROM songs"
-	conditions := []string{}
+	conditions := []string{"cancelled = 0"}
 	args := []interface{}{}
 
 	if albumFilter != "" {

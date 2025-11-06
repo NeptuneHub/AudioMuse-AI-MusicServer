@@ -29,7 +29,7 @@ func migrateDB() error {
 	// Ensure playlist_songs table exists
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS playlist_songs (
         playlist_id INTEGER NOT NULL,
-        song_id INTEGER NOT NULL,
+        song_id TEXT NOT NULL,
         position INTEGER NOT NULL,
         FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
         FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE
@@ -83,6 +83,17 @@ func migrateDB() error {
 		log.Printf("migrateDB: ensureColumnExists date_updated: %v", err)
 	}
 
+	// Ensure songs table has 'cancelled' column for soft-delete functionality
+	if err := ensureColumnExists(db, "songs", "cancelled", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		log.Printf("migrateDB: ensureColumnExists cancelled: %v", err)
+	}
+
+	// Migrate song IDs from INTEGER to TEXT (UUID in base62)
+	// This is a complex migration that needs to be done carefully
+	if err := migrateSongIDsToUUID(db); err != nil {
+		log.Printf("migrateDB: migrateSongIDsToUUID: %v", err)
+	}
+
 	// Backfill date_added and date_updated for existing songs that don't have them
 	// This is a one-time migration to set current timestamp for older songs
 	// Use strftime to match RFC3339 format used in application code
@@ -118,7 +129,7 @@ func migrateDB() error {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS play_history (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		user_id INTEGER NOT NULL,
-		song_id INTEGER NOT NULL,
+		song_id TEXT NOT NULL,
 		played_at TEXT NOT NULL,
 		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
 		FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE
@@ -184,4 +195,335 @@ func ensureColumnExists(db *sql.DB, table, column, definition string) error {
 		return err
 	}
 	return nil
+}
+
+// migrateSongIDsToUUID migrates the songs table ID column from INTEGER to TEXT (UUID base62)
+// This is idempotent and safe to run multiple times
+func migrateSongIDsToUUID(db *sql.DB) error {
+	// Check if migration has already been done by checking the type of the id column
+	var columnType string
+	err := db.QueryRow(`
+		SELECT type FROM pragma_table_info('songs') WHERE name = 'id'
+	`).Scan(&columnType)
+
+	if err != nil {
+		return fmt.Errorf("failed to check songs.id column type: %v", err)
+	}
+
+	// If already TEXT, migration is complete
+	if strings.ToUpper(columnType) == "TEXT" {
+		log.Println("migrateSongIDsToUUID: songs.id is already TEXT, migration complete")
+		return nil
+	}
+
+	log.Println("migrateSongIDsToUUID: Starting migration of songs.id from INTEGER to TEXT (UUID base62)")
+
+	// Begin transaction
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Create new songs table with TEXT id
+	_, err = tx.Exec(`
+		CREATE TABLE IF NOT EXISTS songs_new (
+			id TEXT PRIMARY KEY NOT NULL,
+			title TEXT,
+			artist TEXT,
+			album TEXT,
+			path TEXT UNIQUE NOT NULL,
+			play_count INTEGER NOT NULL DEFAULT 0,
+			last_played TEXT,
+			date_added TEXT,
+			date_updated TEXT,
+			starred INTEGER NOT NULL DEFAULT 0,
+			genre TEXT DEFAULT '',
+			album_path TEXT DEFAULT '',
+			duration INTEGER DEFAULT 0,
+			replaygain_track_gain REAL,
+			replaygain_track_peak REAL,
+			replaygain_album_gain REAL,
+			replaygain_album_peak REAL,
+			cancelled INTEGER NOT NULL DEFAULT 0
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create songs_new table: %v", err)
+	}
+
+	// Migrate data from old table to new table with UUID generation
+	rows, err := tx.Query("SELECT id, title, artist, album, path, play_count, last_played, date_added, date_updated, starred, genre, album_path, duration, replaygain_track_gain, replaygain_track_peak, replaygain_album_gain, replaygain_album_peak FROM songs")
+	if err != nil {
+		return fmt.Errorf("failed to query existing songs: %v", err)
+	}
+	defer rows.Close()
+
+	insertStmt, err := tx.Prepare(`
+		INSERT INTO songs_new (id, title, artist, album, path, play_count, last_played, date_added, date_updated, starred, genre, album_path, duration, replaygain_track_gain, replaygain_track_peak, replaygain_album_gain, replaygain_album_peak, cancelled)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare insert statement: %v", err)
+	}
+	defer insertStmt.Close()
+
+	// Map old integer IDs to new UUID IDs for foreign key updates
+	idMapping := make(map[int]string)
+	migratedCount := 0
+
+	for rows.Next() {
+		var oldID int
+		var title, artist, album, path sql.NullString
+		var playCount, starred, duration sql.NullInt64
+		var lastPlayed, dateAdded, dateUpdated, genre, albumPath sql.NullString
+		var replayGainTrackGain, replayGainTrackPeak, replayGainAlbumGain, replayGainAlbumPeak sql.NullFloat64
+
+		err := rows.Scan(&oldID, &title, &artist, &album, &path, &playCount, &lastPlayed, &dateAdded, &dateUpdated, &starred, &genre, &albumPath, &duration, &replayGainTrackGain, &replayGainTrackPeak, &replayGainAlbumGain, &replayGainAlbumPeak)
+		if err != nil {
+			log.Printf("Error scanning song row: %v", err)
+			continue
+		}
+
+		// Generate new UUID for this song
+		newID := GenerateBase62UUID()
+		idMapping[oldID] = newID
+
+		_, err = insertStmt.Exec(
+			newID,
+			title.String,
+			artist.String,
+			album.String,
+			path.String,
+			playCount.Int64,
+			lastPlayed.String,
+			dateAdded.String,
+			dateUpdated.String,
+			starred.Int64,
+			genre.String,
+			albumPath.String,
+			duration.Int64,
+			nullFloat64ToInterface(replayGainTrackGain),
+			nullFloat64ToInterface(replayGainTrackPeak),
+			nullFloat64ToInterface(replayGainAlbumGain),
+			nullFloat64ToInterface(replayGainAlbumPeak),
+		)
+		if err != nil {
+			log.Printf("Error inserting song with new UUID: %v", err)
+			continue
+		}
+		migratedCount++
+	}
+
+	log.Printf("migrateSongIDsToUUID: Migrated %d songs with new UUIDs", migratedCount)
+
+	// Update foreign key references in other tables
+	// Update playlist_songs
+	if err := updatePlaylistSongsForeignKeys(tx, idMapping); err != nil {
+		return fmt.Errorf("failed to update playlist_songs: %v", err)
+	}
+
+	// Update starred_songs
+	if err := updateStarredSongsForeignKeys(tx, idMapping); err != nil {
+		return fmt.Errorf("failed to update starred_songs: %v", err)
+	}
+
+	// Update play_history
+	if err := updatePlayHistoryForeignKeys(tx, idMapping); err != nil {
+		return fmt.Errorf("failed to update play_history: %v", err)
+	}
+
+	// Drop old songs table and rename new one
+	_, err = tx.Exec("DROP TABLE songs")
+	if err != nil {
+		return fmt.Errorf("failed to drop old songs table: %v", err)
+	}
+
+	_, err = tx.Exec("ALTER TABLE songs_new RENAME TO songs")
+	if err != nil {
+		return fmt.Errorf("failed to rename songs_new to songs: %v", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	log.Println("migrateSongIDsToUUID: Successfully completed migration")
+	return nil
+}
+
+func nullFloat64ToInterface(nf sql.NullFloat64) interface{} {
+	if nf.Valid {
+		return nf.Float64
+	}
+	return nil
+}
+
+func updatePlaylistSongsForeignKeys(tx *sql.Tx, idMapping map[int]string) error {
+	// Create new playlist_songs table with TEXT song_id
+	_, err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS playlist_songs_new (
+			playlist_id INTEGER NOT NULL,
+			song_id TEXT NOT NULL,
+			position INTEGER NOT NULL,
+			FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+			FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Migrate data
+	rows, err := tx.Query("SELECT playlist_id, song_id, position FROM playlist_songs")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	insertStmt, err := tx.Prepare("INSERT INTO playlist_songs_new (playlist_id, song_id, position) VALUES (?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	for rows.Next() {
+		var playlistID, position int
+		var oldSongID int
+		if err := rows.Scan(&playlistID, &oldSongID, &position); err != nil {
+			continue
+		}
+
+		if newSongID, exists := idMapping[oldSongID]; exists {
+			insertStmt.Exec(playlistID, newSongID, position)
+		}
+	}
+
+	_, err = tx.Exec("DROP TABLE playlist_songs")
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec("ALTER TABLE playlist_songs_new RENAME TO playlist_songs")
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec("CREATE INDEX IF NOT EXISTS idx_playlist_songs_order ON playlist_songs (playlist_id, position)")
+	return err
+}
+
+func updateStarredSongsForeignKeys(tx *sql.Tx, idMapping map[int]string) error {
+	// Create new starred_songs table with TEXT song_id
+	_, err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS starred_songs_new (
+			user_id INTEGER NOT NULL,
+			song_id TEXT NOT NULL,
+			starred_at TEXT NOT NULL,
+			PRIMARY KEY (user_id, song_id),
+			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Migrate data
+	rows, err := tx.Query("SELECT user_id, song_id, starred_at FROM starred_songs")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	insertStmt, err := tx.Prepare("INSERT INTO starred_songs_new (user_id, song_id, starred_at) VALUES (?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	for rows.Next() {
+		var userID int
+		var oldSongID int
+		var starredAt string
+		if err := rows.Scan(&userID, &oldSongID, &starredAt); err != nil {
+			continue
+		}
+
+		if newSongID, exists := idMapping[oldSongID]; exists {
+			insertStmt.Exec(userID, newSongID, starredAt)
+		}
+	}
+
+	_, err = tx.Exec("DROP TABLE starred_songs")
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec("ALTER TABLE starred_songs_new RENAME TO starred_songs")
+	return err
+}
+
+func updatePlayHistoryForeignKeys(tx *sql.Tx, idMapping map[int]string) error {
+	// Check if play_history table exists
+	var tableName string
+	err := tx.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='play_history'").Scan(&tableName)
+	if err != nil {
+		// Table doesn't exist, skip
+		return nil
+	}
+
+	// Create new play_history table with TEXT song_id
+	_, err = tx.Exec(`
+		CREATE TABLE IF NOT EXISTS play_history_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			song_id TEXT NOT NULL,
+			played_at TEXT NOT NULL,
+			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Migrate data
+	rows, err := tx.Query("SELECT id, user_id, song_id, played_at FROM play_history")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	insertStmt, err := tx.Prepare("INSERT INTO play_history_new (id, user_id, song_id, played_at) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	for rows.Next() {
+		var id, userID, oldSongID int
+		var playedAt string
+		if err := rows.Scan(&id, &userID, &oldSongID, &playedAt); err != nil {
+			continue
+		}
+
+		if newSongID, exists := idMapping[oldSongID]; exists {
+			insertStmt.Exec(id, userID, newSongID, playedAt)
+		}
+	}
+
+	_, err = tx.Exec("DROP TABLE play_history")
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec("ALTER TABLE play_history_new RENAME TO play_history")
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec("CREATE INDEX IF NOT EXISTS idx_play_history_user_played ON play_history (user_id, played_at DESC)")
+	return err
 }
