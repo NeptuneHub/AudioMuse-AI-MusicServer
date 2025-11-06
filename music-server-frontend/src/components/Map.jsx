@@ -871,7 +871,9 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
             <option value={100}>100%</option>
           </select>
         </div>
-        <div id="map-status" className="text-gray-300 text-xs">Selected: {selectedIds.length}</div>
+        <div id="map-status" className="text-gray-300 text-xs">
+          Selected: {selectedIds.length} / Total: {(window._plotPoints || []).length}
+        </div>
         <button onClick={handleRefresh} className="border-2 border-gray-500 text-gray-400 bg-gray-500/10 hover:bg-gray-500/20 hover:scale-105 transition-all px-2 py-1 rounded-lg text-xs" title="Clear overlays and selection">
           🔄 <span className="hidden sm:inline">Refresh</span>
         </button>

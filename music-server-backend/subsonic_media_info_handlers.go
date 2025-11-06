@@ -198,7 +198,7 @@ func subsonicDownload(c *gin.Context) {
 
 	// Check if request wants the whole album by checking for multiple songs
 	var albumSongCount int
-	err = db.QueryRow("SELECT COUNT(*) FROM songs WHERE album = ? AND artist = ?", albumName, artistName).Scan(&albumSongCount)
+	err = db.QueryRow("SELECT COUNT(*) FROM songs WHERE album = ? AND artist = ? AND cancelled = 0", albumName, artistName).Scan(&albumSongCount)
 	if err != nil || albumSongCount <= 1 {
 		// Single song download
 		downloadSingleFile(c, path)
@@ -338,7 +338,7 @@ func subsonicGetAlbumInfo(c *gin.Context) {
 
 	// Count songs in album
 	var songCount int
-	err = db.QueryRow("SELECT COUNT(*) FROM songs WHERE album = ? AND artist = ?", albumName, artistName).Scan(&songCount)
+	err = db.QueryRow("SELECT COUNT(*) FROM songs WHERE album = ? AND artist = ? AND cancelled = 0", albumName, artistName).Scan(&songCount)
 	if err != nil {
 		songCount = 0
 	}

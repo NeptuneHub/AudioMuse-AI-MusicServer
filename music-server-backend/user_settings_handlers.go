@@ -112,7 +112,7 @@ func getMusicCounts(c *gin.Context) {
 	var counts CountsResponse
 
 	// Count artists
-	artistQuery := "SELECT COUNT(DISTINCT artist) FROM songs WHERE artist != ''"
+	artistQuery := "SELECT COUNT(DISTINCT artist) FROM songs WHERE artist != '' AND cancelled = 0"
 	args := []interface{}{}
 	if genre != "" {
 		artistQuery += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
@@ -121,7 +121,7 @@ func getMusicCounts(c *gin.Context) {
 	db.QueryRow(artistQuery, args...).Scan(&counts.Artists)
 
 	// Count albums by folder path - 1 folder = 1 album
-	albumQuery := "SELECT COUNT(DISTINCT album_path) FROM songs WHERE album_path != ''"
+	albumQuery := "SELECT COUNT(DISTINCT album_path) FROM songs WHERE album_path != '' AND cancelled = 0"
 	args = []interface{}{}
 	if genre != "" {
 		albumQuery += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
@@ -130,7 +130,7 @@ func getMusicCounts(c *gin.Context) {
 	db.QueryRow(albumQuery, args...).Scan(&counts.Albums)
 
 	// Count songs
-	songQuery := "SELECT COUNT(*) FROM songs WHERE 1=1"
+	songQuery := "SELECT COUNT(*) FROM songs WHERE cancelled = 0"
 	args = []interface{}{}
 	if genre != "" {
 		songQuery += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
@@ -143,7 +143,7 @@ func getMusicCounts(c *gin.Context) {
 
 // debugSongsHandler returns raw song data for debugging
 func debugSongsHandler(c *gin.Context) {
-	rows, err := db.Query("SELECT id, title, date_added, date_updated FROM songs LIMIT 10")
+	rows, err := db.Query("SELECT id, title, date_added, date_updated FROM songs WHERE cancelled = 0 LIMIT 10")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -151,7 +151,7 @@ func debugSongsHandler(c *gin.Context) {
 	defer rows.Close()
 
 	type DebugSong struct {
-		ID          int     `json:"id"`
+		ID          string  `json:"id"`
 		Title       string  `json:"title"`
 		DateAdded   *string `json:"dateAdded"`
 		DateUpdated *string `json:"dateUpdated"`
@@ -168,8 +168,8 @@ func debugSongsHandler(c *gin.Context) {
 	}
 
 	var totalSongs, songsWithDate int
-	db.QueryRow("SELECT COUNT(*) FROM songs").Scan(&totalSongs)
-	db.QueryRow("SELECT COUNT(*) FROM songs WHERE date_added IS NOT NULL AND date_added != ''").Scan(&songsWithDate)
+	db.QueryRow("SELECT COUNT(*) FROM songs WHERE cancelled = 0").Scan(&totalSongs)
+	db.QueryRow("SELECT COUNT(*) FROM songs WHERE cancelled = 0 AND date_added IS NOT NULL AND date_added != ''").Scan(&songsWithDate)
 
 	c.JSON(http.StatusOK, gin.H{
 		"totalSongs":    totalSongs,
@@ -189,11 +189,11 @@ func getRecentlyAdded(c *gin.Context) {
 
 	// First, let's check how many songs have date_added set
 	var totalSongs, songsWithDate int
-	db.QueryRow("SELECT COUNT(*) FROM songs").Scan(&totalSongs)
-	db.QueryRow("SELECT COUNT(*) FROM songs WHERE date_added IS NOT NULL AND date_added != ''").Scan(&songsWithDate)
+	db.QueryRow("SELECT COUNT(*) FROM songs WHERE cancelled = 0").Scan(&totalSongs)
+	db.QueryRow("SELECT COUNT(*) FROM songs WHERE cancelled = 0 AND date_added IS NOT NULL AND date_added != ''").Scan(&songsWithDate)
 	log.Printf("DEBUG [getRecentlyAdded]: Total songs=%d, Songs with date_added=%d", totalSongs, songsWithDate)
 
-	query := "SELECT id, title, artist, album, duration, play_count, last_played, date_added, date_updated, starred, genre FROM songs WHERE date_added IS NOT NULL AND date_added != ''"
+	query := "SELECT id, title, artist, album, duration, play_count, last_played, date_added, date_updated, starred, genre FROM songs WHERE cancelled = 0 AND date_added IS NOT NULL AND date_added != ''"
 	args := []interface{}{}
 
 	if genre != "" {
@@ -307,7 +307,7 @@ func getRecentlyPlayed(c *gin.Context) {
 		s.date_added, s.date_updated, s.starred, s.genre, MAX(ph.played_at) as recent_play
 		FROM songs s
 		INNER JOIN play_history ph ON s.id = ph.song_id
-		WHERE ph.user_id = ?`
+		WHERE ph.user_id = ? AND s.cancelled = 0`
 	args := []interface{}{userID}
 
 	if genre != "" {

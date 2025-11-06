@@ -1286,7 +1286,7 @@ func subsonicGetStarred(c *gin.Context) {
 		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, COALESCE(s.genre, '') as genre, COALESCE(s.duration, 0) as duration
 		FROM songs s
 		INNER JOIN starred_songs ss ON s.id = ss.song_id
-		WHERE ss.user_id = ?
+		WHERE ss.user_id = ? AND s.cancelled = 0
 		ORDER BY ss.starred_at DESC
 	`
 

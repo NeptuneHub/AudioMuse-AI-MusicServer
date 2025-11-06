@@ -4,6 +4,7 @@ package main
 import (
 	"database/sql"
 	"log"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -144,7 +145,32 @@ func subsonicDeleteLibraryPath(c *gin.Context) {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "A valid ID is required."))
 		return
 	}
-	_, err := db.Exec("DELETE FROM library_paths WHERE id = ?", req.ID)
+
+	// Get the library path before deleting
+	var libraryPath string
+	err := db.QueryRow("SELECT path FROM library_paths WHERE id = ?", req.ID).Scan(&libraryPath)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Library path not found."))
+		return
+	}
+
+	// Mark all songs in this library path as cancelled (soft delete)
+	searchPath := libraryPath
+	if !strings.HasSuffix(searchPath, "/") && !strings.HasSuffix(searchPath, "\\") {
+		searchPath += string(filepath.Separator)
+	}
+	likePath := searchPath + "%"
+
+	result, err := db.Exec("UPDATE songs SET cancelled = 1 WHERE path LIKE ? AND cancelled = 0", likePath)
+	if err != nil {
+		log.Printf("Error marking songs as cancelled for deleted library path: %v", err)
+	} else {
+		rowsAffected, _ := result.RowsAffected()
+		log.Printf("Marked %d songs as cancelled from deleted library path: %s", rowsAffected, libraryPath)
+	}
+
+	// Now delete the library path entry
+	_, err = db.Exec("DELETE FROM library_paths WHERE id = ?", req.ID)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to delete library path."))
 		return

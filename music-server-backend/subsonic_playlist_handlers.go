@@ -16,9 +16,10 @@ func subsonicGetPlaylists(c *gin.Context) {
 
 	// Return playlists owned by the user and also playlists created by admin users (visible to all)
 	query := `
-		SELECT p.id, p.name, COUNT(ps.song_id), u.username, u.is_admin
+		SELECT p.id, p.name, COUNT(CASE WHEN s.cancelled = 0 THEN 1 END), u.username, u.is_admin
 		FROM playlists p
 		LEFT JOIN playlist_songs ps ON p.id = ps.playlist_id
+		LEFT JOIN songs s ON ps.song_id = s.id
 		JOIN users u ON u.id = p.user_id
 		WHERE p.user_id = ? OR u.is_admin = 1
 		GROUP BY p.id, p.name, u.username, u.is_admin
