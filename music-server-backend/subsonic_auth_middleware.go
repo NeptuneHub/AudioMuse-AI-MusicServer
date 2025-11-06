@@ -100,8 +100,10 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 				var storedApiKey sql.NullString // Use sql.NullString for potentially NULL api_key
 
 				// Fetch user details first, including the API key
-				row := db.QueryRow("SELECT id, username, password_hash, is_admin, api_key FROM users WHERE username = ?", username)
+				row := db.QueryRow("SELECT id, username, password_hash, is_admin, COALESCE(api_key, '') FROM users WHERE username = ?", username)
 				if err := row.Scan(&storedUser.ID, &storedUser.Username, &passwordHash, &storedUser.IsAdmin, &storedApiKey); err == nil {
+					log.Printf("DEBUG: Found user '%s' (ID: %d, IsAdmin: %t)", storedUser.Username, storedUser.ID, storedUser.IsAdmin)
+
 					// Handle hex-encoded password `p=enc:HEXSTRING`
 					if strings.HasPrefix(password, "enc:") {
 						hexEncoded := strings.TrimPrefix(password, "enc:")
@@ -110,7 +112,8 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 							decodedString := string(decodedBytes)
 
 							// NEW: Check if the decoded string is the user's API key
-							if storedApiKey.Valid && decodedString == storedApiKey.String {
+							if storedApiKey.Valid && storedApiKey.String != "" && decodedString == storedApiKey.String {
+								log.Printf("DEBUG: Successfully authenticated user '%s' via API key in hex-encoded password", storedUser.Username)
 								c.Set("user", storedUser)
 								c.Next()
 								return
@@ -118,38 +121,59 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 
 							// Fallback: Check if it's the user's password
 							if checkPasswordHash(decodedString, passwordHash) {
+								log.Printf("DEBUG: Successfully authenticated user '%s' via hex-encoded password", storedUser.Username)
 								c.Set("user", storedUser)
 								c.Next()
 								return
+							} else {
+								log.Printf("DEBUG: Hex-encoded password check failed for user '%s'", storedUser.Username)
 							}
+						} else {
+							log.Printf("DEBUG: Failed to decode hex string for user '%s': %v", username, err)
 						}
 					} else if checkPasswordHash(password, passwordHash) { // Plaintext password check
+						log.Printf("DEBUG: Successfully authenticated user '%s' via plaintext password", storedUser.Username)
 						c.Set("user", storedUser)
 						c.Next()
 						return
+					} else {
+						log.Printf("DEBUG: Plaintext password check failed for user '%s'", storedUser.Username)
 					}
+				} else {
+					log.Printf("DEBUG: User '%s' not found in database or query failed: %v", username, err)
 				}
 			}
 
 			// Token/Salt check
 			if token != "" && salt != "" {
 				var storedUser User
-				var passwordPlain string
-				row := db.QueryRow("SELECT id, username, password_plain, is_admin FROM users WHERE username = ?", username)
-				if err := row.Scan(&storedUser.ID, &storedUser.Username, &passwordPlain, &storedUser.IsAdmin); err == nil && passwordPlain != "" {
+				var passwordPlain sql.NullString
+				row := db.QueryRow("SELECT id, username, COALESCE(password_plain, ''), is_admin FROM users WHERE username = ?", username)
+				if err := row.Scan(&storedUser.ID, &storedUser.Username, &passwordPlain, &storedUser.IsAdmin); err == nil && passwordPlain.Valid && passwordPlain.String != "" {
 					hasher := md5.New()
-					hasher.Write([]byte(passwordPlain + salt))
+					hasher.Write([]byte(passwordPlain.String + salt))
 					expectedToken := hex.EncodeToString(hasher.Sum(nil))
 					if token == expectedToken {
+						log.Printf("DEBUG: Successfully authenticated user '%s' via token/salt", storedUser.Username)
 						c.Set("user", storedUser)
 						c.Next()
 						return
+					} else {
+						log.Printf("DEBUG: Token/salt check failed for user '%s' (expected: %s, got: %s)", storedUser.Username, expectedToken, token)
+					}
+				} else {
+					if err != nil {
+						log.Printf("DEBUG: Token/salt auth query failed for user '%s': %v", username, err)
+					} else if !passwordPlain.Valid || passwordPlain.String == "" {
+						log.Printf("DEBUG: Token/salt auth failed for user '%s': no password_plain stored", username)
 					}
 				}
 			}
 		}
 
 		// If no valid authentication was found
+		log.Printf("DEBUG: Authentication failed for username='%s', password provided=%t, token provided=%t, salt provided=%t",
+			username, password != "", token != "", salt != "")
 		subsonicRespond(c, newSubsonicErrorResponse(40, "Authentication failed. Please provide valid credentials."))
 		c.Abort()
 	}

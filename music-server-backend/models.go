@@ -257,6 +257,13 @@ type SubsonicStarred struct {
 	Songs   []SubsonicSong `xml:"song" json:"song"`
 }
 
+type SubsonicStarred2 struct {
+	XMLName xml.Name         `xml:"starred2" json:"-"`
+	Songs   []SubsonicSong   `xml:"song" json:"song"`
+	Albums  []SubsonicAlbum  `xml:"album" json:"album"`
+	Artists []SubsonicArtist `xml:"artist" json:"artist"`
+}
+
 type SubsonicSongsByGenre struct {
 	XMLName xml.Name       `xml:"songsByGenre" json:"-"`
 	Songs   []SubsonicSong `xml:"song" json:"song"`

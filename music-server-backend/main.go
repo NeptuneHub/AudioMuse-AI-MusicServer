@@ -42,6 +42,22 @@ func loggingMiddleware() gin.HandlerFunc {
 	}
 }
 
+// subsonicCompatibilityHandler creates a wrapper that registers both .view and non-.view versions
+func subsonicCompatibilityHandler(router gin.IRouter, method string, path string, handler gin.HandlerFunc) {
+	// Register with .view suffix (standard)
+	switch method {
+	case "GET":
+		router.GET(path+".view", handler)
+		router.GET(path, handler) // Also register without .view
+	case "POST":
+		router.POST(path+".view", handler)
+		router.POST(path, handler)
+	case "ANY":
+		router.Any(path+".view", handler)
+		router.Any(path, handler)
+	}
+}
+
 // getEnv gets an environment variable or returns a default value.
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
@@ -80,77 +96,78 @@ func main() {
 	r.Use(corsMiddleware())
 	r.Use(loggingMiddleware())
 
-	// Public Subsonic routes (no auth required)
-	r.GET("/rest/ping.view", subsonicPing)
-	r.GET("/rest/getOpenSubsonicExtensions.view", subsonicGetOpenSubsonicExtensions)
+	// Public Subsonic routes (no auth required) - register both with and without .view
+	subsonicCompatibilityHandler(r, "GET", "/rest/ping", subsonicPing)
+	subsonicCompatibilityHandler(r, "GET", "/rest/getOpenSubsonicExtensions", subsonicGetOpenSubsonicExtensions)
 
 	// Authenticated Subsonic API routes
 	subsonic := r.Group("/rest")
 	subsonic.Use(SubsonicAuthMiddleware())
 	{
-		subsonic.GET("/getLicense.view", subsonicGetLicense)
-		subsonic.GET("/stream.view", subsonicStream)
-		subsonic.GET("/scrobble.view", subsonicScrobble)
+		// Core endpoints - register both with and without .view suffix
+		subsonicCompatibilityHandler(subsonic, "GET", "/getLicense", subsonicGetLicense)
+		subsonicCompatibilityHandler(subsonic, "GET", "/stream", subsonicStream)
+		subsonicCompatibilityHandler(subsonic, "GET", "/scrobble", subsonicScrobble)
 
 		// Browsing endpoints
-		subsonic.GET("/getMusicFolders.view", subsonicGetMusicFolders)
-		subsonic.GET("/getIndexes.view", subsonicGetIndexes)
-		subsonic.GET("/getMusicDirectory.view", subsonicGetMusicDirectory)
-		subsonic.GET("/getArtist.view", subsonicGetArtist)
-		subsonic.GET("/getArtists.view", subsonicGetArtists)
-		subsonic.GET("/getAlbumList2.view", subsonicGetAlbumList2)
-		subsonic.GET("/getPlaylists.view", subsonicGetPlaylists)
-		subsonic.GET("/getPlaylist.view", subsonicGetPlaylist)
-		subsonic.Any("/createPlaylist.view", subsonicCreatePlaylist)
-		subsonic.GET("/updatePlaylist.view", subsonicUpdatePlaylist)
-		subsonic.GET("/deletePlaylist.view", subsonicDeletePlaylist)
-		subsonic.GET("/getAlbum.view", subsonicGetAlbum)
-		subsonic.GET("/search2.view", subsonicSearch2)
-		subsonic.GET("/search3.view", subsonicSearch2)
-		subsonic.GET("/getSong.view", subsonicGetSong)
-		subsonic.GET("/getRandomSongs.view", subsonicGetRandomSongs)
-		subsonic.GET("/getSongsByGenre.view", subsonicGetSongsByGenre)
-		subsonic.GET("/getCoverArt.view", subsonicGetCoverArt)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getMusicFolders", subsonicGetMusicFolders)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getIndexes", subsonicGetIndexes)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getMusicDirectory", subsonicGetMusicDirectory)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getArtist", subsonicGetArtist)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getArtists", subsonicGetArtists)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getAlbumList2", subsonicGetAlbumList2)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getPlaylists", subsonicGetPlaylists)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getPlaylist", subsonicGetPlaylist)
+		subsonicCompatibilityHandler(subsonic, "ANY", "/createPlaylist", subsonicCreatePlaylist)
+		subsonicCompatibilityHandler(subsonic, "GET", "/updatePlaylist", subsonicUpdatePlaylist)
+		subsonicCompatibilityHandler(subsonic, "GET", "/deletePlaylist", subsonicDeletePlaylist)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getAlbum", subsonicGetAlbum)
+		subsonicCompatibilityHandler(subsonic, "GET", "/search2", subsonicSearch2)
+		subsonicCompatibilityHandler(subsonic, "GET", "/search3", subsonicSearch3)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getSong", subsonicGetSong)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getRandomSongs", subsonicGetRandomSongs)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getSongsByGenre", subsonicGetSongsByGenre)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getCoverArt", subsonicGetCoverArt)
 
 		// Media info endpoints
-		subsonic.GET("/getTopSongs.view", subsonicGetTopSongs)
-		subsonic.GET("/getSimilarSongs2.view", subsonicGetSimilarSongs2)
-		subsonic.GET("/getAlbumInfo.view", subsonicGetAlbumInfo)
-		subsonic.GET("/getAlbumInfo2.view", subsonicGetAlbumInfo)
-		subsonic.GET("/download.view", subsonicDownload)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getTopSongs", subsonicGetTopSongs)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getSimilarSongs2", subsonicGetSimilarSongs2)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getAlbumInfo", subsonicGetAlbumInfo)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getAlbumInfo2", subsonicGetAlbumInfo)
+		subsonicCompatibilityHandler(subsonic, "GET", "/download", subsonicDownload)
 
-		subsonic.Any("/startScan.view", subsonicStartScan)
-		subsonic.GET("/getScanStatus.view", subsonicGetScanStatus)
-		subsonic.GET("/getLibraryPaths.view", subsonicGetLibraryPaths)
-		subsonic.POST("/addLibraryPath.view", subsonicAddLibraryPath)
-		subsonic.POST("/updateLibraryPath.view", subsonicUpdateLibraryPath)
-		subsonic.POST("/deleteLibraryPath.view", subsonicDeleteLibraryPath)
-		subsonic.GET("/getUsers.view", subsonicGetUsers)
-		subsonic.GET("/createUser.view", subsonicCreateUser)
-		subsonic.GET("/updateUser.view", subsonicUpdateUser)
-		subsonic.GET("/deleteUser.view", subsonicDeleteUser)
-		subsonic.GET("/changePassword.view", subsonicChangePassword)
-		subsonic.GET("/getConfiguration.view", subsonicGetConfiguration)
-		subsonic.GET("/setConfiguration.view", subsonicSetConfiguration)
-		subsonic.GET("/getSimilarSongs.view", subsonicGetSimilarSongs)
-		subsonic.GET("/getSongPath.view", subsonicGetSongPath)
-		subsonic.GET("/getSonicFingerprint.view", subsonicGetSonicFingerprint)
+		subsonicCompatibilityHandler(subsonic, "ANY", "/startScan", subsonicStartScan)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getScanStatus", subsonicGetScanStatus)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getLibraryPaths", subsonicGetLibraryPaths)
+		subsonicCompatibilityHandler(subsonic, "POST", "/addLibraryPath", subsonicAddLibraryPath)
+		subsonicCompatibilityHandler(subsonic, "POST", "/updateLibraryPath", subsonicUpdateLibraryPath)
+		subsonicCompatibilityHandler(subsonic, "POST", "/deleteLibraryPath", subsonicDeleteLibraryPath)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getUsers", subsonicGetUsers)
+		subsonicCompatibilityHandler(subsonic, "GET", "/createUser", subsonicCreateUser)
+		subsonicCompatibilityHandler(subsonic, "GET", "/updateUser", subsonicUpdateUser)
+		subsonicCompatibilityHandler(subsonic, "GET", "/deleteUser", subsonicDeleteUser)
+		subsonicCompatibilityHandler(subsonic, "GET", "/changePassword", subsonicChangePassword)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getConfiguration", subsonicGetConfiguration)
+		subsonicCompatibilityHandler(subsonic, "GET", "/setConfiguration", subsonicSetConfiguration)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getSimilarSongs", subsonicGetSimilarSongs)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getSongPath", subsonicGetSongPath)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getSonicFingerprint", subsonicGetSonicFingerprint)
 
 		// Star/Unstar functionality
-		subsonic.GET("/star.view", subsonicStar)
-		subsonic.GET("/unstar.view", subsonicUnstar)
-		subsonic.GET("/getStarred.view", subsonicGetStarred)
-		subsonic.GET("/getGenres.view", subsonicGetGenres)
+		subsonicCompatibilityHandler(subsonic, "GET", "/star", subsonicStar)
+		subsonicCompatibilityHandler(subsonic, "GET", "/unstar", subsonicUnstar)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getStarred", subsonicGetStarred)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getGenres", subsonicGetGenres)
 
 		// API Key Management
-		subsonic.GET("/getApiKey.view", subsonicGetApiKey)
-		subsonic.POST("/revokeApiKey.view", subsonicRevokeApiKey)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getApiKey", subsonicGetApiKey)
+		subsonicCompatibilityHandler(subsonic, "POST", "/revokeApiKey", subsonicRevokeApiKey)
 
 		// AudioMuse-AI Subsonic routes
-		subsonic.Any("/startSonicAnalysis.view", subsonicStartSonicAnalysis)
-		subsonic.GET("/getSonicAnalysisStatus.view", subsonicGetSonicAnalysisStatus)
-		subsonic.Any("/cancelSonicAnalysis.view", subsonicCancelSonicAnalysis)
-		subsonic.Any("/startSonicClustering.view", subsonicStartClusteringAnalysis)
+		subsonicCompatibilityHandler(subsonic, "ANY", "/startSonicAnalysis", subsonicStartSonicAnalysis)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getSonicAnalysisStatus", subsonicGetSonicAnalysisStatus)
+		subsonicCompatibilityHandler(subsonic, "ANY", "/cancelSonicAnalysis", subsonicCancelSonicAnalysis)
+		subsonicCompatibilityHandler(subsonic, "ANY", "/startSonicClustering", subsonicStartClusteringAnalysis)
 	}
 
 	// Separate JSON API for Web UI
@@ -322,6 +339,12 @@ func initDB() {
 		log.Printf("Note: Could not add genre column (may already exist): %v", err)
 	}
 
+	// Add duration column if it doesn't exist (backward compatibility)
+	_, err = db.Exec(`ALTER TABLE songs ADD COLUMN duration INTEGER NOT NULL DEFAULT 0;`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		log.Printf("Note: Could not add duration column (may already exist): %v", err)
+	}
+
 	// Add album_path column if it doesn't exist - stores directory path for grouping
 	_, err = db.Exec(`ALTER TABLE songs ADD COLUMN album_path TEXT DEFAULT '';`)
 	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
@@ -363,6 +386,30 @@ func initDB() {
 	);`)
 	if err != nil {
 		log.Fatalf("Failed to create starred_songs table: %v", err)
+	}
+
+	// Create starred_albums table for user-specific album stars
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS starred_albums (
+		user_id INTEGER NOT NULL,
+		album_id TEXT NOT NULL,
+		starred_at TEXT NOT NULL,
+		PRIMARY KEY (user_id, album_id),
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	);`)
+	if err != nil {
+		log.Fatalf("Failed to create starred_albums table: %v", err)
+	}
+
+	// Create starred_artists table for user-specific artist stars
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS starred_artists (
+		user_id INTEGER NOT NULL,
+		artist_name TEXT NOT NULL,
+		starred_at TEXT NOT NULL,
+		PRIMARY KEY (user_id, artist_name),
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	);`)
+	if err != nil {
+		log.Fatalf("Failed to create starred_artists table: %v", err)
 	}
 
 	// Playlists table

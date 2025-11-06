@@ -97,8 +97,12 @@ func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 			bodyMap["song"] = body.Song
 		case *SubsonicSearchResult2:
 			bodyMap["searchResult2"] = body
+		case *SubsonicSearchResult3:
+			bodyMap["searchResult3"] = body
 		case *SubsonicStarred:
 			bodyMap["starred"] = body
+		case *SubsonicStarred2:
+			bodyMap["starred2"] = body
 		case *SubsonicSongsByGenre:
 			bodyMap["songsByGenre"] = body
 		case *SubsonicGenres:

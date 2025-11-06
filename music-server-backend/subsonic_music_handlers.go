@@ -710,6 +710,13 @@ func subsonicGetAlbumList2(c *gin.Context) {
 	// Determine ORDER BY clause based on list type
 	var orderByClause string
 	switch listType {
+	case "starred":
+		// Starred albums - need to join with starred_albums table
+		user := c.MustGet("user").(User)
+		whereClause += " AND album_path IN (SELECT s.album_path FROM starred_albums sa INNER JOIN songs s ON sa.album_id = s.id WHERE sa.user_id = ?)"
+		args = append(args, user.ID)
+		orderByClause = "ORDER BY (SELECT sa.starred_at FROM starred_albums sa INNER JOIN songs s ON sa.album_id = s.id WHERE s.album_path = songs.album_path AND sa.user_id = ? LIMIT 1) DESC"
+		args = append(args, user.ID)
 	case "newest":
 		// Recently added albums - sort by the most recent date_added of songs in each album
 		orderByClause = "ORDER BY MAX(date_added) DESC, artist, album"
@@ -1215,73 +1222,136 @@ func proxyImage(c *gin.Context, imageUrl string) {
 	}
 }
 
-// subsonicStar handles starring of songs according to Open Subsonic API
+// subsonicStar handles starring of songs, albums, and artists according to Open Subsonic API
 func subsonicStar(c *gin.Context) {
 	user := c.MustGet("user").(User)
 
-	songID := c.Query("id")
-	if songID == "" {
+	// Can star multiple items at once - use Query() to get all values for repeated parameters
+	// Subsonic sends: id=1&id=2&albumId=3&artistId=4
+	songIDs := c.Request.URL.Query()["id"]
+	albumIDs := c.Request.URL.Query()["albumId"]
+	artistIDs := c.Request.URL.Query()["artistId"]
+
+	if len(songIDs) == 0 && len(albumIDs) == 0 && len(artistIDs) == 0 {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter is missing."))
 		return
 	}
 
-	// Check if song exists
-	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE id = ?)", songID).Scan(&exists)
-	if err != nil || !exists {
-		subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))
-		return
+	now := time.Now().Format(time.RFC3339)
+
+	// Star songs
+	for _, songID := range songIDs {
+		// Check if song exists
+		var exists bool
+		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE id = ? AND cancelled = 0)", songID).Scan(&exists)
+		if err != nil || !exists {
+			log.Printf("Song %s not found for starring", songID)
+			continue
+		}
+
+		_, err = db.Exec(`INSERT OR REPLACE INTO starred_songs (user_id, song_id, starred_at) VALUES (?, ?, ?)`,
+			user.ID, songID, now)
+		if err != nil {
+			log.Printf("Error starring song %s for user %s: %v", songID, user.Username, err)
+		} else {
+			log.Printf("Song %s starred by user %s", songID, user.Username)
+		}
 	}
 
-	// Add star (ignore if already exists)
-	_, err = db.Exec(`INSERT OR REPLACE INTO starred_songs (user_id, song_id, starred_at) VALUES (?, ?, ?)`,
-		user.ID, songID, time.Now().Format(time.RFC3339))
-	if err != nil {
-		log.Printf("Error starring song %s for user %s: %v", songID, user.Username, err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
-		return
+	// Star albums
+	for _, albumID := range albumIDs {
+		// Check if album exists (albumID is actually a song ID representing the album)
+		var exists bool
+		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE id = ? AND cancelled = 0)", albumID).Scan(&exists)
+		if err != nil || !exists {
+			log.Printf("Album %s not found for starring", albumID)
+			continue
+		}
+
+		_, err = db.Exec(`INSERT OR REPLACE INTO starred_albums (user_id, album_id, starred_at) VALUES (?, ?, ?)`,
+			user.ID, albumID, now)
+		if err != nil {
+			log.Printf("Error starring album %s for user %s: %v", albumID, user.Username, err)
+		} else {
+			log.Printf("Album %s starred by user %s", albumID, user.Username)
+		}
 	}
 
-	log.Printf("Song %s starred by user %s", songID, user.Username)
+	// Star artists
+	for _, artistID := range artistIDs {
+		// artistID is the artist name
+		var exists bool
+		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE artist = ? AND cancelled = 0)", artistID).Scan(&exists)
+		if err != nil || !exists {
+			log.Printf("Artist %s not found for starring", artistID)
+			continue
+		}
+
+		_, err = db.Exec(`INSERT OR REPLACE INTO starred_artists (user_id, artist_name, starred_at) VALUES (?, ?, ?)`,
+			user.ID, artistID, now)
+		if err != nil {
+			log.Printf("Error starring artist %s for user %s: %v", artistID, user.Username, err)
+		} else {
+			log.Printf("Artist %s starred by user %s", artistID, user.Username)
+		}
+	}
+
 	subsonicRespond(c, newSubsonicResponse(nil))
 }
 
-// subsonicUnstar handles unstarring of songs according to Open Subsonic API
+// subsonicUnstar handles unstarring of songs, albums, and artists according to Open Subsonic API
 func subsonicUnstar(c *gin.Context) {
 	user := c.MustGet("user").(User)
 
-	songID := c.Query("id")
-	if songID == "" {
+	// Can unstar multiple items at once - use Query() to get all values for repeated parameters
+	songIDs := c.Request.URL.Query()["id"]
+	albumIDs := c.Request.URL.Query()["albumId"]
+	artistIDs := c.Request.URL.Query()["artistId"]
+
+	if len(songIDs) == 0 && len(albumIDs) == 0 && len(artistIDs) == 0 {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter is missing."))
 		return
 	}
 
-	// Remove star
-	_, err := db.Exec(`DELETE FROM starred_songs WHERE user_id = ? AND song_id = ?`, user.ID, songID)
-	if err != nil {
-		log.Printf("Error unstarring song %s for user %s: %v", songID, user.Username, err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
-		return
+	// Unstar songs
+	for _, songID := range songIDs {
+		_, err := db.Exec(`DELETE FROM starred_songs WHERE user_id = ? AND song_id = ?`, user.ID, songID)
+		if err != nil {
+			log.Printf("Error unstarring song %s for user %s: %v", songID, user.Username, err)
+		} else {
+			log.Printf("Song %s unstarred by user %s", songID, user.Username)
+		}
 	}
 
-	log.Printf("Song %s unstarred by user %s", songID, user.Username)
+	// Unstar albums
+	for _, albumID := range albumIDs {
+		_, err := db.Exec(`DELETE FROM starred_albums WHERE user_id = ? AND album_id = ?`, user.ID, albumID)
+		if err != nil {
+			log.Printf("Error unstarring album %s for user %s: %v", albumID, user.Username, err)
+		} else {
+			log.Printf("Album %s unstarred by user %s", albumID, user.Username)
+		}
+	}
+
+	// Unstar artists
+	for _, artistID := range artistIDs {
+		_, err := db.Exec(`DELETE FROM starred_artists WHERE user_id = ? AND artist_name = ?`, user.ID, artistID)
+		if err != nil {
+			log.Printf("Error unstarring artist %s for user %s: %v", artistID, user.Username, err)
+		} else {
+			log.Printf("Artist %s unstarred by user %s", artistID, user.Username)
+		}
+	}
+
 	subsonicRespond(c, newSubsonicResponse(nil))
 }
 
-// subsonicGetStarred returns starred songs for the current user
+// subsonicGetStarred returns starred songs, albums, and artists for the current user
 func subsonicGetStarred(c *gin.Context) {
 	user := c.MustGet("user").(User)
 	log.Printf("subsonicGetStarred called by user: %s (ID: %d)", user.Username, user.ID)
 
-	// First check if there are any starred songs for this user
-	var starredCount int
-	err := db.QueryRow("SELECT COUNT(*) FROM starred_songs WHERE user_id = ?", user.ID).Scan(&starredCount)
-	if err != nil {
-		log.Printf("Error counting starred songs: %v", err)
-	} else {
-		log.Printf("Total starred songs for user %d: %d", user.ID, starredCount)
-	}
-
+	// Get starred songs
 	query := `
 		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, COALESCE(s.genre, '') as genre, COALESCE(s.duration, 0) as duration
 		FROM songs s
@@ -1290,7 +1360,6 @@ func subsonicGetStarred(c *gin.Context) {
 		ORDER BY ss.starred_at DESC
 	`
 
-	log.Printf("Executing starred songs query for user ID: %d", user.ID)
 	rows, err := db.Query(query, user.ID)
 	if err != nil {
 		log.Printf("Starred songs query error: %v", err)
@@ -1308,36 +1377,80 @@ func subsonicGetStarred(c *gin.Context) {
 			log.Printf("Error scanning starred song: %v", err)
 			continue
 		}
-
 		s.Starred = true
+		s.CoverArt = s.ID
 		if lastPlayed.Valid {
 			s.LastPlayed = lastPlayed.String
 		}
 		songs = append(songs, s)
 	}
 
-	// Ensure songs is never nil for JSON marshaling
+	// Get starred albums
+	albumQuery := `
+		SELECT s.album, s.artist, COALESCE(s.genre, ''), sa.album_id
+		FROM starred_albums sa
+		INNER JOIN songs s ON sa.album_id = s.id
+		WHERE sa.user_id = ?
+		GROUP BY sa.album_id
+		ORDER BY sa.starred_at DESC
+	`
+
+	albumRows, err := db.Query(albumQuery, user.ID)
+	var albums []SubsonicAlbum
+	if err == nil {
+		defer albumRows.Close()
+		for albumRows.Next() {
+			var a SubsonicAlbum
+			err := albumRows.Scan(&a.Name, &a.Artist, &a.Genre, &a.ID)
+			if err == nil {
+				a.CoverArt = a.ID
+				albums = append(albums, a)
+			}
+		}
+	}
+
+	// Get starred artists
+	artistQuery := `
+		SELECT artist_name
+		FROM starred_artists
+		WHERE user_id = ?
+		ORDER BY starred_at DESC
+	`
+
+	artistRows, err := db.Query(artistQuery, user.ID)
+	var artists []SubsonicArtist
+	if err == nil {
+		defer artistRows.Close()
+		for artistRows.Next() {
+			var artistName string
+			if err := artistRows.Scan(&artistName); err == nil {
+				artists = append(artists, SubsonicArtist{
+					ID:       artistName,
+					Name:     artistName,
+					CoverArt: artistName,
+				})
+			}
+		}
+	}
+
+	// Ensure slices are non-nil
 	if songs == nil {
 		songs = []SubsonicSong{}
 	}
-
-	log.Printf("Found %d starred songs for user %d", len(songs), user.ID)
-
-	// Add a test song if no starred songs found
-	if len(songs) == 0 {
-		log.Printf("No starred songs found, adding test song")
-		songs = append(songs, SubsonicSong{
-			ID:      "test",
-			Title:   "Test Song",
-			Artist:  "Test Artist",
-			Album:   "Test Album",
-			Genre:   "Test",
-			Starred: true,
-		})
+	if albums == nil {
+		albums = []SubsonicAlbum{}
+	}
+	if artists == nil {
+		artists = []SubsonicArtist{}
 	}
 
-	starred := &SubsonicStarred{Songs: songs}
-	log.Printf("About to respond with starred songs: %+v", starred)
+	starred := &SubsonicStarred2{
+		Songs:   songs,
+		Albums:  albums,
+		Artists: artists,
+	}
+
+	log.Printf("Returning %d starred songs, %d starred albums, %d starred artists", len(songs), len(albums), len(artists))
 	subsonicRespond(c, newSubsonicResponse(starred))
 }
 

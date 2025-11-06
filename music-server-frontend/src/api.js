@@ -104,6 +104,22 @@ export async function getStarredSongs() {
     return await subsonicFetch('getStarred.view');
 }
 
+export async function starAlbum(albumId) {
+    return await subsonicFetch('star.view', { albumId });
+}
+
+export async function unstarAlbum(albumId) {
+    return await subsonicFetch('unstar.view', { albumId });
+}
+
+export async function starArtist(artistId) {
+    return await subsonicFetch('star.view', { artistId });
+}
+
+export async function unstarArtist(artistId) {
+    return await subsonicFetch('unstar.view', { artistId });
+}
+
 // Genre functions
 export async function getGenres() {
     return await subsonicFetch('getGenres.view');

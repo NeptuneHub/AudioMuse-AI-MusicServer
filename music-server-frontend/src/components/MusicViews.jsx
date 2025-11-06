@@ -1,6 +1,6 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { API_BASE, subsonicFetch, starSong, unstarSong, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed, getRadioSeed } from '../api';
+import { API_BASE, subsonicFetch, starSong, unstarSong, starAlbum, unstarAlbum, starArtist, unstarArtist, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed, getRadioSeed } from '../api';
 
 const formatDate = (isoString) => {
     if (!isoString) return 'Never';
@@ -735,6 +735,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             setSelectedGenre('');
                             setHasMore(false);
                             setIsStarredFilter(true);
+                            setDiscoveryView('all');  // Reset to 'all' view to show star column
                             
                             const data = await getStarredSongs();
                             const starredSongs = data.starred?.song;
@@ -748,8 +749,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             }
                             
                             setAllSongs(songList);
-                            setSongs(songList.slice(0, PAGE_SIZE));
-                            setHasMore(songList.length > PAGE_SIZE);
+                            setSongs(songList);  // Show ALL starred songs immediately
+                            setHasMore(false);  // No pagination for starred songs
                         } catch (err) {
                             setError('Failed to load starred songs: ' + err.message);
                             setIsStarredFilter(false);
@@ -1041,7 +1042,7 @@ const ImageWithFallback = ({ src, placeholder, alt }) => {
 };
 
 // Memoized album card to prevent unnecessary re-renders during scroll
-const AlbumCard = React.memo(({ album, isLastElement, lastAlbumElementRef, onNavigate }) => {
+const AlbumCard = React.memo(({ album, isLastElement, lastAlbumElementRef, onNavigate, onStarToggle, isStarred }) => {
     return (
         <div 
             ref={isLastElement ? lastAlbumElementRef : null}
@@ -1059,6 +1060,20 @@ const AlbumCard = React.memo(({ album, isLastElement, lastAlbumElementRef, onNav
                     placeholder={<AlbumPlaceholder name={album.name} />}
                     alt={album.name}
                 />
+                {/* Star button in top-right corner */}
+                {onStarToggle && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onStarToggle(album.id, isStarred);
+                        }}
+                        className="absolute top-2 right-2 z-10 p-1 sm:p-1.5 rounded-full bg-dark-800/80 hover:bg-dark-700/90 transition-all"
+                    >
+                        <svg className={`w-4 h-4 sm:w-5 sm:h-5 ${isStarred ? 'text-yellow-400 fill-current' : 'text-gray-400'}`} fill={isStarred ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 20 20">
+                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                        </svg>
+                    </button>
+                )}
                 {/* Play button overlay on hover */}
                 <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
                     <div className="bg-accent-500 rounded-full p-3 shadow-glow transform group-hover:scale-110 transition-transform">
@@ -1082,6 +1097,8 @@ export function Albums({ credentials, filter, onNavigate }) {
     const [genres, setGenres] = useState([]);
     const [selectedGenre, setSelectedGenre] = useState('');
     const [totalCount, setTotalCount] = useState(0);
+    const [isStarredFilter, setIsStarredFilter] = useState(false);
+    const [starredAlbums, setStarredAlbums] = useState(new Set());
     const PAGE_SIZE = 10;
     
     // Load genres on component mount
@@ -1113,6 +1130,39 @@ export function Albums({ credentials, filter, onNavigate }) {
         loadGenres();
     }, []);
     
+    // Load starred albums
+    useEffect(() => {
+        const loadStarredAlbums = async () => {
+            try {
+                const data = await getStarredSongs();
+                const starred = data.starred2?.album || [];
+                const starredIds = new Set((Array.isArray(starred) ? starred : [starred]).filter(Boolean).map(a => a.id));
+                setStarredAlbums(starredIds);
+            } catch (err) {
+                console.error('Failed to load starred albums:', err);
+            }
+        };
+        loadStarredAlbums();
+    }, []);
+    
+    const handleStarToggle = async (albumId, isStarred) => {
+        try {
+            if (isStarred) {
+                await unstarAlbum(albumId);
+                setStarredAlbums(prev => {
+                    const next = new Set(prev);
+                    next.delete(albumId);
+                    return next;
+                });
+            } else {
+                await starAlbum(albumId);
+                setStarredAlbums(prev => new Set(prev).add(albumId));
+            }
+        } catch (err) {
+            console.error('Failed to toggle star:', err);
+        }
+    };
+    
     useEffect(() => {
         setAlbums([]);
         setHasMore(true);
@@ -1122,7 +1172,7 @@ export function Albums({ credentials, filter, onNavigate }) {
     useEffect(() => {
         setAlbums([]);
         setHasMore(true);
-    }, [searchTerm, selectedGenre]);
+    }, [searchTerm, selectedGenre, isStarredFilter]);
 
     // Load album counts
     useEffect(() => {
@@ -1147,7 +1197,12 @@ export function Albums({ credentials, filter, onNavigate }) {
                 let albumList = [];
                 const query = searchTerm || filter;
 
-                if (query) {
+                if (isStarredFilter) {
+                    // Load starred albums
+                    const params = { type: 'starred', size: PAGE_SIZE, offset: albums.length };
+                    const data = await subsonicFetch('getAlbumList2.view', params);
+                    albumList = data.albumList2?.album || [];
+                } else if (query) {
                     const data = await subsonicFetch('search2.view', { query, albumCount: PAGE_SIZE, albumOffset: albums.length });
                     albumList = data.searchResult2?.album || data.searchResult3?.album || [];
                 } else {
@@ -1168,7 +1223,7 @@ export function Albums({ credentials, filter, onNavigate }) {
         };
         
         fetcher();
-    }, [filter, searchTerm, albums.length, isLoading, hasMore, selectedGenre]);
+    }, [filter, searchTerm, albums.length, isLoading, hasMore, selectedGenre, isStarredFilter]);
     
     useEffect(() => {
         if (albums.length === 0 && hasMore) {
@@ -1215,7 +1270,8 @@ export function Albums({ credentials, filter, onNavigate }) {
                         placeholder="Search for an album or artist..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-10 pr-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white placeholder-gray-500 transition-all"
+                        disabled={isStarredFilter}
+                        className="w-full pl-10 pr-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white placeholder-gray-500 transition-all disabled:opacity-50"
                     />
                     {searchTerm && (
                         <button
@@ -1231,13 +1287,33 @@ export function Albums({ credentials, filter, onNavigate }) {
                 <select
                     value={selectedGenre}
                     onChange={(e) => setSelectedGenre(e.target.value)}
-                    className="px-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white min-w-[150px] transition-all"
+                    disabled={isStarredFilter}
+                    className="px-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white min-w-[150px] transition-all disabled:opacity-50"
                 >
                     <option value="">All Genres</option>
                     {genres.map(genre => (
                         <option key={genre.name} value={genre.name}>{genre.name}</option>
                     ))}
                 </select>
+                <button
+                    onClick={async () => {
+                        setSearchTerm('');
+                        setSelectedGenre('');
+                        setIsStarredFilter(!isStarredFilter);
+                        setAlbums([]);
+                        setHasMore(true);
+                    }}
+                    className={`inline-flex items-center gap-2 font-semibold py-2.5 px-5 rounded-lg transition-all whitespace-nowrap ${
+                        isStarredFilter
+                            ? 'bg-yellow-500/20 text-yellow-400 border-2 border-yellow-400 shadow-glow'
+                            : 'bg-dark-750 hover:bg-dark-700 text-yellow-400 border border-yellow-400/30 hover:border-yellow-400/50'
+                    }`}
+                >
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                    </svg>
+                    Starred Albums
+                </button>
             </div>
             
             {/* Album Grid */}
@@ -1249,6 +1325,8 @@ export function Albums({ credentials, filter, onNavigate }) {
                         isLastElement={index === albums.length - 1}
                         lastAlbumElementRef={lastAlbumElementRef}
                         onNavigate={onNavigate}
+                        onStarToggle={handleStarToggle}
+                        isStarred={starredAlbums.has(album.id)}
                     />
                 ))}
             </div>
@@ -1272,12 +1350,47 @@ export function Artists({ credentials, onNavigate }) {
     const [isLoading, setIsLoading] = useState(false);
     const [hasMore, setHasMore] = useState(true);
     const [totalCount, setTotalCount] = useState(0);
+    const [isStarredFilter, setIsStarredFilter] = useState(false);
+    const [starredArtists, setStarredArtists] = useState(new Set());
     const PAGE_SIZE = 50; // Increased page size for better performance
 
     useEffect(() => {
         setArtists([]);
         setHasMore(true);
-    }, [searchTerm]);
+    }, [searchTerm, isStarredFilter]);
+
+    // Load starred artists
+    useEffect(() => {
+        const loadStarredArtists = async () => {
+            try {
+                const data = await getStarredSongs();
+                const starred = data.starred2?.artist || [];
+                const starredIds = new Set((Array.isArray(starred) ? starred : [starred]).filter(Boolean).map(a => a.id));
+                setStarredArtists(starredIds);
+            } catch (err) {
+                console.error('Failed to load starred artists:', err);
+            }
+        };
+        loadStarredArtists();
+    }, []);
+
+    const handleStarToggle = async (artistId, isStarred) => {
+        try {
+            if (isStarred) {
+                await unstarArtist(artistId);
+                setStarredArtists(prev => {
+                    const next = new Set(prev);
+                    next.delete(artistId);
+                    return next;
+                });
+            } else {
+                await starArtist(artistId);
+                setStarredArtists(prev => new Set(prev).add(artistId));
+            }
+        } catch (err) {
+            console.error('Failed to toggle star:', err);
+        }
+    };
 
     // Load artist counts
     useEffect(() => {
@@ -1298,21 +1411,36 @@ export function Artists({ credentials, onNavigate }) {
 
         const fetcher = async () => {
             try {
-                // Use search2.view for all cases with proper pagination
-                // Use "*" as query for listing all artists (backend supports this)
-                const query = searchTerm.length >= 1 ? searchTerm : '*';
-                const data = await subsonicFetch('search2.view', { 
-                    query: query, 
-                    artistCount: PAGE_SIZE, 
-                    artistOffset: artists.length,
-                    albumCount: 0,  // Don't fetch albums
-                    songCount: 0    // Don't fetch songs
-                });
+                let newArtists = [];
                 
-                const artistList = data.searchResult2?.artist || data.searchResult3?.artist || [];
-                const newArtists = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
+                if (isStarredFilter) {
+                    // Load starred artists from getStarred
+                    if (artists.length === 0) {
+                        const data = await getStarredSongs();
+                        const artistList = data.starred2?.artist || [];
+                        newArtists = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
+                        setHasMore(false); // All starred artists loaded at once
+                    } else {
+                        setHasMore(false);
+                    }
+                } else {
+                    // Use search2.view for all cases with proper pagination
+                    // Use "*" as query for listing all artists (backend supports this)
+                    const query = searchTerm.length >= 1 ? searchTerm : '*';
+                    const data = await subsonicFetch('search2.view', { 
+                        query: query, 
+                        artistCount: PAGE_SIZE, 
+                        artistOffset: artists.length,
+                        albumCount: 0,  // Don't fetch albums
+                        songCount: 0    // Don't fetch songs
+                    });
+                    
+                    const artistList = data.searchResult2?.artist || data.searchResult3?.artist || [];
+                    newArtists = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
+                    setHasMore(newArtists.length === PAGE_SIZE);
+                }
+                
                 setArtists(prev => [...prev, ...newArtists]);
-                setHasMore(newArtists.length === PAGE_SIZE);
             } catch (e) {
                 console.error("Failed to fetch artists:", e);
             } finally {
@@ -1321,7 +1449,7 @@ export function Artists({ credentials, onNavigate }) {
         };
 
         fetcher();
-    }, [searchTerm, artists.length, isLoading, hasMore]);
+    }, [searchTerm, artists.length, isLoading, hasMore, isStarredFilter]);
     
     useEffect(() => {
         if (artists.length === 0 && hasMore) {
@@ -1356,8 +1484,8 @@ export function Artists({ credentials, onNavigate }) {
             )}
             
             {/* Modern Search Bar */}
-            <div className="mb-6">
-                <div className="relative">
+            <div className="mb-6 flex flex-col sm:flex-row gap-3">
+                <div className="flex-1 relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
@@ -1368,7 +1496,8 @@ export function Artists({ credentials, onNavigate }) {
                         placeholder="Search for an artist..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-10 pr-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white placeholder-gray-500 transition-all"
+                        disabled={isStarredFilter}
+                        className="w-full pl-10 pr-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white placeholder-gray-500 transition-all disabled:opacity-50"
                     />
                     {searchTerm && (
                         <button
@@ -1381,38 +1510,72 @@ export function Artists({ credentials, onNavigate }) {
                         </button>
                     )}
                 </div>
+                <button
+                    onClick={async () => {
+                        setSearchTerm('');
+                        setIsStarredFilter(!isStarredFilter);
+                        setArtists([]);
+                        setHasMore(true);
+                    }}
+                    className={`inline-flex items-center gap-2 font-semibold py-2.5 px-5 rounded-lg transition-all whitespace-nowrap ${
+                        isStarredFilter
+                            ? 'bg-yellow-500/20 text-yellow-400 border-2 border-yellow-400 shadow-glow'
+                            : 'bg-dark-750 hover:bg-dark-700 text-yellow-400 border border-yellow-400/30 hover:border-yellow-400/50'
+                    }`}
+                >
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                    </svg>
+                    Starred Artists
+                </button>
             </div>
             
             {/* Artist Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
-                {artists.map((artist, index) => (
-                    <div 
-                        ref={index === artists.length - 1 ? lastArtistElementRef : null}
-                        key={`${artist.id}-${index}`} 
-                        onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: artist.name })} 
-                        className="group bg-dark-750 rounded-xl p-3 sm:p-4 text-center hover:bg-dark-700 card-hover flex flex-col items-center cursor-pointer">
-                        <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-accent-500/20 to-purple-500/20 flex items-center justify-center mb-3 overflow-hidden flex-shrink-0 shadow-lg border-2 border-dark-600 group-hover:border-accent-500/50 transition-all">
-                             <ImageWithFallback
-                                src={artist.artistImageUrl ? (() => {
-                                    const params = new URLSearchParams({ id: artist.artistImageUrl, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
-                                    const url = `${API_BASE}/rest/getCoverArt.view?${params.toString()}`;
-                                    return { url, useAuthFetch: true };
-                                })() : ''}
-                                placeholder={<ArtistPlaceholder />}
-                                alt={artist.name}
-                            />
-                            {/* Play button overlay on hover */}
-                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100 rounded-full">
-                                <div className="bg-accent-500 rounded-full p-3 shadow-glow transform group-hover:scale-110 transition-transform">
-                                    <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                        <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
-                                    </svg>
+                {artists.map((artist, index) => {
+                    const isStarred = starredArtists.has(artist.id);
+                    return (
+                        <div 
+                            ref={index === artists.length - 1 ? lastArtistElementRef : null}
+                            key={`${artist.id}-${index}`} 
+                            onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: artist.name })} 
+                            className="group bg-dark-750 rounded-xl p-3 sm:p-4 text-center hover:bg-dark-700 card-hover flex flex-col items-center cursor-pointer relative">
+                            {/* Star button in top-right corner of the card */}
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleStarToggle(artist.id, isStarred);
+                                }}
+                                className="absolute top-2 right-2 z-10 p-1 sm:p-1.5 rounded-full bg-dark-800/80 hover:bg-dark-700/90 transition-all"
+                            >
+                                <svg className={`w-4 h-4 sm:w-5 sm:h-5 ${isStarred ? 'text-yellow-400 fill-current' : 'text-gray-400'}`} fill={isStarred ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 20 20">
+                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                                </svg>
+                            </button>
+                            <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-accent-500/20 to-purple-500/20 flex items-center justify-center mb-3 overflow-hidden flex-shrink-0 shadow-lg border-2 border-dark-600 group-hover:border-accent-500/50 transition-all">
+                                <ImageWithFallback
+                                    src={artist.artistImageUrl ? (() => {
+                                        const params = new URLSearchParams({ id: artist.artistImageUrl, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
+                                        const url = `${API_BASE}/rest/getCoverArt.view?${params.toString()}`;
+                                        return { url, useAuthFetch: true };
+                                    })() : ''}
+                                    placeholder={<ArtistPlaceholder />}
+                                    alt={artist.name}
+                                />
+                                {/* Play button overlay on hover */}
+                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100 rounded-full">
+                                    <div className="bg-accent-500 rounded-full p-3 shadow-glow transform group-hover:scale-110 transition-transform">
+                                        <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
+                                        </svg>
+                                    </div>
                                 </div>
                             </div>
+                            <p className="font-semibold text-white truncate w-full text-sm sm:text-base group-hover:text-accent-400 transition-colors">{artist.name}</p>
+                            <p className="text-xs sm:text-sm text-gray-400 truncate w-full mt-1">&nbsp;</p>
                         </div>
-                        <p className="font-semibold text-white truncate w-full text-sm sm:text-base group-hover:text-accent-400 transition-colors">{artist.name}</p>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
             
             {isLoading && (
