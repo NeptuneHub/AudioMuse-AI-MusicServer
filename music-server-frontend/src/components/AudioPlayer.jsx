@@ -1,6 +1,9 @@
 // Suggested path: music-server-frontend/src/components/AudioPlayer.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE, apiFetch } from '../api';
+import WaveSurfer from 'wavesurfer.js';
+import Hover from 'wavesurfer.js/dist/plugins/hover.esm.js';
+import './AudioPlayer.css';
 
 function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevious, hasQueue, onToggleQueueView, queueCount = 0, playMode = 'sequential', onTogglePlayMode }) {
     const [audioSrc, setAudioSrc] = useState(null);
@@ -16,36 +19,12 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
     const seekingRef = useRef(false);
     const isDraggingRef = useRef(false);
     const previousSongIdRef = useRef(null);
-
-    // Immediate seek function - no debounce to avoid visual flicker
-    const performSeek = useCallback((newTime) => {
-        if (audioRef.current && !seekingRef.current) {
-            const audio = audioRef.current;
-            
-            // Ensure audio is ready for seeking (has loaded metadata)
-            if (audio.readyState >= 1) { // HAVE_METADATA or better
-                try {
-                    // Clamp to valid range
-                    const clampedTime = Math.max(0, Math.min(newTime, audio.duration || duration));
-                    audio.currentTime = clampedTime;
-                } catch (e) {
-                    console.warn('Seek failed:', e);
-                }
-            } else {
-                // If not ready yet, wait for metadata and try again
-                const handleCanSeek = () => {
-                    try {
-                        const clampedTime = Math.max(0, Math.min(newTime, audio.duration || duration));
-                        audio.currentTime = clampedTime;
-                    } catch (e) {
-                        console.warn('Delayed seek failed:', e);
-                    }
-                    audio.removeEventListener('loadedmetadata', handleCanSeek);
-                };
-                audio.addEventListener('loadedmetadata', handleCanSeek, { once: true });
-            }
-        }
-    }, [duration]);
+    const waveformRef = useRef(null);
+    const waveformMobileRef = useRef(null);
+    const wavesurferRef = useRef(null);
+    const wavesurferMobileRef = useRef(null);
+    const seekDebounceRef = useRef(null);
+    const isSeekingViaWaveformRef = useRef(false);
 
     // Effect for fetching audio data and scrobbling
     useEffect(() => {
@@ -195,6 +174,147 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
         setupMediaSession();
     }, [song, setupMediaSession]);
     
+    // Initialize WaveSurfer instances and load audio when audioSrc changes
+    useEffect(() => {
+        if (!waveformRef.current || !waveformMobileRef.current) {
+            return;
+        }
+
+        // Destroy existing instances if they exist
+        if (wavesurferRef.current) {
+            wavesurferRef.current.destroy();
+            wavesurferRef.current = null;
+        }
+        if (wavesurferMobileRef.current) {
+            wavesurferMobileRef.current.destroy();
+            wavesurferMobileRef.current = null;
+        }
+
+        if (!audioSrc) {
+            return;
+        }
+
+        console.log('🌊 Creating WaveSurfer and loading:', audioSrc);
+
+        // Create desktop waveform with hover plugin
+        const wavesurfer = WaveSurfer.create({
+            container: waveformRef.current,
+            waveColor: '#4B5563',
+            progressColor: '#14b8a6',
+            cursorColor: '#14b8a6',
+            height: 48,
+            normalize: true,
+            interact: true,
+            hideScrollbar: true,
+            fillParent: true,
+            url: audioSrc,
+            plugins: [
+                Hover.create({
+                    lineColor: '#14b8a6',
+                    lineWidth: 2,
+                    labelBackground: '#14b8a6',
+                    labelColor: '#fff',
+                    labelSize: '11px'
+                })
+            ]
+        });
+
+        // Create mobile waveform
+        const wavesurferMobile = WaveSurfer.create({
+            container: waveformMobileRef.current,
+            waveColor: '#4B5563',
+            progressColor: '#14b8a6',
+            cursorColor: '#14b8a6',
+            height: 32,
+            normalize: true,
+            interact: true,
+            hideScrollbar: true,
+            fillParent: true,
+            url: audioSrc
+        });
+
+        wavesurferRef.current = wavesurfer;
+        wavesurferMobileRef.current = wavesurferMobile;
+
+        // Handle seeking via waveform click with debouncing
+        // Note: 'interaction' event returns time in seconds, NOT progress (0-1)
+        wavesurfer.on('interaction', (timeInSeconds) => {
+            console.log('🌊 Waveform click - time:', timeInSeconds);
+            
+            // Prevent visual update during debounce
+            isSeekingViaWaveformRef.current = true;
+            
+            // Clear any pending seek
+            if (seekDebounceRef.current) {
+                clearTimeout(seekDebounceRef.current);
+            }
+            
+            // Debounce the seek - wait 500ms before actually seeking
+            seekDebounceRef.current = setTimeout(() => {
+                if (audioRef.current) {
+                    console.log('🌊 Seeking audio to:', timeInSeconds);
+                    audioRef.current.currentTime = timeInSeconds;
+                    isSeekingViaWaveformRef.current = false;
+                }
+            }, 500);
+        });
+
+        wavesurferMobile.on('interaction', (timeInSeconds) => {
+            console.log('🌊 Mobile waveform click - time:', timeInSeconds);
+            
+            // Prevent visual update during debounce
+            isSeekingViaWaveformRef.current = true;
+            
+            // Clear any pending seek
+            if (seekDebounceRef.current) {
+                clearTimeout(seekDebounceRef.current);
+            }
+            
+            // Debounce the seek - wait 500ms before actually seeking
+            seekDebounceRef.current = setTimeout(() => {
+                if (audioRef.current) {
+                    console.log('🌊 Mobile seeking audio to:', timeInSeconds);
+                    audioRef.current.currentTime = timeInSeconds;
+                    isSeekingViaWaveformRef.current = false;
+                }
+            }, 500);
+        });
+
+        // Sync waveform progress with our audio element
+        const syncHandler = () => {
+            // Don't sync if we're waiting for a debounced seek
+            if (isSeekingViaWaveformRef.current) {
+                return;
+            }
+            
+            if (audioRef.current && audioRef.current.duration > 0 && isFinite(audioRef.current.duration)) {
+                const progress = audioRef.current.currentTime / audioRef.current.duration;
+                if (isFinite(progress) && progress >= 0 && progress <= 1) {
+                    wavesurfer?.seekTo(progress);
+                    wavesurferMobile?.seekTo(progress);
+                }
+            }
+        };
+
+        // Attach to audio element events
+        const audio = audioRef.current;
+        if (audio) {
+            audio.addEventListener('timeupdate', syncHandler);
+            audio.addEventListener('seeking', syncHandler);
+        }
+
+        return () => {
+            if (audio) {
+                audio.removeEventListener('timeupdate', syncHandler);
+                audio.removeEventListener('seeking', syncHandler);
+            }
+            wavesurfer.destroy();
+            wavesurferMobile.destroy();
+        };
+    }, [audioSrc]);
+
+
+    
     useEffect(() => {
         if (audioSrc && audioRef.current) {
             console.log('🎵 audioSrc changed, loading new audio');
@@ -242,37 +362,17 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
     return (
         <div className="fixed bottom-0 left-0 right-0 glass border-t border-dark-600 z-50 shadow-2xl">
             {/* Mobile Timeline - At the very top on mobile only */}
-            {song && (
-                <div className="sm:hidden px-2 py-1.5 bg-dark-800/30">
-                    <div className="flex items-center gap-1">
-                        <span className="text-[9px] text-gray-400 whitespace-nowrap flex-shrink-0 w-8 text-right">
-                            {Math.floor(currentTime / 60)}:{String(Math.floor(currentTime % 60)).padStart(2, '0')}
-                        </span>
-                        <input
-                            type="range"
-                            min="0"
-                            max={duration || 100}
-                            value={currentTime}
-                            onChange={(e) => {
-                                const newTime = parseFloat(e.target.value);
-                                setCurrentTime(newTime);
-                                isDraggingRef.current = true;
-                                performSeek(newTime);
-                                setTimeout(() => {
-                                    isDraggingRef.current = false;
-                                }, 100);
-                            }}
-                            className="flex-1 h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer"
-                            style={{
-                                background: `linear-gradient(to right, #14b8a6 0%, #14b8a6 ${duration > 0 ? (currentTime / duration * 100) : 0}%, #374151 ${duration > 0 ? (currentTime / duration * 100) : 0}%, #374151 100%)`
-                            }}
-                        />
-                        <span className="text-[9px] text-gray-400 whitespace-nowrap flex-shrink-0 w-8">
-                            {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}
-                        </span>
-                    </div>
+            <div className={`sm:hidden px-2 py-1.5 bg-dark-800/30 ${!song ? 'hidden' : ''}`}>
+                <div className="flex items-center gap-1">
+                    <span className="text-[9px] text-gray-400 whitespace-nowrap flex-shrink-0 w-8 text-right">
+                        {Math.floor(currentTime / 60)}:{String(Math.floor(currentTime % 60)).padStart(2, '0')}
+                    </span>
+                    <div ref={waveformMobileRef} className="flex-1 h-8" />
+                    <span className="text-[9px] text-gray-400 whitespace-nowrap flex-shrink-0 w-8">
+                        {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}
+                    </span>
                 </div>
-            )}
+            </div>
             <div className="container mx-auto px-1 sm:px-6 py-2 sm:py-3">
                 <div className="flex items-center gap-1 sm:gap-6">
                     {/* Song Info - More compact on mobile */}
@@ -436,35 +536,12 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                         </svg>
                                     </button>
                                 </div>
-                                {/* Desktop Timeline Slider */}
-                                <div className="hidden sm:flex items-center gap-2 flex-1 max-w-md">
+                                {/* Desktop Timeline - Waveform between playback controls and volume */}
+                                <div className={`hidden sm:flex items-center gap-2 flex-1 max-w-md ${!song ? 'invisible' : ''}`}>
                                     <span className="text-xs text-gray-400 whitespace-nowrap">
                                         {Math.floor(currentTime / 60)}:{String(Math.floor(currentTime % 60)).padStart(2, '0')}
                                     </span>
-                                    <input
-                                        type="range"
-                                        min="0"
-                                        max={duration || 100}
-                                        value={currentTime}
-                                        onPointerDown={() => {
-                                            isDraggingRef.current = true;
-                                        }}
-                                        onPointerUp={(e) => {
-                                            const newTime = parseFloat(e.target.value);
-                                            isDraggingRef.current = false;
-                                            // Apply seek when user releases using debounced function
-                                            performSeek(newTime);
-                                        }}
-                                        onInput={(e) => {
-                                            // Update visual immediately while dragging
-                                            const newTime = parseFloat(e.target.value);
-                                            setCurrentTime(newTime);
-                                        }}
-                                        className="flex-1 h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer"
-                                        style={{
-                                            background: `linear-gradient(to right, #14b8a6 0%, #14b8a6 ${duration > 0 ? (currentTime / duration * 100) : 0}%, #374151 ${duration > 0 ? (currentTime / duration * 100) : 0}%, #374151 100%)`
-                                        }}
-                                    />
+                                    <div ref={waveformRef} className="flex-1 h-12" />
                                     <span className="text-xs text-gray-400 whitespace-nowrap">
                                         {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}
                                     </span>

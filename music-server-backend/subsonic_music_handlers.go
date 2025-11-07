@@ -445,13 +445,38 @@ func streamDirect(c *gin.Context, path string) {
 
 func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitrate int) {
 	startTime := time.Now()
-	log.Printf("🎵 TRANSCODING ACTIVE: format=%s, bitrate=%dkbps, file=%s", format, bitrate, filepath.Base(inputPath))
+	songID := c.Query("id")
 
-	// FFmpeg format mapping (what FFmpeg expects for -f flag)
+	log.Printf("🎵 TRANSCODING REQUEST: format=%s, bitrate=%dkbps, file=%s, songID=%s",
+		format, bitrate, filepath.Base(inputPath), songID)
+
+	// Parse Range header if present
+	rangeHeader := c.GetHeader("Range")
+	var requestedStart int64 = 0
+	var isRangeRequest bool = false
+
+	if rangeHeader != "" {
+		// Parse "bytes=12345-" or "bytes=12345-67890"
+		re := regexp.MustCompile(`bytes=(\d+)-`)
+		matches := re.FindStringSubmatch(rangeHeader)
+		if len(matches) > 1 {
+			requestedStart, _ = strconv.ParseInt(matches[1], 10, 64)
+			// Only treat as range request if starting position is > 0
+			// bytes=0- is just the browser asking for the whole file
+			if requestedStart > 0 {
+				isRangeRequest = true
+				log.Printf("📍 RANGE REQUEST: bytes=%d- (seeking in transcoded stream)", requestedStart)
+			} else {
+				log.Printf("📀 Initial request (Range: bytes=0-) - treating as full stream")
+			}
+		}
+	}
+
+	// FFmpeg format mapping
 	ffmpegFormatMap := map[string]string{
 		"mp3":  "mp3",
 		"ogg":  "ogg",
-		"aac":  "adts", // AAC uses ADTS format for streaming (not m4a/mp4)
+		"aac":  "adts",
 		"opus": "opus",
 	}
 
@@ -462,18 +487,32 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 		return
 	}
 
-	// Get optimized transcoding profile (includes codec, preset, and quality settings)
+	var seekSeconds float64 = 0
+
+	if isRangeRequest && requestedStart > 0 {
+		// Calculate approximate seek time from byte offset
+		// Formula: bytes / (bitrate_kbps * 125) = seconds
+		seekSeconds = float64(requestedStart) / float64(bitrate*125)
+		log.Printf("🔍 Calculated seek position: %.2f seconds", seekSeconds)
+	}
+
+	// Get optimized transcoding profile
 	profileArgs := getTranscodingProfile(format, bitrate)
 
-	// Build complete FFmpeg command with optimized profile
-	args := []string{
-		"-i", inputPath,
-		"-vn", // No video
+	// Build FFmpeg command with seeking support
+	args := []string{}
+
+	// Add seek BEFORE input for fast seeking (only if actually seeking)
+	if seekSeconds > 0 {
+		args = append(args, "-ss", fmt.Sprintf("%.2f", seekSeconds))
+		log.Printf("🔧 Adding FFmpeg seek flag: -ss %.2f", seekSeconds)
 	}
+
+	args = append(args, "-i", inputPath, "-vn")
 	args = append(args, profileArgs...)
 	args = append(args, "-f", ffmpegFormat, "pipe:1")
 
-	log.Printf("🔧 FFmpeg command (optimized): ffmpeg %s", strings.Join(args, " "))
+	log.Printf("🔧 FFmpeg command: ffmpeg %s", strings.Join(args, " "))
 
 	cmd := exec.Command("ffmpeg", args...)
 
@@ -498,18 +537,18 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Printf("❌ Failed to create FFmpeg stdout pipe: %v - falling back to direct stream", err)
+		log.Printf("❌ Failed to create FFmpeg stdout pipe: %v", err)
 		streamDirect(c, inputPath)
 		return
 	}
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("❌ Failed to start FFmpeg: %v - falling back to direct stream", err)
+		log.Printf("❌ Failed to start FFmpeg: %v", err)
 		streamDirect(c, inputPath)
 		return
 	}
 
-	// Set appropriate content type
+	// Set headers
 	contentTypes := map[string]string{
 		"mp3":  "audio/mpeg",
 		"ogg":  "audio/ogg",
@@ -520,26 +559,30 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 	bitrateStr := strconv.Itoa(bitrate) + "k"
 
 	c.Header("Content-Type", contentType)
-	c.Header("Accept-Ranges", "none") // Transcoding doesn't support range requests
-	c.Header("X-Transcoded", "true")  // Custom header to indicate transcoding
+	c.Header("Accept-Ranges", "bytes") // Support seeking
+	c.Header("X-Transcoded", "true")
 	c.Header("X-Transcode-Format", format)
 	c.Header("X-Transcode-Bitrate", bitrateStr)
-	c.Header("Cache-Control", "no-cache, no-store") // Prevent any caching
-	c.Header("Connection", "keep-alive")            // Keep connection open for streaming
-	c.Header("Transfer-Encoding", "chunked")        // Explicit chunked encoding
-	c.Status(http.StatusOK)                         // Send headers immediately
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
 
-	// Flush headers to client immediately
+	if isRangeRequest {
+		c.Status(http.StatusPartialContent)
+		log.Printf("📤 Sending 206 Partial Content response")
+	} else {
+		c.Status(http.StatusOK)
+		log.Printf("📤 Sending 200 OK response")
+	}
+
+	// Flush headers immediately
 	if flusher, ok := c.Writer.(http.Flusher); ok {
 		flusher.Flush()
 		elapsed := time.Since(startTime).Milliseconds()
-		log.Printf("⚡ Headers flushed at %dms - client should start buffering NOW", elapsed)
+		log.Printf("⚡ Headers flushed at %dms", elapsed)
 	}
 
-	log.Printf("⚡ Starting ULTRA low-latency stream: Content-Type=%s, Bitrate=%s", contentType, bitrateStr)
-
-	// Stream transcoded output to client with MINIMAL buffer and AGGRESSIVE flushing
-	buf := make([]byte, 2048) // 2KB buffer for ULTRA low latency (smaller = faster start)
+	// Stream transcoded audio
+	buf := make([]byte, 4096)
 	bytesWritten := int64(0)
 	chunkCount := 0
 
@@ -550,15 +593,13 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 			bytesWritten += int64(written)
 			chunkCount++
 
-			// Flush IMMEDIATELY after EVERY write for absolute minimum latency
 			if flusher, ok := c.Writer.(http.Flusher); ok {
 				flusher.Flush()
 			}
 
-			// Log first chunk to verify immediate sending
 			if chunkCount == 1 {
 				elapsed := time.Since(startTime).Milliseconds()
-				log.Printf("🚀 FIRST CHUNK SENT at %dms (%d bytes) - audio should START NOW!", elapsed, written)
+				log.Printf("🚀 FIRST CHUNK SENT at %dms (%d bytes)", elapsed, written)
 			}
 
 			if writeErr != nil {
@@ -577,7 +618,6 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 	}
 
 	cmd.Wait()
-
 	log.Printf("✅ Transcoding complete: %d bytes sent", bytesWritten)
 }
 

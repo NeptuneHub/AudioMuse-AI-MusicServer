@@ -1,0 +1,10 @@
+/* WaveSurfer waveform styling */
+wave {
+    overflow: hidden !important;
+    border-radius: 6px;
+}
+
+/* Cursor styling for waveform */
+wave canvas {
+    cursor: pointer;
+}
