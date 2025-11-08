@@ -230,7 +230,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
           mode: 'markers',
           type: 'scatter',
           name: 'Add Centroid',
-          marker: { size: 15, color: 'rgba(253, 224, 71, 1)', symbol: 'triangle-up', line: { width: 2, color: 'rgba(234, 179, 8, 1)' } }
+          marker: { size: 20, color: 'rgba(253, 224, 71, 1)', symbol: 'triangle-up', line: { width: 3, color: 'rgba(234, 179, 8, 1)' } }
         });
       }
       
@@ -243,7 +243,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
           mode: 'markers',
           type: 'scatter',
           name: 'Subtract Centroid',
-          marker: { size: 15, color: 'rgba(239, 68, 68, 1)', symbol: 'triangle-down', line: { width: 2, color: 'rgba(159, 18, 57, 1)' } }
+          marker: { size: 20, color: 'rgba(239, 68, 68, 1)', symbol: 'triangle-down', line: { width: 3, color: 'rgba(159, 18, 57, 1)' } }
         });
       }
       
@@ -256,7 +256,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
           mode: 'markers',
           type: 'scatter',
           name: 'Selected ADD song(s)',
-          marker: { size: 12, color: 'rgba(34, 197, 94, 0.9)', line: { width: 2, color: 'rgba(22, 163, 74, 1)' } }
+          marker: { size: 18, color: 'rgba(34, 197, 94, 1)', line: { width: 3, color: 'rgba(22, 163, 74, 1)' } }
         });
       }
       
@@ -269,7 +269,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
           mode: 'markers',
           type: 'scatter',
           name: 'Selected SUBTRACT song(s)',
-          marker: { size: 10, color: 'rgba(239, 68, 68, 0.9)', line: { width: 2, color: 'rgba(220, 38, 38, 1)' } }
+          marker: { size: 16, color: 'rgba(239, 68, 68, 1)', line: { width: 3, color: 'rgba(220, 38, 38, 1)' } }
         });
       }
       
