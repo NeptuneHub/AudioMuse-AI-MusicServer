@@ -505,7 +505,9 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 			</nav>
 			
 			{/* Main Content - optimized padding for navbar and audio bar */}
-			<main className="px-3 sm:px-6 pt-16 sm:pt-20 pb-20 sm:pb-24 bg-dark-800 min-h-screen">
+			{/* Mobile: pb-32 (128px) to account for waveform timeline + player controls */}
+			{/* Desktop: pb-28 (112px) for standard player height */}
+			<main className="px-3 sm:px-6 pt-16 sm:pt-20 pb-32 sm:pb-28 bg-dark-800 min-h-screen">
 				{navigation.length > 1 && (
 					<button 
 						onClick={handleBack} 
