@@ -47,6 +47,7 @@ After both of this point done, you can start the Sonic Analysis diectly from the
 * Sonic Path
 * Sonic Fingerprint
 * Music Map
+* Song Alchemy
 
 **IMPORTANT:** This is a Open Subsonic API compliant server (or it should be), so you need to configure AudioMuse-AI with the **navidrome** deployment, setting url, user and password correctly.
 
