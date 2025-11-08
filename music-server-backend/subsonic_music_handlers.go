@@ -621,6 +621,106 @@ func streamWithTranscoding(c *gin.Context, inputPath string, format string, bitr
 	log.Printf("✅ Transcoding complete: %d bytes sent", bytesWritten)
 }
 
+// subsonicGetWaveform generates waveform peaks data for fast visualization
+func subsonicGetWaveform(c *gin.Context) {
+	user := c.MustGet("user").(User)
+	songID := c.Query("id")
+
+	if songID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing song ID"})
+		return
+	}
+
+	// Get song file path
+	var path string
+	var duration int
+	err := db.QueryRow("SELECT path, duration FROM songs WHERE id = ?", songID).Scan(&path, &duration)
+	if err != nil {
+		log.Printf("Error fetching song for waveform %s: %v", songID, err)
+		c.JSON(http.StatusNotFound, gin.H{"error": "Song not found"})
+		return
+	}
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		log.Printf("File does not exist for waveform: %s", path)
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	log.Printf("🌊 Generating waveform for user=%s, song=%s, duration=%ds",
+		user.Username, filepath.Base(path), duration)
+
+	// Use FFmpeg to extract audio samples for waveform
+	// Generate 1000 peaks (500 samples = 1000 values for min/max peaks)
+	samplesCount := 500
+
+	cmd := exec.Command("ffmpeg",
+		"-i", path,
+		"-ac", "1", // Mono
+		"-ar", "8000", // Low sample rate for faster processing
+		"-f", "s16le", // 16-bit PCM
+		"-acodec", "pcm_s16le",
+		"pipe:1")
+
+	output, err := cmd.Output()
+	if err != nil {
+		log.Printf("❌ FFmpeg waveform generation failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Waveform generation failed"})
+		return
+	}
+
+	// Convert PCM data to peaks array
+	samples := make([]int16, len(output)/2)
+	for i := 0; i < len(samples); i++ {
+		samples[i] = int16(output[i*2]) | int16(output[i*2+1])<<8
+	}
+
+	// Downsample to desired number of peaks
+	peaks := make([]float32, samplesCount*2) // min/max pairs
+	samplesPerPeak := len(samples) / samplesCount
+
+	if samplesPerPeak == 0 {
+		samplesPerPeak = 1
+	}
+
+	for i := 0; i < samplesCount; i++ {
+		start := i * samplesPerPeak
+		end := start + samplesPerPeak
+		if end > len(samples) {
+			end = len(samples)
+		}
+
+		if start >= len(samples) {
+			break
+		}
+
+		var min, max int16 = 32767, -32768
+		for j := start; j < end; j++ {
+			if samples[j] < min {
+				min = samples[j]
+			}
+			if samples[j] > max {
+				max = samples[j]
+			}
+		}
+
+		// Normalize to -1.0 to 1.0
+		peaks[i*2] = float32(min) / 32768.0   // Min peak
+		peaks[i*2+1] = float32(max) / 32768.0 // Max peak
+	}
+
+	log.Printf("✅ Generated %d waveform peaks", len(peaks))
+
+	c.Header("Content-Type", "application/json")
+	c.Header("Cache-Control", "no-cache, no-store, must-revalidate") // NO CACHING
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+	c.JSON(http.StatusOK, gin.H{
+		"peaks":    peaks,
+		"duration": duration,
+	})
+}
+
 func subsonicScrobble(c *gin.Context) {
 	user := c.MustGet("user").(User)
 

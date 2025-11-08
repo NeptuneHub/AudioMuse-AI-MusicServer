@@ -76,6 +76,9 @@ config/music.db-shm
 config/music.db-wal
 config/music-server
 
+# HLS transcoding cache
+music-server-backend/hls_cache/
+
 # Git repository
 .git/
 .gitignore

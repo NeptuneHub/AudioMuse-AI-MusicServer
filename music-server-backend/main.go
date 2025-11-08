@@ -86,6 +86,7 @@ func main() {
 		log.Printf("Database migration warnings/errors: %v", err)
 	}
 	startScheduler()
+	StartSessionCleanup() // Start HLS session cleanup
 
 	if _, err := db.Exec("UPDATE scan_status SET is_scanning = 0 WHERE id = 1"); err != nil {
 		log.Fatalf("Failed to reset scan status on startup: %v", err)
@@ -107,6 +108,9 @@ func main() {
 		// Core endpoints - register both with and without .view suffix
 		subsonicCompatibilityHandler(subsonic, "GET", "/getLicense", subsonicGetLicense)
 		subsonicCompatibilityHandler(subsonic, "GET", "/stream", subsonicStream)
+		subsonicCompatibilityHandler(subsonic, "GET", "/waveform", subsonicGetWaveform)    // NEW: Fast waveform data
+		subsonicCompatibilityHandler(subsonic, "GET", "/hlsPlaylist", subsonicHLSPlaylist) // NEW: HLS playlist
+		subsonicCompatibilityHandler(subsonic, "GET", "/hlsSegment", subsonicHLSSegment)   // NEW: HLS segments
 		subsonicCompatibilityHandler(subsonic, "GET", "/scrobble", subsonicScrobble)
 
 		// Browsing endpoints

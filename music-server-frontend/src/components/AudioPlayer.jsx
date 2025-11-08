@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE, apiFetch } from '../api';
 import WaveSurfer from 'wavesurfer.js';
 import Hover from 'wavesurfer.js/dist/plugins/hover.esm.js';
+import Hls from 'hls.js';
 import './AudioPlayer.css';
 
 function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevious, hasQueue, onToggleQueueView, queueCount = 0, playMode = 'sequential', onTogglePlayMode }) {
@@ -15,6 +16,7 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
     const [volume, setVolume] = useState(1.0);
     const [isMuted, setIsMuted] = useState(false);
     const audioRef = useRef(null);
+    const hlsRef = useRef(null); // HLS.js instance
     const playPromiseRef = useRef(null);
     const seekingRef = useRef(false);
     const isDraggingRef = useRef(false);
@@ -35,6 +37,13 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
             setDuration(0);
             setCurrentTime(0);
             previousSongIdRef.current = null;
+            
+            // Clean up HLS instance
+            if (hlsRef.current) {
+                hlsRef.current.destroy();
+                hlsRef.current = null;
+            }
+            
             return;
         }
         
@@ -46,6 +55,12 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
             // Reset current time ONLY for new songs
             setCurrentTime(0);
             previousSongIdRef.current = song.id;
+            
+            // Clean up old HLS instance for new song
+            if (hlsRef.current) {
+                hlsRef.current.destroy();
+                hlsRef.current = null;
+            }
         }
         
         // Use song.duration from metadata immediately (duration is in seconds)
@@ -61,7 +76,6 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
 
         setIsLoading(true);
         setError(false);
-        let objectUrl;
 
         const fetchAndSetAudio = async () => {
             try {
@@ -74,53 +88,169 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                     }
                 }
 
-                // Get JWT token from localStorage for direct URL streaming
+                // Get JWT token from localStorage
                 const token = localStorage.getItem('token');
                 if (!token) {
                     throw new Error('No authentication token found');
                 }
 
-                // Build stream URL with JWT in query string (for <audio> element direct streaming)
-                const streamUrl = `${API_BASE}/rest/stream.view?id=${encodeURIComponent(song.id)}&v=1.16.1&c=AudioMuse-AI&jwt=${encodeURIComponent(token)}`;
-                
-                // Fetch X-Content-Duration header from stream (if no duration in metadata)
-                if (!song.duration || song.duration === 0) {
-                    try {
-                        console.log('⏱️ Fetching duration from stream headers...');
-                        const response = await fetch(streamUrl, { 
-                            method: 'GET',
-                            headers: {
-                                'Authorization': `Bearer ${token}`,
-                                'Range': 'bytes=0-0' // Request only 1 byte to get headers quickly
-                            }
-                        });
+                // Check if transcoding is enabled
+                let transcodingSettings = { enabled: false };
+                try {
+                    const settingsResponse = await fetch(`${API_BASE}/api/v1/user/settings/transcoding`, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                    if (settingsResponse.ok) {
+                        transcodingSettings = await settingsResponse.json();
+                    }
+                } catch (e) {
+                    console.warn('Could not fetch transcoding settings:', e);
+                }
+
+                console.log('🎵 Transcoding settings:', transcodingSettings);
+
+                // Use HLS if transcoding is enabled
+                if (transcodingSettings.enabled) {
+                    console.log('📺 Using HLS transcoding for playback');
+                    
+                    // Build HLS playlist URL with JWT authentication
+                    const hlsPlaylistUrl = `${API_BASE}/rest/hlsPlaylist.view?id=${encodeURIComponent(song.id)}&v=1.16.1&c=AudioMuse-AI&jwt=${encodeURIComponent(token)}&format=${transcodingSettings.format || 'mp3'}&maxBitRate=${transcodingSettings.bitrate || 192}`;
+                    
+                    console.log('📺 HLS Playlist URL:', hlsPlaylistUrl);
+                    console.log('📺 Song ID being sent:', song.id);
+                    
+                    // Setup HLS.js
+                    const audio = audioRef.current;
+                    if (!audio) {
+                        throw new Error('Audio element not available');
+                    }
+
+                    // Check for HLS support
+                    if (Hls.isSupported()) {
+                        console.log('📺 HLS.js is supported, initializing...');
                         
-                        const xContentDuration = response.headers.get('X-Content-Duration');
-                        console.log('⏱️ X-Content-Duration header value:', xContentDuration);
-                        
-                        if (xContentDuration) {
-                            const durationSeconds = parseInt(xContentDuration, 10);
-                            if (!isNaN(durationSeconds) && durationSeconds > 0) {
-                                console.log('⏱️ ✅ Got duration from X-Content-Duration header:', durationSeconds, 'seconds');
-                                setDuration(durationSeconds);
-                            }
-                        } else {
-                            console.warn('⏱️ ❌ No X-Content-Duration header in response');
+                        // Destroy old HLS instance if exists
+                        if (hlsRef.current) {
+                            console.log('📺 Destroying previous HLS instance');
+                            hlsRef.current.destroy();
+                            hlsRef.current = null;
                         }
                         
-                        // Abort the response body to avoid downloading the full file
-                        response.body?.cancel();
-                    } catch (e) {
-                        console.warn('⏱️ Could not fetch X-Content-Duration header:', e);
+                        const hls = new Hls({
+                            debug: false,
+                            enableWorker: true,
+                            lowLatencyMode: false,
+                            backBufferLength: 90
+                        });
+
+                        hls.loadSource(hlsPlaylistUrl);
+                        hls.attachMedia(audio);
+
+                        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                            console.log('📺 HLS manifest parsed, ready to play');
+                            setError(false);
+                            setIsLoading(false);
+                            
+                            // Always auto-play when song loads (matches original behavior)
+                            if (audioRef.current) {
+                                console.log('📺 Auto-playing HLS stream');
+                                setTimeout(() => {
+                                    audioRef.current?.play().catch(e => console.error('📺 Auto-play failed:', e));
+                                }, 100);
+                            }
+                        });
+
+                        hls.on(Hls.Events.ERROR, (event, data) => {
+                            console.error('📺 HLS error:', data);
+                            if (data.fatal) {
+                                switch (data.type) {
+                                    case Hls.ErrorTypes.NETWORK_ERROR:
+                                        console.error('📺 Fatal network error, trying to recover');
+                                        hls.startLoad();
+                                        break;
+                                    case Hls.ErrorTypes.MEDIA_ERROR:
+                                        console.error('📺 Fatal media error, trying to recover');
+                                        hls.recoverMediaError();
+                                        break;
+                                    default:
+                                        console.error('📺 Fatal error, cannot recover');
+                                        hls.destroy();
+                                        setError(true);
+                                        break;
+                                }
+                            }
+                        });
+
+                        hlsRef.current = hls;
+                        setAudioSrc(null); // Not needed for HLS.js
+                        
+                    } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
+                        // Native HLS support (Safari/iOS)
+                        console.log('📺 Using native HLS support (Safari/iOS)');
+                        audio.src = hlsPlaylistUrl;
+                        setAudioSrc(hlsPlaylistUrl);
+                        setError(false);
+                        setIsLoading(false);
+                    } else {
+                        console.error('📺 HLS not supported on this browser');
+                        throw new Error('HLS not supported');
                     }
+                    
+                } else {
+                    // Direct streaming (no transcoding)
+                    console.log('🎵 Using direct streaming (no transcoding)');
+                    
+                    // Clean up HLS if it was previously active
+                    if (hlsRef.current) {
+                        console.log('🧹 Cleaning up HLS instance for direct stream');
+                        hlsRef.current.destroy();
+                        hlsRef.current = null;
+                    }
+                    
+                    // Build stream URL with JWT in query string (for <audio> element direct streaming)
+                    const streamUrl = `${API_BASE}/rest/stream.view?id=${encodeURIComponent(song.id)}&v=1.16.1&c=AudioMuse-AI&jwt=${encodeURIComponent(token)}`;
+                    
+                    // Fetch X-Content-Duration header from stream (if no duration in metadata)
+                    if (!song.duration || song.duration === 0) {
+                        try {
+                            console.log('⏱️ Fetching duration from stream headers...');
+                            const response = await fetch(streamUrl, { 
+                                method: 'GET',
+                                headers: {
+                                    'Authorization': `Bearer ${token}`,
+                                    'Range': 'bytes=0-0' // Request only 1 byte to get headers quickly
+                                }
+                            });
+                            
+                            const xContentDuration = response.headers.get('X-Content-Duration');
+                            console.log('⏱️ X-Content-Duration header value:', xContentDuration);
+                            
+                            if (xContentDuration) {
+                                const durationSeconds = parseInt(xContentDuration, 10);
+                                if (!isNaN(durationSeconds) && durationSeconds > 0) {
+                                    console.log('⏱️ ✅ Got duration from X-Content-Duration header:', durationSeconds, 'seconds');
+                                    setDuration(durationSeconds);
+                                }
+                            } else {
+                                console.warn('⏱️ ❌ No X-Content-Duration header in response');
+                            }
+                            
+                            // Abort the response body to avoid downloading the full file
+                            response.body?.cancel();
+                        } catch (e) {
+                            console.warn('⏱️ Could not fetch X-Content-Duration header:', e);
+                        }
+                    }
+                    
+                    console.log('🎵 Setting direct stream URL for immediate playback:', song.title);
+                    
+                    // Set URL directly - browser will handle progressive streaming natively!
+                    setAudioSrc(streamUrl);
+                    setError(false);
+                    setIsLoading(false);
                 }
-                
-                console.log('🎵 Setting direct stream URL for immediate playback:', song.title);
-                
-                // Set URL directly - browser will handle progressive streaming natively!
-                setAudioSrc(streamUrl);
-                setError(false);
-                setIsLoading(false);
                 
             } catch (err) {
                 console.error("Error setting up audio stream:", err);
@@ -134,9 +264,6 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
 
         return () => {
             clearTimeout(timer);
-            if (objectUrl) {
-                URL.revokeObjectURL(objectUrl);
-            }
         };
     }, [song, credentials]);
 
@@ -174,144 +301,258 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
         setupMediaSession();
     }, [song, setupMediaSession]);
     
-    // Initialize WaveSurfer instances and load audio when audioSrc changes
+    // Initialize WaveSurfer instances and load audio when song changes
     useEffect(() => {
         if (!waveformRef.current || !waveformMobileRef.current) {
             return;
         }
 
-        // Destroy existing instances if they exist
-        if (wavesurferRef.current) {
-            wavesurferRef.current.destroy();
-            wavesurferRef.current = null;
-        }
-        if (wavesurferMobileRef.current) {
-            wavesurferMobileRef.current.destroy();
-            wavesurferMobileRef.current = null;
-        }
-
-        if (!audioSrc) {
+        // Only load waveform if we have a song
+        if (!song || !song.id) {
             return;
         }
 
-        console.log('🌊 Creating WaveSurfer and loading:', audioSrc);
+        console.log('🌊 Loading waveform for song:', song.id);
+        
+        // Capture current duration at effect start to avoid re-renders from duration updates
+        const initialDuration = song.duration || duration;
 
-        // Create desktop waveform with hover plugin
-        const wavesurfer = WaveSurfer.create({
-            container: waveformRef.current,
-            waveColor: '#4B5563',
-            progressColor: '#14b8a6',
-            cursorColor: '#14b8a6',
-            height: 48,
-            normalize: true,
-            interact: true,
-            hideScrollbar: true,
-            fillParent: true,
-            url: audioSrc,
-            plugins: [
-                Hover.create({
-                    lineColor: '#14b8a6',
-                    lineWidth: 2,
-                    labelBackground: '#14b8a6',
-                    labelColor: '#fff',
-                    labelSize: '11px'
-                })
-            ]
-        });
+        let cleanupFn = null; // Store cleanup function
 
-        // Create mobile waveform
-        const wavesurferMobile = WaveSurfer.create({
-            container: waveformMobileRef.current,
-            waveColor: '#4B5563',
-            progressColor: '#14b8a6',
-            cursorColor: '#14b8a6',
-            height: 32,
-            normalize: true,
-            interact: true,
-            hideScrollbar: true,
-            fillParent: true,
-            url: audioSrc
-        });
+        // Fetch pre-computed waveform peaks for instant rendering
+        const loadWaveform = async () => {
+            try {
+                const token = localStorage.getItem('token');
+                const waveformUrl = `${API_BASE}/rest/waveform.view?id=${encodeURIComponent(song.id)}&v=1.16.1&c=AudioMuse-AI&jwt=${encodeURIComponent(token)}&_t=${Date.now()}`; // Add timestamp to prevent caching
+                
+                console.log('🌊 Fetching pre-computed waveform peaks for song:', song.id);
+                const response = await fetch(waveformUrl, {
+                    cache: 'no-store' // Disable browser caching
+                });
+                const data = await response.json();
+                
+                if (data.peaks) {
+                    console.log(`✅ Received ${data.peaks.length} waveform peaks for duration ${data.duration}s`);
+                    
+                    // Destroy any existing instances before creating new ones
+                    if (wavesurferRef.current) {
+                        wavesurferRef.current.destroy();
+                        wavesurferRef.current = null;
+                    }
+                    if (wavesurferMobileRef.current) {
+                        wavesurferMobileRef.current.destroy();
+                        wavesurferMobileRef.current = null;
+                    }
+                    
+                    // Create desktop waveform with pre-computed peaks
+                    const wavesurfer = WaveSurfer.create({
+                        container: waveformRef.current,
+                        waveColor: '#4B5563',
+                        progressColor: '#14b8a6',
+                        cursorColor: '#14b8a6',
+                        height: 48,
+                        normalize: true,
+                        interact: true,
+                        hideScrollbar: true,
+                        fillParent: true,
+                        peaks: [data.peaks], // Use pre-computed peaks
+                        duration: data.duration || initialDuration, // Use captured duration
+                        plugins: [
+                            Hover.create({
+                                lineColor: '#14b8a6',
+                                lineWidth: 2,
+                                labelBackground: '#14b8a6',
+                                labelColor: '#fff',
+                                labelSize: '11px'
+                            })
+                        ]
+                    });
 
-        wavesurferRef.current = wavesurfer;
-        wavesurferMobileRef.current = wavesurferMobile;
+                    // Create mobile waveform with pre-computed peaks
+                    const wavesurferMobile = WaveSurfer.create({
+                        container: waveformMobileRef.current,
+                        waveColor: '#4B5563',
+                        progressColor: '#14b8a6',
+                        cursorColor: '#14b8a6',
+                        height: 32,
+                        normalize: true,
+                        interact: true,
+                        hideScrollbar: true,
+                        fillParent: true,
+                        peaks: [data.peaks], // Use pre-computed peaks
+                        duration: data.duration || initialDuration // Use captured duration
+                    });
 
-        // Handle seeking via waveform click with debouncing
-        // Note: 'interaction' event returns time in seconds, NOT progress (0-1)
-        wavesurfer.on('interaction', (timeInSeconds) => {
-            console.log('🌊 Waveform click - time:', timeInSeconds);
-            
-            // Prevent visual update during debounce
-            isSeekingViaWaveformRef.current = true;
-            
-            // Clear any pending seek
-            if (seekDebounceRef.current) {
-                clearTimeout(seekDebounceRef.current);
-            }
-            
-            // Debounce the seek - wait 500ms before actually seeking
-            seekDebounceRef.current = setTimeout(() => {
-                if (audioRef.current) {
-                    console.log('🌊 Seeking audio to:', timeInSeconds);
-                    audioRef.current.currentTime = timeInSeconds;
-                    isSeekingViaWaveformRef.current = false;
+                    wavesurferRef.current = wavesurfer;
+                    wavesurferMobileRef.current = wavesurferMobile;
+
+                    cleanupFn = setupWaveformInteraction(wavesurfer, wavesurferMobile);
+                } else {
+                    // Fallback to loading from audio URL
+                    console.warn('⚠️ No peaks data, falling back to audio URL');
+                    cleanupFn = createWaveformFromAudio();
                 }
-            }, 500);
-        });
-
-        wavesurferMobile.on('interaction', (timeInSeconds) => {
-            console.log('🌊 Mobile waveform click - time:', timeInSeconds);
-            
-            // Prevent visual update during debounce
-            isSeekingViaWaveformRef.current = true;
-            
-            // Clear any pending seek
-            if (seekDebounceRef.current) {
-                clearTimeout(seekDebounceRef.current);
-            }
-            
-            // Debounce the seek - wait 500ms before actually seeking
-            seekDebounceRef.current = setTimeout(() => {
-                if (audioRef.current) {
-                    console.log('🌊 Mobile seeking audio to:', timeInSeconds);
-                    audioRef.current.currentTime = timeInSeconds;
-                    isSeekingViaWaveformRef.current = false;
-                }
-            }, 500);
-        });
-
-        // Sync waveform progress with our audio element
-        const syncHandler = () => {
-            // Don't sync if we're waiting for a debounced seek
-            if (isSeekingViaWaveformRef.current) {
-                return;
-            }
-            
-            if (audioRef.current && audioRef.current.duration > 0 && isFinite(audioRef.current.duration)) {
-                const progress = audioRef.current.currentTime / audioRef.current.duration;
-                if (isFinite(progress) && progress >= 0 && progress <= 1) {
-                    wavesurfer?.seekTo(progress);
-                    wavesurferMobile?.seekTo(progress);
-                }
+            } catch (error) {
+                console.error('❌ Failed to load waveform peaks:', error);
+                // Fallback to loading from audio URL
+                cleanupFn = createWaveformFromAudio();
             }
         };
 
-        // Attach to audio element events
-        const audio = audioRef.current;
-        if (audio) {
-            audio.addEventListener('timeupdate', syncHandler);
-            audio.addEventListener('seeking', syncHandler);
-        }
+        // Fallback: Create waveform from audio URL (slow)
+        const createWaveformFromAudio = () => {
+            console.log('🌊 Creating waveform from audio URL (slow method)');
+            
+            // Destroy any existing instances before creating new ones
+            if (wavesurferRef.current) {
+                wavesurferRef.current.destroy();
+                wavesurferRef.current = null;
+            }
+            if (wavesurferMobileRef.current) {
+                wavesurferMobileRef.current.destroy();
+                wavesurferMobileRef.current = null;
+            }
+            
+            const wavesurfer = WaveSurfer.create({
+                container: waveformRef.current,
+                waveColor: '#4B5563',
+                progressColor: '#14b8a6',
+                cursorColor: '#14b8a6',
+                height: 48,
+                normalize: true,
+                interact: true,
+                hideScrollbar: true,
+                fillParent: true,
+                url: audioSrc,
+                plugins: [
+                    Hover.create({
+                        lineColor: '#14b8a6',
+                        lineWidth: 2,
+                        labelBackground: '#14b8a6',
+                        labelColor: '#fff',
+                        labelSize: '11px'
+                    })
+                ]
+            });
 
-        return () => {
+            const wavesurferMobile = WaveSurfer.create({
+                container: waveformMobileRef.current,
+                waveColor: '#4B5563',
+                progressColor: '#14b8a6',
+                cursorColor: '#14b8a6',
+                height: 32,
+                normalize: true,
+                interact: true,
+                hideScrollbar: true,
+                fillParent: true,
+                url: audioSrc
+            });
+
+            wavesurferRef.current = wavesurfer;
+            wavesurferMobileRef.current = wavesurferMobile;
+
+            return setupWaveformInteraction(wavesurfer, wavesurferMobile);
+        };
+
+        // Setup interaction handlers (extracted to avoid duplication)
+        const setupWaveformInteraction = (wavesurfer, wavesurferMobile) => {
+            // Handle seeking via waveform click with debouncing
+            wavesurfer.on('interaction', (timeInSeconds) => {
+                console.log('🌊 Waveform click - time:', timeInSeconds);
+                
+                // Prevent visual update during debounce
+                isSeekingViaWaveformRef.current = true;
+                
+                // Clear any pending seek
+                if (seekDebounceRef.current) {
+                    clearTimeout(seekDebounceRef.current);
+                }
+                
+                // Debounce the seek - wait 500ms before actually seeking
+                seekDebounceRef.current = setTimeout(() => {
+                    if (audioRef.current) {
+                        console.log('🌊 Seeking audio to:', timeInSeconds);
+                        audioRef.current.currentTime = timeInSeconds;
+                        isSeekingViaWaveformRef.current = false;
+                    }
+                }, 500);
+            });
+
+            wavesurferMobile.on('interaction', (timeInSeconds) => {
+                console.log('🌊 Mobile waveform click - time:', timeInSeconds);
+                
+                // Prevent visual update during debounce
+                isSeekingViaWaveformRef.current = true;
+                
+                // Clear any pending seek
+                if (seekDebounceRef.current) {
+                    clearTimeout(seekDebounceRef.current);
+                }
+                
+                // Debounce the seek - wait 500ms before actually seeking
+                seekDebounceRef.current = setTimeout(() => {
+                    if (audioRef.current) {
+                        console.log('🌊 Mobile seeking audio to:', timeInSeconds);
+                        audioRef.current.currentTime = timeInSeconds;
+                        isSeekingViaWaveformRef.current = false;
+                    }
+                }, 500);
+            });
+
+            // Sync waveform progress with our audio element
+            const syncHandler = () => {
+                // Don't sync if we're waiting for a debounced seek
+                if (isSeekingViaWaveformRef.current) {
+                    return;
+                }
+                
+                if (audioRef.current && audioRef.current.duration > 0 && isFinite(audioRef.current.duration)) {
+                    const progress = audioRef.current.currentTime / audioRef.current.duration;
+                    if (isFinite(progress) && progress >= 0 && progress <= 1) {
+                        wavesurfer?.seekTo(progress);
+                        wavesurferMobile?.seekTo(progress);
+                    }
+                }
+            };
+
+            // Attach to audio element events
+            const audio = audioRef.current;
             if (audio) {
-                audio.removeEventListener('timeupdate', syncHandler);
-                audio.removeEventListener('seeking', syncHandler);
+                audio.addEventListener('timeupdate', syncHandler);
+                audio.addEventListener('seeking', syncHandler);
             }
-            wavesurfer.destroy();
-            wavesurferMobile.destroy();
+
+            return () => {
+                if (audio) {
+                    audio.removeEventListener('timeupdate', syncHandler);
+                    audio.removeEventListener('seeking', syncHandler);
+                }
+                wavesurfer.destroy();
+                wavesurferMobile.destroy();
+            };
         };
-    }, [audioSrc]);
+
+        // Start loading waveform
+        loadWaveform();
+
+        // Return cleanup function
+        return () => {
+            console.log('🧹 Cleaning up WaveSurfer instances');
+            if (cleanupFn) {
+                cleanupFn();
+            }
+            if (wavesurferRef.current) {
+                wavesurferRef.current.destroy();
+                wavesurferRef.current = null;
+            }
+            if (wavesurferMobileRef.current) {
+                wavesurferMobileRef.current.destroy();
+                wavesurferMobileRef.current = null;
+            }
+        };
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [song?.id]); // Only reload waveform when song changes, not when duration updates
 
 
     
@@ -478,6 +719,12 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                     setDuration(e.target.duration);
                                 } else {
                                     console.log('⏱️ Metadata duration invalid, keeping existing:', duration);
+                                }
+                                
+                                // Auto-play when metadata loads (matches original behavior)
+                                if (audioRef.current && audioSrc) {
+                                    console.log('🎵 Auto-playing direct stream');
+                                    audioRef.current.play().catch(e => console.error('🎵 Auto-play failed:', e));
                                 }
                             }}
                             style={{ display: 'none' }}

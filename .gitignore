@@ -92,6 +92,10 @@ config/music.db
 config/music.db-shm
 config/music.db-wal
 music-server-backend/music-server
+
+# HLS transcoding cache
+music-server-backend/hls_cache/
+
 #go
 go.sum
 go.mod
