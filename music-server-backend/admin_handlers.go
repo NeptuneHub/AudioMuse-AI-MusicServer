@@ -374,32 +374,72 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
 
 				var songID string
+				var shouldComputeWaveform bool
 				if err == sql.ErrNoRows {
-					// New song - generate UUID
+					// New song - generate UUID and compute waveform
 					songID = GenerateBase62UUID()
+					shouldComputeWaveform = true
 				} else if err != nil {
 					log.Printf("Error checking for existing song: %v", err)
 					return nil
 				} else {
-					// Existing song - reuse UUID
+					// Existing song (rescan) - reuse UUID, DON'T recompute waveform
 					songID = existingID
+					shouldComputeWaveform = false
+				}
+
+				// Pre-compute waveform ONLY for new songs
+				var waveformPeaks string
+				if shouldComputeWaveform {
+					waveformData, err := generateWaveformPeaks(path)
+					if err != nil {
+						log.Printf("⚠️  Failed to generate waveform for %s: %v", filepath.Base(path), err)
+						// Continue without waveform, not a fatal error
+					} else {
+						waveformPeaks = waveformData
+						if songsAdded < 3 {
+							log.Printf("🌊 Pre-computed waveform for NEW song #%d", songsAdded+1)
+						}
+					}
 				}
 
 				// Use UPSERT to update existing songs or insert new ones
 				albumPath := filepath.Dir(path) // Store directory path for grouping
-				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, cancelled) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-					ON CONFLICT(path) DO UPDATE SET 
-						title=excluded.title, 
-						artist=excluded.artist, 
-						album=excluded.album,
-						album_path=excluded.album_path, 
-						genre=excluded.genre,
-						duration=excluded.duration,
-						date_added=COALESCE(songs.date_added, excluded.date_added),
-						date_updated=excluded.date_updated,
-						cancelled=0`,
-					songID, title, artist, album, path, albumPath, genre, duration, currentTime, currentTime)
+
+				var res sql.Result
+				if shouldComputeWaveform && waveformPeaks != "" {
+					// NEW song: Insert with waveform
+					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, waveform_peaks, cancelled) 
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+						ON CONFLICT(path) DO UPDATE SET 
+							title=excluded.title, 
+							artist=excluded.artist, 
+							album=excluded.album,
+							album_path=excluded.album_path, 
+							genre=excluded.genre,
+							duration=excluded.duration,
+							date_added=COALESCE(songs.date_added, excluded.date_added),
+							date_updated=excluded.date_updated,
+							waveform_peaks=excluded.waveform_peaks,
+							cancelled=0`,
+						songID, title, artist, album, path, albumPath, genre, duration, currentTime, currentTime, waveformPeaks)
+				} else {
+					// EXISTING song (rescan) or new song without waveform: Preserve existing waveform
+					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+						ON CONFLICT(path) DO UPDATE SET 
+							title=excluded.title, 
+							artist=excluded.artist, 
+							album=excluded.album,
+							album_path=excluded.album_path, 
+							genre=excluded.genre,
+							duration=excluded.duration,
+							date_added=COALESCE(songs.date_added, excluded.date_added),
+							date_updated=excluded.date_updated,
+							cancelled=0`,
+						songID, title, artist, album, path, albumPath, genre, duration, currentTime, currentTime)
+				}
+
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -510,32 +550,72 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 				err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
 
 				var songID string
+				var shouldComputeWaveform bool
 				if err == sql.ErrNoRows {
-					// New song - generate UUID
+					// New song - generate UUID and compute waveform
 					songID = GenerateBase62UUID()
+					shouldComputeWaveform = true
 				} else if err != nil {
 					log.Printf("Error checking for existing song: %v", err)
 					return nil
 				} else {
-					// Existing song - reuse UUID
+					// Existing song (rescan) - reuse UUID, DON'T recompute waveform
 					songID = existingID
+					shouldComputeWaveform = false
+				}
+
+				// Pre-compute waveform ONLY for new songs
+				var waveformPeaks string
+				if shouldComputeWaveform {
+					waveformData, err := generateWaveformPeaks(path)
+					if err != nil {
+						log.Printf("⚠️  Failed to generate waveform for %s: %v", filepath.Base(path), err)
+						// Continue without waveform, not a fatal error
+					} else {
+						waveformPeaks = waveformData
+						if *totalSongsAdded < 3 {
+							log.Printf("🌊 Pre-computed waveform for NEW song #%d", *totalSongsAdded+1)
+						}
+					}
 				}
 
 				// Use UPSERT to update existing songs or insert new ones
 				albumPath := filepath.Dir(path) // Store directory path for grouping
-				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, cancelled) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-					ON CONFLICT(path) DO UPDATE SET 
-						title=excluded.title, 
-						artist=excluded.artist, 
-						album=excluded.album,
-						album_path=excluded.album_path, 
-						genre=excluded.genre,
-						duration=excluded.duration,
-						date_added=COALESCE(songs.date_added, excluded.date_added),
-						date_updated=excluded.date_updated,
-						cancelled=0`,
-					songID, title, artist, album, path, albumPath, genre, duration, currentTime, currentTime)
+
+				var res sql.Result
+				if shouldComputeWaveform && waveformPeaks != "" {
+					// NEW song: Insert with waveform
+					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, waveform_peaks, cancelled) 
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+						ON CONFLICT(path) DO UPDATE SET 
+							title=excluded.title, 
+							artist=excluded.artist, 
+							album=excluded.album,
+							album_path=excluded.album_path, 
+							genre=excluded.genre,
+							duration=excluded.duration,
+							date_added=COALESCE(songs.date_added, excluded.date_added),
+							date_updated=excluded.date_updated,
+							waveform_peaks=excluded.waveform_peaks,
+							cancelled=0`,
+						songID, title, artist, album, path, albumPath, genre, duration, currentTime, currentTime, waveformPeaks)
+				} else {
+					// EXISTING song (rescan) or new song without waveform: Preserve existing waveform
+					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+						ON CONFLICT(path) DO UPDATE SET 
+							title=excluded.title, 
+							artist=excluded.artist, 
+							album=excluded.album,
+							album_path=excluded.album_path, 
+							genre=excluded.genre,
+							duration=excluded.duration,
+							date_added=COALESCE(songs.date_added, excluded.date_added),
+							date_updated=excluded.date_updated,
+							cancelled=0`,
+						songID, title, artist, album, path, albumPath, genre, duration, currentTime, currentTime)
+				}
+
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil

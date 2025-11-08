@@ -178,6 +178,11 @@ func migrateDB() error {
 		log.Printf("migrateDB: failed to create radio_stations index: %v", err)
 	}
 
+	// Add waveform_peaks column for pre-computed waveforms
+	if err := ensureColumnExists(db, "songs", "waveform_peaks", "TEXT"); err != nil {
+		log.Printf("migrateDB: ensureColumnExists waveform_peaks: %v", err)
+	}
+
 	log.Println("migrateDB: completed migrations (idempotent)")
 	return nil
 }
