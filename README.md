@@ -5,14 +5,14 @@
 </p>
 
 
-Prototype music server built on the Open Subsonic API, designed to showcase AudioMuse-AI's advanced sonic analysis capabilities.
+Music Server built on the Open Subsonic API, designed to showcase AudioMuse-AI's advanced sonic analysis capabilities.
 
 
 **The full list or AudioMuse-AI related repository are:** 
   > * [AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI): the core application, it run Flask and Worker containers to actually run all the feature;
   > * [AudioMuse-AI Helm Chart](https://github.com/NeptuneHub/AudioMuse-AI-helm): helm chart for easy installation on Kubernetes;
   > * [AudioMuse-AI Plugin for Jellyfin](https://github.com/NeptuneHub/audiomuse-ai-plugin): Jellyfin Plugin;
-  > * [AudioMuse-AI MusicServer](https://github.com/NeptuneHub/AudioMuse-AI-MusicServer): **Experimental** Open Subosnic like Music Sever with integrated sonic functionality.
+  > * [AudioMuse-AI MusicServer](https://github.com/NeptuneHub/AudioMuse-AI-MusicServer): Open Subosnic like Music Sever with integrated sonic functionality.
 
 ## Container Deployment
 
@@ -49,7 +49,7 @@ After both of this point done, you can start the Sonic Analysis diectly from the
 * Music Map
 * Song Alchemy
 
-**IMPORTANT:** This is a Open Subsonic API compliant server (or it should be), so you need to configure AudioMuse-AI with the **navidrome** deployment, setting url, user and password correctly.
+**IMPORTANT:** This is a Open Subsonic API compliant server, so you need to configure AudioMuse-AI with the **navidrome** deployment, setting url, user and password correctly.
 
 # Developer
 This is instruction to run both backend and frontned on your developing envirorment
