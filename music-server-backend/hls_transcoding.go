@@ -168,6 +168,24 @@ func getOrCreateSession(songID, format, bitrate, filePath string, duration int) 
 	hlsSessionManager.sessions.Store(sessionID, session)
 	log.Printf("📺 Created new HLS session: %s (format=%s, bitrate=%s)", sessionID, format, bitrate)
 
+	// HYBRID APPROACH: Instant playback + gapless quality
+	// 1. Pre-encode first 3 segments immediately (instant start, ~2-3 seconds)
+	// 2. Pre-encode remaining segments in background (gapless playback)
+	log.Printf("🚀 Quick-encoding first 3 segments for instant playback...")
+	if err := preEncodeFirstSegments(session, 3); err != nil {
+		log.Printf("⚠️  Failed to quick-encode first segments: %v", err)
+	}
+
+	// Start background encoding for remaining segments (non-blocking)
+	go func() {
+		log.Printf("🎬 Background pre-encoding remaining segments for session %s", session.SessionID)
+		if err := preEncodeHLSSegments(session); err != nil {
+			log.Printf("⚠️  Background pre-encoding failed: %v (on-demand fallback active)", err)
+		} else {
+			log.Printf("✅ Background pre-encoding complete for session %s", session.SessionID)
+		}
+	}()
+
 	return session, nil
 }
 
@@ -215,6 +233,35 @@ func generateHLSPlaylist(c *gin.Context, session *TranscodingSession) {
 	c.String(200, playlist)
 }
 
+// preEncodeFirstSegments quickly encodes first N segments for instant playback
+// Uses on-demand encoding for speed, background process will replace with gapless versions
+func preEncodeFirstSegments(session *TranscodingSession, count int) error {
+	totalSegments := (session.Duration + HLS_SEGMENT_DURATION - 1) / HLS_SEGMENT_DURATION
+	if count > totalSegments {
+		count = totalSegments
+	}
+
+	log.Printf("⚡ Quick-encoding first %d segments for instant playback", count)
+
+	for i := 0; i < count; i++ {
+		startTime := i * HLS_SEGMENT_DURATION
+		segmentPath := filepath.Join(session.SegmentDir, fmt.Sprintf("segment_%d.ts", i))
+
+		// Check if already exists (from previous session or background encoding)
+		if _, err := os.Stat(segmentPath); err == nil {
+			log.Printf("✅ Segment %d already exists, skipping", i)
+			continue
+		}
+
+		if err := generateSegment(session, i, segmentPath, startTime); err != nil {
+			return fmt.Errorf("failed to encode segment %d: %v", i, err)
+		}
+		log.Printf("✅ Quick-encoded segment %d/%d", i+1, count)
+	}
+
+	return nil
+}
+
 // generateHLSSegment generates a specific HLS segment on-demand
 func generateHLSSegment(c *gin.Context, session *TranscodingSession, segmentNum int) {
 	session.mu.Lock()
@@ -229,7 +276,8 @@ func generateHLSSegment(c *gin.Context, session *TranscodingSession, segmentNum 
 
 	// Check if segment already exists
 	if _, err := os.Stat(segmentPath); err == nil {
-		// Segment exists, serve it
+		// Segment exists, serve it immediately
+		log.Printf("✅ Serving cached HLS segment %d for session %s", segmentNum, session.SessionID)
 		c.File(segmentPath)
 		return
 	}
@@ -237,18 +285,94 @@ func generateHLSSegment(c *gin.Context, session *TranscodingSession, segmentNum 
 	// Generate segment using FFmpeg
 	log.Printf("🎬 Generating HLS segment %d for session %s (start=%ds)", segmentNum, session.SessionID, startTime)
 
-	var ffmpegArgs []string
-
-	// Seek to segment start (BEFORE input for fast seeking)
-	if startTime > 0 {
-		ffmpegArgs = append(ffmpegArgs, "-ss", strconv.Itoa(startTime))
+	// Generate this segment ON-DEMAND (backend has 10 seconds to generate each segment)
+	if err := generateSegment(session, segmentNum, segmentPath, startTime); err != nil {
+		log.Printf("❌ Segment generation failed: %v", err)
+		c.String(500, "Segment generation failed")
+		return
 	}
+
+	// Serve the generated segment
+	c.File(segmentPath)
+}
+
+// preEncodeHLSSegments pre-encodes ALL segments using FFmpeg's HLS muxer
+// This ensures seamless playback with no gaps by maintaining continuous encoder state
+func preEncodeHLSSegments(session *TranscodingSession) error {
+	// Check if already fully encoded
+	playlistPath := filepath.Join(session.SegmentDir, "playlist.m3u8")
+	if _, err := os.Stat(playlistPath); err == nil {
+		log.Printf("✅ Session %s already pre-encoded, skipping", session.SessionID)
+		return nil
+	}
+
+	log.Printf("🎬 Pre-encoding HLS segments for session %s", session.SessionID)
+
+	// Convert bitrate string to int
+	bitrateInt, err := strconv.Atoi(session.Bitrate)
+	if err != nil {
+		log.Printf("⚠️  Invalid bitrate: %s, using default 192", session.Bitrate)
+		bitrateInt = 192
+	}
+
+	// Build FFmpeg command for HLS muxer (BEST PRACTICE for gapless audio)
+	var ffmpegArgs []string
 
 	// Input file
 	ffmpegArgs = append(ffmpegArgs, "-i", session.FilePath)
 
-	// Duration of this segment
-	ffmpegArgs = append(ffmpegArgs, "-t", strconv.Itoa(HLS_SEGMENT_DURATION))
+	// Get base transcoding profile (audio codec settings)
+	profileArgs := getTranscodingProfile(session.Format, bitrateInt)
+	ffmpegArgs = append(ffmpegArgs, profileArgs...)
+
+	// CRITICAL: HLS-specific settings for gapless audio playback
+	ffmpegArgs = append(ffmpegArgs,
+		// Timestamp handling - CRITICAL for seamless transitions
+		"-copyts",                         // Copy timestamps from input
+		"-start_at_zero",                  // Start timestamps at zero
+		"-avoid_negative_ts", "make_zero", // Handle AAC encoder priming delay
+		"-async", "1", // Audio sync correction
+
+		// HLS muxer settings
+		"-f", "hls", // HLS output format
+		"-hls_time", fmt.Sprintf("%d", HLS_SEGMENT_DURATION), // Segment duration
+		"-hls_list_size", "0", // Keep all segments in playlist
+		"-hls_segment_type", "mpegts", // Use MPEG-TS for audio
+		"-hls_flags", "split_by_time+independent_segments", // Accurate splitting + independent segments
+		"-hls_segment_filename", filepath.Join(session.SegmentDir, "segment_%d.ts"), // Segment naming
+
+		// Output playlist path
+		filepath.Join(session.SegmentDir, "playlist.m3u8"),
+	)
+
+	// Run FFmpeg in background
+	cmd := exec.Command("ffmpeg", ffmpegArgs...)
+
+	// Capture output for debugging
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("FFmpeg HLS muxer failed: %v\nOutput: %s", err, string(output))
+	}
+
+	log.Printf("✅ Pre-encoded HLS segments for session %s", session.SessionID)
+	return nil
+}
+
+// generateSegment generates a single HLS segment on-demand (FALLBACK ONLY)
+// NOTE: This approach can cause audio gaps - pre-encoding is preferred
+func generateSegment(session *TranscodingSession, segmentNum int, segmentPath string, startTime int) error {
+	var ffmpegArgs []string
+
+	// Input file
+	ffmpegArgs = append(ffmpegArgs, "-i", session.FilePath)
+
+	// Seek to segment start (AFTER input to avoid cutting frames)
+	if startTime > 0 {
+		ffmpegArgs = append(ffmpegArgs, "-ss", fmt.Sprintf("%d", startTime))
+	}
+
+	// Segment duration (exact, no overlap - overlap causes artifacts!)
+	ffmpegArgs = append(ffmpegArgs, "-t", fmt.Sprintf("%d", HLS_SEGMENT_DURATION))
 
 	// Convert bitrate string to int for getTranscodingProfile
 	bitrateInt, err := strconv.Atoi(session.Bitrate)
@@ -261,6 +385,12 @@ func generateHLSSegment(c *gin.Context, session *TranscodingSession, segmentNum 
 	profileArgs := getTranscodingProfile(session.Format, bitrateInt)
 	ffmpegArgs = append(ffmpegArgs, profileArgs...)
 
+	// CRITICAL: Add timestamp handling to minimize gaps
+	ffmpegArgs = append(ffmpegArgs,
+		"-avoid_negative_ts", "make_zero", // Handle AAC encoder delay
+		"-async", "1", // Audio sync correction
+	)
+
 	// Output format: MPEG-TS for HLS
 	ffmpegArgs = append(ffmpegArgs,
 		"-f", "mpegts",
@@ -272,13 +402,10 @@ func generateHLSSegment(c *gin.Context, session *TranscodingSession, segmentNum 
 	// Run FFmpeg
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("❌ FFmpeg segment generation failed: %v\nOutput: %s", err, string(output))
-		c.String(500, "Segment generation failed")
-		return
+		return fmt.Errorf("FFmpeg failed: %v\nOutput: %s", err, string(output))
 	}
 
-	// Serve the generated segment
-	c.File(segmentPath)
+	return nil
 }
 
 // Subsonic HLS playlist handler

@@ -139,28 +139,34 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                         }
                         
                         const hls = new Hls({
-                            debug: false,
-                            enableWorker: true,
-                            lowLatencyMode: false,
-                            backBufferLength: 90,
-                            // Aggressive buffering to prevent gaps between segments
-                            maxBufferLength: 30,        // Buffer up to 30 seconds ahead
-                            maxMaxBufferLength: 60,     // Maximum buffer in seconds
-                            maxBufferSize: 60 * 1000 * 1000, // 60MB buffer
-                            maxBufferHole: 0.5,         // Jump over small gaps
-                            // Start buffering next segment earlier
-                            nudgeOffset: 0.1,           // Start fetching 0.1s before needed
-                            nudgeMaxRetry: 3,           // Retry nudging
-                            // Faster segment loading
+                            // OPTIMIZED: Fast startup + seamless audio playback
+                            maxBufferLength: 20,            // Buffer up to 20s (2 segments) - faster start
+                            maxBufferSize: 40 * 1000 * 1000, // 40MB buffer - reduced for faster start
+                            maxBufferHole: 0.1,             // Jump gaps > 100ms (minimizes discontinuity tolerance)
+                            nudgeMaxRetry: 10,              // Retry nudging for seamless playback
+                            
+                            // INSTANT START: Minimal initial buffering
+                            maxMaxBufferLength: 60,         // Max buffer ceiling
+                            backBufferLength: 10,           // Keep 10s back buffer for seeking
+                            
+                            // Buffer management for gapless playback
+                            lowBufferWatchdogPeriod: 0.5,   // Check buffer every 0.5s
+                            highBufferWatchdogPeriod: 1,    // Check buffer every 1s
+                            
+                            // Start loading immediately
+                            autoStartLoad: true,
+                            startLevel: -1,                 // Auto quality selection
+                            
+                            // Network settings - fast retry
                             manifestLoadingTimeOut: 10000,
-                            manifestLoadingMaxRetry: 4,
-                            manifestLoadingRetryDelay: 1000,
                             levelLoadingTimeOut: 10000,
-                            levelLoadingMaxRetry: 4,
-                            levelLoadingRetryDelay: 1000,
                             fragLoadingTimeOut: 20000,
-                            fragLoadingMaxRetry: 6,
-                            fragLoadingRetryDelay: 1000
+                            fragLoadingMaxRetry: 3,
+                            fragLoadingRetryDelay: 500,
+                            
+                            // CRITICAL: Enable smooth audio transitions between segments
+                            enableWorker: true,             // Use web worker for better performance
+                            forceKeyFrameOnDiscontinuity: false, // Don't force keyframes (audio only)
                         });
 
                         hls.loadSource(hlsPlaylistUrl);
@@ -177,30 +183,6 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                 setTimeout(() => {
                                     audioRef.current?.play().catch(e => console.error('📺 Auto-play failed:', e));
                                 }, 100);
-                            }
-                        });
-
-                        // Monitor buffer levels to detect stalls
-                        hls.on(Hls.Events.FRAG_BUFFERED, (event, data) => {
-                            const buffered = audioRef.current?.buffered;
-                            if (buffered && buffered.length > 0) {
-                                const bufferEnd = buffered.end(buffered.length - 1);
-                                const currentTime = audioRef.current?.currentTime || 0;
-                                const bufferAhead = bufferEnd - currentTime;
-                                if (bufferAhead < 5) {
-                                    console.log(`📺 Buffer low: ${bufferAhead.toFixed(2)}s ahead (loading segment ${data.frag.sn})`);
-                                }
-                            }
-                        });
-
-                        // Log when starting to load fragments
-                        hls.on(Hls.Events.FRAG_LOADING, (event, data) => {
-                            const buffered = audioRef.current?.buffered;
-                            if (buffered && buffered.length > 0) {
-                                const bufferEnd = buffered.end(buffered.length - 1);
-                                const currentTime = audioRef.current?.currentTime || 0;
-                                const bufferAhead = bufferEnd - currentTime;
-                                console.log(`📺 Loading segment ${data.frag.sn} (buffer: ${bufferAhead.toFixed(2)}s ahead)`);
                             }
                         });
 
