@@ -21,6 +21,7 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
     const seekingRef = useRef(false);
     const isDraggingRef = useRef(false);
     const previousSongIdRef = useRef(null);
+    const isMapSongRef = useRef(false); // Persist map song flag across effects
     const waveformRef = useRef(null);
     const waveformMobileRef = useRef(null);
     const wavesurferRef = useRef(null);
@@ -52,6 +53,16 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
         
         if (isNewSong) {
             console.log('🎵 NEW SONG:', song.title, '(id:', song.id, ')');
+            
+            // CRITICAL: Capture map flag into ref BEFORE any async operations
+            if (window._mapAddedSong) {
+                console.log('🗺️ Map song detected at song change - setting up without auto-play');
+                isMapSongRef.current = true; // Store in ref for persistence
+                window._mapAddedSong = false; // Clear global flag
+            } else {
+                isMapSongRef.current = false; // Normal song, should auto-play
+            }
+            
             // Reset current time ONLY for new songs
             setCurrentTime(0);
             previousSongIdRef.current = song.id;
@@ -174,10 +185,18 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
 
                         hls.on(Hls.Events.MANIFEST_PARSED, () => {
                             console.log('📺 HLS manifest parsed, ready to play');
+                            console.log('📺 Checking isMapSong flag:', isMapSongRef.current);
                             setError(false);
                             setIsLoading(false);
                             
-                            // Always auto-play when song loads (matches original behavior)
+                            // Check if this song was added from Map - if so, don't auto-play
+                            if (isMapSongRef.current) {
+                                console.log('📺 Map song detected - skipping HLS auto-play');
+                                isMapSongRef.current = false; // Reset for next song
+                                return;
+                            }
+                            
+                            // Auto-play when song loads
                             if (audioRef.current) {
                                 console.log('📺 Auto-playing HLS stream');
                                 setTimeout(() => {
@@ -593,9 +612,10 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
             }
 
             // Check if this song was added from Map - if so, don't auto-play
-            if (window._mapAddedSong) {
-                console.log('Map song detected - skipping auto-play');
-                window._mapAddedSong = false;
+            if (isMapSongRef.current) {
+                console.log('Map song detected in audioSrc effect - skipping auto-play');
+                console.log('audioSrc effect - Checking isMapSong flag:', isMapSongRef.current);
+                isMapSongRef.current = false; // Reset for next song
                 return;
             }
             
@@ -745,11 +765,9 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                     console.log('⏱️ Metadata duration invalid, keeping existing:', duration);
                                 }
                                 
-                                // Auto-play when metadata loads (matches original behavior)
-                                if (audioRef.current && audioSrc) {
-                                    console.log('🎵 Auto-playing direct stream');
-                                    audioRef.current.play().catch(e => console.error('🎵 Auto-play failed:', e));
-                                }
+                                // NOTE: Don't auto-play here! The audioSrc effect handles auto-play logic
+                                // (including checking for map songs). This event can fire multiple times
+                                // and would bypass the map song check.
                             }}
                             style={{ display: 'none' }}
                         />
