@@ -424,7 +424,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     
     // --- Navigation ---
     const NavLink = ({ page, title, children }) => {
-		const isActive = navigation[0].page === page;
+		const isActive = currentView.page === page;
 		return (
 			<button 
 				onClick={() => handleResetNavigation(page, title)} 
