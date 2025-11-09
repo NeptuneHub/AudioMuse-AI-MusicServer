@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"math/big"
 	"strings"
@@ -9,6 +11,23 @@ import (
 )
 
 const base62Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// GenerateArtistID generates a consistent ID for an artist name using MD5 hash
+func GenerateArtistID(artistName string) string {
+	if artistName == "" {
+		return ""
+	}
+	// Normalize the artist name (trim whitespace, lowercase for consistency)
+	normalized := strings.TrimSpace(artistName)
+
+	// Generate MD5 hash
+	hasher := md5.New()
+	hasher.Write([]byte(normalized))
+	hash := hasher.Sum(nil)
+
+	// Return as hex string (32 characters, same format as Navidrome)
+	return hex.EncodeToString(hash)
+}
 
 // GenerateBase62UUID generates a new UUID and encodes it as a base62 string
 func GenerateBase62UUID() string {

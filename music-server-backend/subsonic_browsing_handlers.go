@@ -311,6 +311,7 @@ func subsonicGetArtist(c *gin.Context) {
 			ID:       albumID,
 			Name:     albumName,
 			Artist:   artistName,
+			ArtistID: GenerateArtistID(artistName),
 			CoverArt: albumID,
 			Genre:    genre,
 		}

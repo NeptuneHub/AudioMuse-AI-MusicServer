@@ -21,14 +21,22 @@ func getArtists(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	var artists []string
+	type ArtistWithID struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+
+	var artists []ArtistWithID
 	for rows.Next() {
-		var artist string
-		if err := rows.Scan(&artist); err != nil {
+		var artistName string
+		if err := rows.Scan(&artistName); err != nil {
 			log.Printf("Error scanning artist row: %v", err)
 			continue
 		}
-		artists = append(artists, artist)
+		artists = append(artists, ArtistWithID{
+			ID:   GenerateArtistID(artistName),
+			Name: artistName,
+		})
 	}
 	c.JSON(http.StatusOK, artists)
 }

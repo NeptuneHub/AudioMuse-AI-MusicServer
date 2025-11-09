@@ -1021,6 +1021,7 @@ func subsonicGetAlbumList2(c *gin.Context) {
 			continue
 		}
 		album.CoverArt = album.ID
+		album.ArtistID = GenerateArtistID(album.Artist)
 		albums = append(albums, album)
 	}
 
@@ -1086,6 +1087,10 @@ func subsonicGetAlbum(c *gin.Context) {
 		s.CoverArt = albumSongId
 		s.Duration = duration
 		s.Starred = starred == 1
+		s.ArtistID = GenerateArtistID(s.Artist)        // Track artist ID
+		s.AlbumID = albumSongId                        // Album ID
+		s.AlbumArtist = artistName                     // Album artist name
+		s.AlbumArtistID = GenerateArtistID(artistName) // Album artist ID
 		if lastPlayed.Valid {
 			s.LastPlayed = lastPlayed.String
 		}
@@ -1824,6 +1829,7 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 			ID:        songFromDb.ID,
 			Title:     songFromDb.Title,
 			Artist:    songFromDb.Artist,
+			ArtistID:  GenerateArtistID(songFromDb.Artist),
 			Album:     songFromDb.Album,
 			Genre:     songFromDb.Genre,
 			CoverArt:  songFromDb.ID,

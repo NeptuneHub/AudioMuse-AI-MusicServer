@@ -114,18 +114,22 @@ type SubsonicAlbumWithSongs struct {
 }
 
 type SubsonicSong struct {
-	XMLName    xml.Name `xml:"song" json:"-"`
-	ID         string   `xml:"id,attr" json:"id"`
-	CoverArt   string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
-	Title      string   `xml:"title,attr" json:"title"`
-	Artist     string   `xml:"artist,attr" json:"artist"`
-	Album      string   `xml:"album,attr" json:"album"`
-	Path       string   `xml:"path,attr,omitempty" json:"path,omitempty"`
-	Duration   int      `xml:"duration,attr,omitempty" json:"duration,omitempty"` // Duration in seconds
-	PlayCount  int      `xml:"playCount,attr,omitempty" json:"playCount,omitempty"`
-	LastPlayed string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
-	Starred    bool     `xml:"starred,attr,omitempty" json:"starred,omitempty"`
-	Genre      string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
+	XMLName       xml.Name `xml:"song" json:"-"`
+	ID            string   `xml:"id,attr" json:"id"`
+	CoverArt      string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	Title         string   `xml:"title,attr" json:"title"`
+	Artist        string   `xml:"artist,attr" json:"artist"`
+	ArtistID      string   `xml:"artistId,attr,omitempty" json:"artistId,omitempty"`
+	Album         string   `xml:"album,attr" json:"album"`
+	AlbumID       string   `xml:"albumId,attr,omitempty" json:"albumId,omitempty"`
+	AlbumArtist   string   `xml:"albumArtist,attr,omitempty" json:"albumArtist,omitempty"`
+	AlbumArtistID string   `xml:"albumArtistId,attr,omitempty" json:"albumArtistId,omitempty"`
+	Path          string   `xml:"path,attr,omitempty" json:"path,omitempty"`
+	Duration      int      `xml:"duration,attr,omitempty" json:"duration,omitempty"` // Duration in seconds
+	PlayCount     int      `xml:"playCount,attr,omitempty" json:"playCount,omitempty"`
+	LastPlayed    string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
+	Starred       bool     `xml:"starred,attr,omitempty" json:"starred,omitempty"`
+	Genre         string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
 }
 
 type SubsonicArtistIndex struct {
@@ -157,6 +161,7 @@ type SubsonicAlbum struct {
 	ID       string   `xml:"id,attr" json:"id"`
 	Name     string   `xml:"name,attr" json:"name"`
 	Artist   string   `xml:"artist,attr" json:"artist"`
+	ArtistID string   `xml:"artistId,attr,omitempty" json:"artistId,omitempty"`
 	CoverArt string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
 	Genre    string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
 }

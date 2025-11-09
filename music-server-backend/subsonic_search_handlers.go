@@ -102,7 +102,14 @@ func subsonicSearch2(c *gin.Context) {
 				var albumName, artistName, genre string
 				var albumID string
 				if err := albumRows.Scan(&albumName, &artistName, &genre, &albumID); err == nil {
-					result.Albums = append(result.Albums, SubsonicAlbum{ID: albumID, Name: albumName, Artist: artistName, Genre: genre, CoverArt: albumID})
+					result.Albums = append(result.Albums, SubsonicAlbum{
+						ID:       albumID,
+						Name:     albumName,
+						Artist:   artistName,
+						ArtistID: GenerateArtistID(artistName),
+						Genre:    genre,
+						CoverArt: albumID,
+					})
 				}
 			}
 		}
@@ -146,6 +153,7 @@ func subsonicSearch2(c *gin.Context) {
 						CoverArt:  songFromDb.ID,
 						Title:     songFromDb.Title,
 						Artist:    songFromDb.Artist,
+						ArtistID:  GenerateArtistID(songFromDb.Artist),
 						Album:     songFromDb.Album,
 						Duration:  songFromDb.Duration,
 						PlayCount: songFromDb.PlayCount,
@@ -257,6 +265,7 @@ func subsonicSearch3(c *gin.Context) {
 						ID:       albumID,
 						Name:     albumName,
 						Artist:   artistName,
+						ArtistID: GenerateArtistID(artistName),
 						Genre:    genre,
 						CoverArt: albumID,
 					})
@@ -302,6 +311,7 @@ func subsonicSearch3(c *gin.Context) {
 						ID:        id,
 						Title:     title,
 						Artist:    artist,
+						ArtistID:  GenerateArtistID(artist),
 						Album:     album,
 						Genre:     genre,
 						Duration:  duration,
