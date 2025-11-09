@@ -149,6 +149,7 @@ type SubsonicArtist struct {
 	Name       string   `xml:"name,attr" json:"name"`
 	CoverArt   string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
 	AlbumCount int      `xml:"albumCount,attr" json:"albumCount"`
+	SongCount  int      `xml:"songCount,attr,omitempty" json:"songCount,omitempty"`
 }
 
 type SubsonicAlbumList2 struct {

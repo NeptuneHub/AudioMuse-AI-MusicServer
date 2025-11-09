@@ -211,3 +211,8 @@ export async function updateRadioName(radioId, name) {
     });
     return await res.json();
 }
+
+// Similar artists function
+export async function getSimilarArtists(artistId, count = 20) {
+    return await subsonicFetch('getSimilarArtists2.view', { id: artistId, count });
+}

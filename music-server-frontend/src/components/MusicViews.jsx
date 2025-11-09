@@ -1348,7 +1348,7 @@ export function Albums({ credentials, filter, onNavigate }) {
     );
 }
 
-export function Artists({ credentials, onNavigate }) {
+export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtists, similarTo, filter }) {
     const [artists, setArtists] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -1361,7 +1361,11 @@ export function Artists({ credentials, onNavigate }) {
     useEffect(() => {
         setArtists([]);
         setHasMore(true);
-    }, [searchTerm, isStarredFilter]);
+        // Reset count when filter changes, it will be updated when artists load
+        if (filter?.similarArtists) {
+            setTotalCount(0);
+        }
+    }, [searchTerm, isStarredFilter, filter]);
 
     // Load starred artists
     useEffect(() => {
@@ -1417,7 +1421,12 @@ export function Artists({ credentials, onNavigate }) {
             try {
                 let newArtists = [];
                 
-                if (isStarredFilter) {
+                // Handle preloaded similar artists
+                if (filter?.similarArtists && artists.length === 0) {
+                    newArtists = filter.similarArtists;
+                    setTotalCount(newArtists.length); // Update count for similar artists
+                    setHasMore(false); // Similar artists are all loaded at once
+                } else if (isStarredFilter) {
                     // Load starred artists from getStarred
                     if (artists.length === 0) {
                         const data = await getStarredSongs();
@@ -1453,7 +1462,7 @@ export function Artists({ credentials, onNavigate }) {
         };
 
         fetcher();
-    }, [searchTerm, artists.length, isLoading, hasMore, isStarredFilter]);
+    }, [searchTerm, artists.length, isLoading, hasMore, isStarredFilter, filter]);
     
     useEffect(() => {
         if (artists.length === 0 && hasMore) {
@@ -1478,14 +1487,13 @@ export function Artists({ credentials, onNavigate }) {
     return (
         <div>
             {/* Count Header */}
-            {totalCount > 0 && (
-                <div className="mb-4">
-                    <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                        Artists
-                        <span className="text-accent-400 text-lg">({totalCount})</span>
-                    </h2>
-                </div>
-            )}
+            <div className="mb-4">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    Artists
+                    {totalCount > 0 && <span className="text-accent-400 text-lg">({totalCount})</span>}
+                    {similarTo && <span className="text-gray-400 text-lg">- Similar to {similarTo}</span>}
+                </h2>
+            </div>
             
             {/* Modern Search Bar */}
             <div className="mb-6 flex flex-col sm:flex-row gap-3">
@@ -1556,6 +1564,21 @@ export function Artists({ credentials, onNavigate }) {
                                     <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
                                 </svg>
                             </button>
+                            {/* Instant Mix button in bottom-left corner aligned with star */}
+                            {audioMuseUrl && onSimilarArtists && artist.songCount >= 5 && (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onSimilarArtists(artist);
+                                    }}
+                                    title="Similar Artists"
+                                    className="absolute bottom-2 right-2 z-10 p-1 rounded-full bg-accent-500/80 hover:bg-accent-500/90 transition-all flex items-center justify-center"
+                                >
+                                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                    </svg>
+                                </button>
+                            )}
                             <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-accent-500/20 to-purple-500/20 flex items-center justify-center mb-3 overflow-hidden flex-shrink-0 shadow-lg border-2 border-dark-600 group-hover:border-accent-500/50 transition-all">
                                 <ImageWithFallback
                                     src={artist.artistImageUrl ? (() => {

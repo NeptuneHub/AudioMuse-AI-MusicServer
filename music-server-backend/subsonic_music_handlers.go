@@ -851,7 +851,8 @@ func subsonicGetArtists(c *gin.Context) {
 	query := `
 		SELECT
 			s.artist,
-			COUNT(DISTINCT s.album_path)
+			COUNT(DISTINCT s.album_path),
+			COUNT(*)
 		FROM songs s
 		WHERE s.artist != ''
 		GROUP BY s.artist
@@ -867,11 +868,11 @@ func subsonicGetArtists(c *gin.Context) {
 	artistIndex := make(map[string][]SubsonicArtist)
 	for rows.Next() {
 		var artist SubsonicArtist
-		if err := rows.Scan(&artist.Name, &artist.AlbumCount); err != nil {
+		if err := rows.Scan(&artist.Name, &artist.AlbumCount, &artist.SongCount); err != nil {
 			log.Printf("Error scanning artist for subsonicGetArtists: %v", err)
 			continue
 		}
-		artist.ID = artist.Name
+		artist.ID = GenerateArtistID(artist.Name) // Generate MD5 artist ID
 		artist.CoverArt = artist.Name
 
 		var indexChar string

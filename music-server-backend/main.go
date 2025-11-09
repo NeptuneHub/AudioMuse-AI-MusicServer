@@ -136,6 +136,7 @@ func main() {
 		// Media info endpoints
 		subsonicCompatibilityHandler(subsonic, "GET", "/getTopSongs", subsonicGetTopSongs)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getSimilarSongs2", subsonicGetSimilarSongs2)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getSimilarArtists2", subsonicGetSimilarArtists2)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getAlbumInfo", subsonicGetAlbumInfo)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getAlbumInfo2", subsonicGetAlbumInfo)
 		subsonicCompatibilityHandler(subsonic, "GET", "/download", subsonicDownload)

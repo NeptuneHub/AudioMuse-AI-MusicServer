@@ -43,7 +43,7 @@ The configuration needed is go in the admin tab and:
 * configure the path of `AudioMuse-AI` (the core contianer)
 
 After both of this point done, you can start the Sonic Analysis diectly from the Music Server, after the analysis is completed you can run the integrated Sonic Analysis function that now are:
-* Instnat Mix
+* Instan mix for both Artist and Song
 * Sonic Path
 * Sonic Fingerprint
 * Music Map

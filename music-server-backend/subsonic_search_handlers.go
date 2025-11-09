@@ -50,7 +50,7 @@ func subsonicSearch2(c *gin.Context) {
 
 		if query == "" || query == "*" {
 			// Return all artists with pagination when no search query or wildcard
-			artistQuery = "SELECT DISTINCT artist FROM songs WHERE artist != '' AND cancelled = 0 ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
+			artistQuery = "SELECT artist, COUNT(DISTINCT album_path), COUNT(*) FROM songs WHERE artist != '' AND cancelled = 0 GROUP BY artist ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
 			artistArgs = append(artistArgs, artistCount, artistOffset)
 		} else {
 			// Search artists with query
@@ -60,7 +60,7 @@ func subsonicSearch2(c *gin.Context) {
 				artistArgs = append(artistArgs, "%"+word+"%")
 			}
 			artistArgs = append(artistArgs, artistCount, artistOffset)
-			artistQuery = "SELECT DISTINCT artist FROM songs WHERE " + strings.Join(artistConditions, " AND ") + " AND artist != '' AND cancelled = 0 ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
+			artistQuery = "SELECT artist, COUNT(DISTINCT album_path), COUNT(*) FROM songs WHERE " + strings.Join(artistConditions, " AND ") + " AND artist != '' AND cancelled = 0 GROUP BY artist ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
 		}
 
 		artistRows, err := db.Query(artistQuery, artistArgs...)
@@ -70,11 +70,14 @@ func subsonicSearch2(c *gin.Context) {
 			defer artistRows.Close()
 			for artistRows.Next() {
 				var artistName string
-				if err := artistRows.Scan(&artistName); err == nil {
+				var albumCount, songCount int
+				if err := artistRows.Scan(&artistName, &albumCount, &songCount); err == nil {
 					result.Artists = append(result.Artists, SubsonicArtist{
-						ID:       artistName,
-						Name:     artistName,
-						CoverArt: artistName, // Use artist name for getCoverArt ID
+						ID:         GenerateArtistID(artistName), // Generate MD5 artist ID
+						Name:       artistName,
+						CoverArt:   artistName, // Use artist name for getCoverArt ID
+						AlbumCount: albumCount,
+						SongCount:  songCount,
 					})
 				}
 			}
@@ -220,7 +223,7 @@ func subsonicSearch3(c *gin.Context) {
 			artistArgs = append(artistArgs, "%"+word+"%")
 		}
 		artistArgs = append(artistArgs, artistCount, artistOffset)
-		artistQuery := "SELECT DISTINCT artist FROM songs WHERE " + strings.Join(artistConditions, " AND ") + " AND artist != '' AND cancelled = 0 ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
+		artistQuery := "SELECT artist, COUNT(DISTINCT album_path), COUNT(*) FROM songs WHERE " + strings.Join(artistConditions, " AND ") + " AND artist != '' AND cancelled = 0 GROUP BY artist ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
 
 		artistRows, err := db.Query(artistQuery, artistArgs...)
 		if err != nil {
@@ -229,11 +232,14 @@ func subsonicSearch3(c *gin.Context) {
 			defer artistRows.Close()
 			for artistRows.Next() {
 				var artistName string
-				if err := artistRows.Scan(&artistName); err == nil {
+				var albumCount, songCount int
+				if err := artistRows.Scan(&artistName, &albumCount, &songCount); err == nil {
 					result.Artists = append(result.Artists, SubsonicArtist{
-						ID:       artistName,
-						Name:     artistName,
-						CoverArt: artistName,
+						ID:         GenerateArtistID(artistName), // Generate MD5 artist ID
+						Name:       artistName,
+						CoverArt:   artistName,
+						AlbumCount: albumCount,
+						SongCount:  songCount,
 					})
 				}
 			}

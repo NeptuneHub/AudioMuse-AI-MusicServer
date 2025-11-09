@@ -103,6 +103,8 @@ func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 			bodyMap["starred"] = body
 		case *SubsonicStarred2:
 			bodyMap["starred2"] = body
+		case *SubsonicSimilarArtists:
+			bodyMap["similarArtists2"] = body
 		case *SubsonicSongsByGenre:
 			bodyMap["songsByGenre"] = body
 		case *SubsonicGenres:

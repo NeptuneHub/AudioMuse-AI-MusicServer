@@ -8,7 +8,7 @@ import AdminPanel from './AdminPanel.jsx';
 import UserSettings from './UserSettings.jsx';
 import CustomAudioPlayer from './AudioPlayer.jsx';
 import PlayQueueView from './PlayQueueView.jsx';
-import { subsonicFetch, getRadioSeed } from '../api';
+import { subsonicFetch, getRadioSeed, getSimilarArtists } from '../api';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 
@@ -367,6 +367,30 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
         }
     };
 
+    const handleSimilarArtists = async (artist) => {
+        if (!audioMuseUrl) return;
+
+        setMixMessage(`Finding similar artists to "${artist.name}"...`);
+        try {
+            const data = await getSimilarArtists(artist.id, 10);  // Changed from 50 to 10
+            let similarArtists = data.similarArtists2?.artist || [];
+            similarArtists = Array.isArray(similarArtists) ? similarArtists : [similarArtists].filter(Boolean);
+
+            // Navigate to artists view with similar results
+            handleNavigate({
+                page: 'artists',
+                title: 'Artists',
+                similarTo: artist.name,
+                filter: { similarArtists: similarArtists }
+            });
+            setMixMessage('');
+        } catch (error) {
+            console.error("Failed to find similar artists:", error);
+            setMixMessage('Error finding similar artists.');
+            setTimeout(() => setMixMessage(''), 3000);
+        }
+    };
+
     // Toggle play/pause for currently playing song
     const handleTogglePlayPause = useCallback(() => {
         const audio = document.querySelector('audio');
@@ -400,7 +424,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     
     // --- Navigation ---
     const NavLink = ({ page, title, children }) => {
-		const isActive = currentView.page === page && navigation.length === 1;
+		const isActive = navigation[0].page === page;
 		return (
 			<button 
 				onClick={() => handleResetNavigation(page, title)} 
@@ -526,7 +550,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 				)}
                     {currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onTogglePlayPause={handleTogglePlayPause} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} isAudioPlaying={isAudioPlaying} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onInstantMix={handleInstantMix} onAddToPlaylist={setSelectedSongForPlaylist} />}
                     {currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
-                    {currentView.page === 'artists' && <Artists credentials={credentials} onNavigate={handleNavigate} />}
+                    {currentView.page === 'artists' && <Artists credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onSimilarArtists={handleSimilarArtists} similarTo={currentView.similarTo} />}
                     {currentView.page === 'playlists' && <Playlists credentials={credentials} isAdmin={isAdmin} onNavigate={handleNavigate} />}
                     {currentView.page === 'radio' && <RadioPage onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} />}
                     {currentView.page === 'map' && <Map onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} onRemoveFromQueue={handleRemoveFromQueue} onClearQueue={handleClearQueue} playQueue={playQueue} />}
