@@ -333,10 +333,19 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                 artwork: artwork
             });
 
+            // Basic playback controls
             navigator.mediaSession.setActionHandler('play', () => audioRef.current?.play());
             navigator.mediaSession.setActionHandler('pause', () => audioRef.current?.pause());
             navigator.mediaSession.setActionHandler('nexttrack', hasQueue ? onPlayNext : null);
             navigator.mediaSession.setActionHandler('previoustrack', hasQueue ? onPlayPrevious : null);
+            
+            // Timeline scrubbing for iOS lock screen (seekto enables the timeline slider)
+            // Note: We don't set seekbackward/seekforward to preserve next/previous track buttons
+            navigator.mediaSession.setActionHandler('seekto', (details) => {
+                if (audioRef.current && details.seekTime !== null && details.seekTime !== undefined) {
+                    audioRef.current.currentTime = details.seekTime;
+                }
+            });
         }
     }, [song, credentials, hasQueue, onPlayNext, onPlayPrevious]);
 
@@ -744,6 +753,23 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                                     setDuration(dur);
                                 }
                                 // If duration is still 0 or invalid, keep using metadata duration from state
+                                
+                                // Update Media Session position state for iOS lock screen timeline
+                                if ('mediaSession' in navigator && navigator.mediaSession.setPositionState) {
+                                    const duration = e.target.duration;
+                                    const currentTime = e.target.currentTime;
+                                    if (duration && !isNaN(duration) && duration !== Infinity && duration > 0) {
+                                        try {
+                                            navigator.mediaSession.setPositionState({
+                                                duration: duration,
+                                                playbackRate: e.target.playbackRate,
+                                                position: currentTime
+                                            });
+                                        } catch (error) {
+                                            // Ignore errors (some browsers might not support this)
+                                        }
+                                    }
+                                }
                             }}
                             onDurationChange={(e) => {
                                 console.log('⏱️ onDurationChange - duration:', e.target.duration);
