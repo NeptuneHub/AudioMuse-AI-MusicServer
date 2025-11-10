@@ -269,13 +269,53 @@ func getAlbumDirectory(c *gin.Context, user User, albumID string, albumName, art
 func subsonicGetArtist(c *gin.Context) {
 	_ = c.MustGet("user") // Auth is handled by middleware
 
-	artistName := c.Query("id")
-	if artistName == "" {
+	artistID := c.Query("id")
+	if artistID == "" {
 		subsonicRespond(c, newSubsonicErrorResponse(10, "Required parameter id is missing."))
 		return
 	}
 
-	log.Printf("getArtist called with ID: %s", artistName)
+	log.Printf("getArtist called with ID: %s", artistID)
+
+	// Resolve artist ID to artist name by finding any song with matching artist ID
+	var artistName string
+	err := db.QueryRow(`
+		SELECT DISTINCT artist 
+		FROM songs 
+		WHERE artist != '' 
+		AND cancelled = 0
+		LIMIT 1000
+	`).Scan(&artistName)
+
+	// Scan through artists to find matching ID (since we generate IDs dynamically)
+	var foundArtist string
+	artistRows, err := db.Query(`SELECT DISTINCT artist FROM songs WHERE artist != '' AND cancelled = 0`)
+	if err != nil {
+		log.Printf("Error querying artists: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+		return
+	}
+	defer artistRows.Close()
+
+	for artistRows.Next() {
+		var name string
+		if err := artistRows.Scan(&name); err != nil {
+			continue
+		}
+		if GenerateArtistID(name) == artistID {
+			foundArtist = name
+			break
+		}
+	}
+
+	if foundArtist == "" {
+		log.Printf("Artist not found for ID: %s", artistID)
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Artist not found."))
+		return
+	}
+
+	artistName = foundArtist
+	log.Printf("Resolved artist ID %s to name: %s", artistID, artistName)
 
 	// Get albums by this artist
 	// Group by album_path (directory) ONLY - 1 folder = 1 album

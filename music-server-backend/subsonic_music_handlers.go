@@ -1206,14 +1206,36 @@ func subsonicGetCoverArt(c *gin.Context) {
 		size = 512 // Default on parse error
 	}
 
-	// Check if ID exists in songs table (song/album ID), otherwise treat as artist name
+	// Check if ID exists in songs table (song/album ID)
 	var exists int
 	err = db.QueryRow("SELECT COUNT(*) FROM songs WHERE id = ?", id).Scan(&exists)
 	if err == nil && exists > 0 {
 		handleAlbumArt(c, id, size)
-	} else {
-		handleArtistArt(c, id, size)
+		return
 	}
+
+	// Try to resolve as artist ID (MD5 hash) to artist name
+	artistRows, err := db.Query(`SELECT DISTINCT artist FROM songs WHERE artist != '' AND cancelled = 0`)
+	if err != nil {
+		log.Printf("Error querying artists for cover art: %v", err)
+		c.Status(http.StatusNotFound)
+		return
+	}
+	defer artistRows.Close()
+
+	for artistRows.Next() {
+		var name string
+		if err := artistRows.Scan(&name); err != nil {
+			continue
+		}
+		if GenerateArtistID(name) == id {
+			handleArtistArt(c, name, size)
+			return
+		}
+	}
+
+	// If not found as artist ID, treat as artist name directly (backward compatibility)
+	handleArtistArt(c, id, size)
 }
 
 func handleAlbumArt(c *gin.Context, songID string, size int) {
