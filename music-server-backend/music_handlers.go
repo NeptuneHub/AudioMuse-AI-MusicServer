@@ -126,7 +126,7 @@ func getSongs(c *gin.Context) {
 func streamSong(c *gin.Context) {
 	songID := c.Param("songID")
 	var path string
-	err := db.QueryRow("SELECT path FROM songs WHERE id = ?", songID).Scan(&path)
+	err := db.QueryRow("SELECT path FROM songs WHERE id = ? AND cancelled = 0", songID).Scan(&path)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Song not found"})

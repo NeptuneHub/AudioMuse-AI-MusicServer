@@ -1581,8 +1581,8 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
                             )}
                             <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-accent-500/20 to-purple-500/20 flex items-center justify-center mb-3 overflow-hidden flex-shrink-0 shadow-lg border-2 border-dark-600 group-hover:border-accent-500/50 transition-all">
                                 <ImageWithFallback
-                                    src={artist.artistImageUrl ? (() => {
-                                        const params = new URLSearchParams({ id: artist.artistImageUrl, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
+                                    src={artist.coverArt ? (() => {
+                                        const params = new URLSearchParams({ id: artist.coverArt, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
                                         const url = `${API_BASE}/rest/getCoverArt.view?${params.toString()}`;
                                         return { url, useAuthFetch: true };
                                     })() : ''}

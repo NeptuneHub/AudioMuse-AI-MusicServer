@@ -421,7 +421,7 @@ func subsonicHLSPlaylist(c *gin.Context) {
 	// Get song from database (using correct table and column names)
 	var filePath string
 	var duration int
-	err := db.QueryRow("SELECT path, duration FROM songs WHERE id = ?", songID).Scan(&filePath, &duration)
+	err := db.QueryRow("SELECT path, duration FROM songs WHERE id = ? AND cancelled = 0", songID).Scan(&filePath, &duration)
 	if err != nil {
 		log.Printf("❌ Song not found in database: %s (error: %v)", songID, err)
 		c.String(404, "Song not found")

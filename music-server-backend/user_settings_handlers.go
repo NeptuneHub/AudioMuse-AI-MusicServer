@@ -247,7 +247,7 @@ func getMostPlayed(c *gin.Context) {
 	limit, _ := strconv.Atoi(limitStr)
 	offset, _ := strconv.Atoi(offsetStr)
 
-	query := "SELECT id, title, artist, album, duration, play_count, last_played, date_added, date_updated, starred, genre FROM songs WHERE play_count > 0"
+	query := "SELECT id, title, artist, album, duration, play_count, last_played, date_added, date_updated, starred, genre FROM songs WHERE play_count > 0 AND cancelled = 0"
 	args := []interface{}{}
 
 	if genre != "" {

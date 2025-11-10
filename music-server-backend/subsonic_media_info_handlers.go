@@ -103,7 +103,7 @@ func subsonicGetSimilarSongs2(c *gin.Context) {
 
 	// Get the reference song's artist and genre
 	var refArtist, refGenre string
-	err := db.QueryRow("SELECT artist, COALESCE(genre, '') FROM songs WHERE id = ?", songID).Scan(&refArtist, &refGenre)
+	err := db.QueryRow("SELECT artist, COALESCE(genre, '') FROM songs WHERE id = ? AND cancelled = 0", songID).Scan(&refArtist, &refGenre)
 	if err != nil {
 		log.Printf("Reference song not found for getSimilarSongs2: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))
@@ -118,6 +118,7 @@ func subsonicGetSimilarSongs2(c *gin.Context) {
 		FROM songs
 		WHERE id != ?
 		  AND (artist = ? OR (genre = ? AND genre != ''))
+		  AND cancelled = 0
 		ORDER BY 
 			CASE 
 				WHEN artist = ? THEN 0 
@@ -191,7 +192,7 @@ func subsonicDownload(c *gin.Context) {
 
 	// Check if this is a single song or an album reference
 	var path, albumName, artistName string
-	err := db.QueryRow("SELECT path, album, artist FROM songs WHERE id = ?", id).Scan(&path, &albumName, &artistName)
+	err := db.QueryRow("SELECT path, album, artist FROM songs WHERE id = ? AND cancelled = 0", id).Scan(&path, &albumName, &artistName)
 	if err != nil {
 		log.Printf("Song not found for download: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))
@@ -331,7 +332,7 @@ func subsonicGetAlbumInfo(c *gin.Context) {
 
 	// Get album info from a song in the album
 	var albumName, artistName, genre string
-	err := db.QueryRow("SELECT album, artist, COALESCE(genre, '') FROM songs WHERE id = ?", id).Scan(&albumName, &artistName, &genre)
+	err := db.QueryRow("SELECT album, artist, COALESCE(genre, '') FROM songs WHERE id = ? AND cancelled = 0", id).Scan(&albumName, &artistName, &genre)
 	if err != nil {
 		log.Printf("Album not found for getAlbumInfo: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Album not found."))

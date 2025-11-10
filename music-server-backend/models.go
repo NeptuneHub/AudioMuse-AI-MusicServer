@@ -292,6 +292,7 @@ type SubsonicIndexArtist struct {
 	XMLName    xml.Name `xml:"artist" json:"-"`
 	ID         string   `xml:"id,attr" json:"id"`
 	Name       string   `xml:"name,attr" json:"name"`
+	CoverArt   string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
 	AlbumCount int      `xml:"albumCount,attr,omitempty" json:"albumCount,omitempty"`
 }
 

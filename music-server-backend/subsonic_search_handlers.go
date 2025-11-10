@@ -72,10 +72,11 @@ func subsonicSearch2(c *gin.Context) {
 				var artistName string
 				var albumCount, songCount int
 				if err := artistRows.Scan(&artistName, &albumCount, &songCount); err == nil {
+					artistID := GenerateArtistID(artistName)
 					result.Artists = append(result.Artists, SubsonicArtist{
-						ID:         GenerateArtistID(artistName), // Generate MD5 artist ID
+						ID:         artistID, // Generate MD5 artist ID
 						Name:       artistName,
-						CoverArt:   artistName, // Use artist name for getCoverArt ID
+						CoverArt:   artistID, // Use artist ID for getCoverArt (not artist name!)
 						AlbumCount: albumCount,
 						SongCount:  songCount,
 					})
@@ -234,10 +235,11 @@ func subsonicSearch3(c *gin.Context) {
 				var artistName string
 				var albumCount, songCount int
 				if err := artistRows.Scan(&artistName, &albumCount, &songCount); err == nil {
+					artistID := GenerateArtistID(artistName)
 					result.Artists = append(result.Artists, SubsonicArtist{
-						ID:         GenerateArtistID(artistName), // Generate MD5 artist ID
+						ID:         artistID, // Generate MD5 artist ID
 						Name:       artistName,
-						CoverArt:   artistName,
+						CoverArt:   artistID, // Use artist ID for getCoverArt (not artist name!)
 						AlbumCount: albumCount,
 						SongCount:  songCount,
 					})

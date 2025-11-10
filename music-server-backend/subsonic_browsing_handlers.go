@@ -73,7 +73,9 @@ func subsonicGetIndexes(c *gin.Context) {
 			log.Printf("Error scanning artist for getIndexes: %v", err)
 			continue
 		}
-		artist.ID = artist.Name // Use artist name as ID for compatibility
+		artistID := GenerateArtistID(artist.Name)
+		artist.ID = artistID       // Use MD5 hash as artist ID
+		artist.CoverArt = artistID // Set cover art ID for artist images
 
 		// Determine index character
 		var indexChar string
@@ -125,7 +127,7 @@ func subsonicGetMusicDirectory(c *gin.Context) {
 
 	// Check if ID exists as a song ID (representing an album)
 	var albumName, artistName string
-	err := db.QueryRow("SELECT album, artist FROM songs WHERE id = ?", id).Scan(&albumName, &artistName)
+	err := db.QueryRow("SELECT album, artist FROM songs WHERE id = ? AND cancelled = 0", id).Scan(&albumName, &artistName)
 	if err == nil {
 		// Found song - return songs in this album
 		getAlbumDirectory(c, user, id, albumName, artistName)
@@ -142,7 +144,7 @@ func getArtistDirectory(c *gin.Context, artistName string) {
 	query := `
 		SELECT album, MIN(id) as album_id, COUNT(*) as song_count, COALESCE(genre, '') as genre
 		FROM songs
-		WHERE artist = ?
+		WHERE artist = ? AND cancelled = 0
 		GROUP BY album_path
 		ORDER BY album COLLATE NOCASE
 	`
@@ -193,7 +195,7 @@ func getArtistDirectory(c *gin.Context, artistName string) {
 func getAlbumDirectory(c *gin.Context, user User, albumID string, albumName, artistName string) {
 	// Get the album's directory path from the albumID song
 	var albumPath string
-	err := db.QueryRow("SELECT path FROM songs WHERE id = ?", albumID).Scan(&albumPath)
+	err := db.QueryRow("SELECT path FROM songs WHERE id = ? AND cancelled = 0", albumID).Scan(&albumPath)
 	if err != nil {
 		log.Printf("Error getting album path for ID %s: %v", albumID, err)
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Album not found."))

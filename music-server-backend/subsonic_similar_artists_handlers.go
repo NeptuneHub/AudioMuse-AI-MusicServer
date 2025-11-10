@@ -112,7 +112,7 @@ func subsonicGetSimilarArtists2(c *gin.Context) {
 		subsonicArtists = append(subsonicArtists, SubsonicArtist{
 			ID:         sa.ArtistID,
 			Name:       sa.Artist,
-			CoverArt:   sa.Artist,
+			CoverArt:   sa.ArtistID, // Use artist ID for getCoverArt
 			AlbumCount: albumCount,
 		})
 	}

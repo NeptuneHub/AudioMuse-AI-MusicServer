@@ -15,6 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/robfig/cron/v3"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
 var db *sql.DB
@@ -235,10 +237,12 @@ func main() {
 		c.File("/app/music-server-frontend/build/index.html")
 	})
 
-	// Configure server with HTTP/2 support
+	// Configure server with HTTP/2 h2c (cleartext) support for multiplexing
+	h2s := &http2.Server{}
+
 	srv := &http.Server{
 		Addr:              ":8080",
-		Handler:           r,
+		Handler:           h2c.NewHandler(r, h2s), // Wrap handler with h2c for HTTP/2 without TLS
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -246,11 +250,10 @@ func main() {
 		MaxHeaderBytes:    1 << 20, // 1MB
 	}
 
-	log.Println("[GIN-debug] Listening and serving HTTP with HTTP/2 support on :8080")
-	log.Println("[HTTP/2] Multiplexing enabled for parallel cover art requests")
+	log.Println("[GIN-debug] Listening and serving HTTP on :8080")
+	log.Println("[HTTP/2] h2c (HTTP/2 Cleartext) enabled - multiplexing active for parallel cover art requests")
+	log.Println("[HTTP/2] Multiple cover art images can now be downloaded simultaneously over a single connection")
 
-	// HTTP/2 is automatically enabled for h2c (HTTP/2 Cleartext)
-	// No TLS required - Gin/Go will handle h2c negotiation
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server failed to start: %v", err)
 	}
