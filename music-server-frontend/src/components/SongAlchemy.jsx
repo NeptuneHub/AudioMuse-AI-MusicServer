@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { searchMusic, createRadio } from '../api';
 import Plotly from 'plotly.js-dist-min';
 
-const defaultRow = () => ({ artist: '', title: '', id: '', op: 'ADD' });
+const defaultRow = () => ({ artist: '', title: '', id: '', op: 'ADD', type: 'song' });
 
 // Create Radio Form Component
 function CreateRadioForm({ rows, temperature, subtractDistance, onSuccess }) {
@@ -23,7 +23,7 @@ function CreateRadioForm({ rows, temperature, subtractDistance, onSuccess }) {
       // Filter rows with valid IDs and create seed songs array
       const seedSongs = rows
         .filter(r => r.id)
-        .map(r => ({ id: r.id, op: r.op }));
+        .map(r => ({ id: r.id, op: r.op, type: r.type || 'song' }));
 
       if (seedSongs.length === 0) {
         setError('No valid songs to save');
@@ -91,15 +91,38 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
   const previewPlotRef = useRef(null);
 
   const handleRowChange = (idx, field, value) => {
-    setRows(rows => rows.map((row, i) => i === idx ? { ...row, [field]: value } : row));
-    // Trigger suggestions when artist/title change
-    if (field === 'artist' || field === 'title') {
-      triggerDebouncedSearch(idx);
-    }
+    console.log(`handleRowChange: idx=${idx}, field=${field}, value=${value}`);
+    setRows(rows => {
+      const newRows = rows.map((row, i) => i === idx ? { ...row, [field]: value } : row);
+      
+      // Trigger suggestions based on the UPDATED row
+      const updatedRow = newRows[idx];
+      console.log('Updated row:', updatedRow);
+      
+      if (field === 'artist' || field === 'title') {
+        // If this is an artist row typing in artist field, use artist search
+        if (updatedRow.type === 'artist' && field === 'artist') {
+          console.log('Triggering artist search for idx', idx);
+          triggerDebouncedArtistSearch(idx);
+        } else if (updatedRow.type === 'song') {
+          // For songs, use regular song search
+          console.log('Triggering song search for idx', idx);
+          triggerDebouncedSearch(idx);
+        }
+      }
+      
+      return newRows;
+    });
+  };
+
+  const triggerDebouncedArtistSearch = (idx) => {
+    clearTimeout(timeouts.current[`artist_${idx}`]);
+    timeouts.current[`artist_${idx}`] = setTimeout(() => fetchArtistSuggestions(idx), 300);
   };
 
   // Suggestions per row: { [idx]: [song objects] }
   const [suggestions, setSuggestions] = useState({});
+  const [artistSuggestions, setArtistSuggestions] = useState({});
   const timeouts = useRef({});
 
   const triggerDebouncedSearch = (idx) => {
@@ -125,9 +148,46 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
     }
   };
 
+  const fetchArtistSuggestions = async (idx) => {
+    const row = rows[idx];
+    const q = (row.artist || '').trim();
+    console.log(`fetchArtistSuggestions for idx=${idx}, query="${q}", row.type="${row.type}"`);
+    if (!q || q.length < 2) {
+      setArtistSuggestions(s => ({ ...s, [idx]: [] }));
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const url = `/api/alchemy/search_artists?query=${encodeURIComponent(q)}`;
+      console.log('Fetching artist suggestions from:', url);
+      const resp = await fetch(url, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      const data = await resp.json();
+      console.log('Artist suggestions received:', data);
+      setArtistSuggestions(s => ({ ...s, [idx]: data || [] }));
+    } catch (e) {
+      console.error('Artist autocomplete search failed', e);
+      setArtistSuggestions(s => ({ ...s, [idx]: [] }));
+    }
+  };
+
   const selectSuggestion = (idx, item) => {
-    setRows(rs => rs.map((r, i) => i === idx ? { ...r, id: item.id || item.item_id || item.songId || item.id, artist: item.artist || item.author || item.creator || r.artist, title: item.title || r.title, op: r.op } : r));
+    setRows(rs => rs.map((r, i) => i === idx ? { ...r, id: item.id || item.item_id || item.songId || item.id, artist: item.artist || item.author || item.creator || r.artist, title: item.title || r.title, op: r.op, type: 'song' } : r));
     setSuggestions(s => ({ ...s, [idx]: [] }));
+  };
+
+  const selectArtistSuggestion = (idx, artist) => {
+    console.log('Selected artist:', artist, 'ID:', artist.artist_id);
+    setRows(rs => rs.map((r, i) => {
+      if (i === idx) {
+        const updated = { ...r, id: artist.artist_id || artist.artist, artist: artist.artist, title: '', op: r.op, type: 'artist' };
+        console.log('Row updated to:', updated);
+        return updated;
+      }
+      return r;
+    }));
+    setArtistSuggestions(s => ({ ...s, [idx]: [] }));
   };
 
   const addRow = () => setRows([...rows, defaultRow()]);
@@ -138,9 +198,11 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
     setLoading(true);
     try {
       const rowsCopy = [...rows];
+      console.log('Rows before filtering:', rowsCopy);
       for (let i = 0; i < rowsCopy.length; i++) {
         const r = rowsCopy[i];
-        if (!r.id) {
+        // Auto-resolve logic only for songs - artists should already have IDs from selection
+        if (!r.id && r.type === 'song') {
           const q = `${(r.artist || '').trim()} ${(r.title || '').trim()}`.trim();
           if (q && q.length >= 3) {
             try {
@@ -157,9 +219,11 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
           }
         }
       }
-      const items = rowsCopy.filter(r => r.id).map(r => ({ id: r.id, op: r.op }));
+      const items = rowsCopy.filter(r => r.id).map(r => ({ id: r.id, op: r.op, type: r.type || 'song' }));
+      console.log('Items after filtering:', items);
+      console.log('Payload:', JSON.stringify({ items, n: nResults, temperature, subtract_distance: subtractDistance, preview: true }, null, 2));
       if (!items.some(i => i.op === 'ADD')) {
-        setError('Please include at least one ADD song.');
+        setError('Please include at least one ADD item.');
         setLoading(false);
         return;
       }
@@ -221,7 +285,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
         });
       }
       
-      // ADD Centroid - Yellow/Green triangle
+      // ADD Centroid - Green triangle
       if (previewData.add_centroid_2d) {
         traces.push({
           x: [previewData.add_centroid_2d[0]],
@@ -230,7 +294,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
           mode: 'markers',
           type: 'scatter',
           name: 'Add Centroid',
-          marker: { size: 20, color: 'rgba(253, 224, 71, 1)', symbol: 'triangle-up', line: { width: 3, color: 'rgba(234, 179, 8, 1)' } }
+          marker: { size: 20, color: 'rgba(34, 197, 94, 1)', symbol: 'triangle-up', line: { width: 3, color: 'rgba(22, 163, 74, 1)' } }
         });
       }
       
@@ -243,34 +307,68 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
           mode: 'markers',
           type: 'scatter',
           name: 'Subtract Centroid',
-          marker: { size: 20, color: 'rgba(239, 68, 68, 1)', symbol: 'triangle-down', line: { width: 3, color: 'rgba(159, 18, 57, 1)' } }
+          marker: { size: 20, color: 'rgba(239, 68, 68, 1)', symbol: 'triangle-down', line: { width: 3, color: 'rgba(220, 38, 38, 1)' } }
         });
       }
       
       // Selected ADD songs - Green circles
       if (previewData.add_points && previewData.add_points.length) {
-        traces.push({
-          x: previewData.add_points.map(p => p.embedding_2d ? p.embedding_2d[0] : 0),
-          y: previewData.add_points.map(p => p.embedding_2d ? p.embedding_2d[1] : 0),
-          text: previewData.add_points.map(fullLabel),
-          mode: 'markers',
-          type: 'scatter',
-          name: 'Selected ADD song(s)',
-          marker: { size: 18, color: 'rgba(34, 197, 94, 1)', line: { width: 3, color: 'rgba(22, 163, 74, 1)' } }
-        });
+        const addSongs = previewData.add_points.filter(p => !p.is_artist_component);
+        const addArtistComponents = previewData.add_points.filter(p => p.is_artist_component);
+        
+        if (addSongs.length > 0) {
+          traces.push({
+            x: addSongs.map(p => p.embedding_2d ? p.embedding_2d[0] : 0),
+            y: addSongs.map(p => p.embedding_2d ? p.embedding_2d[1] : 0),
+            text: addSongs.map(fullLabel),
+            mode: 'markers',
+            type: 'scatter',
+            name: 'Selected ADD Songs',
+            marker: { size: 12, color: 'rgba(34, 197, 94, 1)', symbol: 'circle', line: { width: 2, color: 'rgba(22, 163, 74, 1)' } }
+          });
+        }
+        
+        if (addArtistComponents.length > 0) {
+          traces.push({
+            x: addArtistComponents.map(p => p.embedding_2d ? p.embedding_2d[0] : 0),
+            y: addArtistComponents.map(p => p.embedding_2d ? p.embedding_2d[1] : 0),
+            text: addArtistComponents.map(fullLabel),
+            mode: 'markers',
+            type: 'scatter',
+            name: 'Selected ADD Artist Components',
+            marker: { size: 10, color: 'rgba(34, 197, 94, 1)', symbol: 'square', line: { width: 2, color: 'rgba(22, 163, 74, 1)' } }
+          });
+        }
       }
       
       // Selected SUBTRACT songs - Red circles
       if (previewData.sub_points && previewData.sub_points.length) {
-        traces.push({
-          x: previewData.sub_points.map(p => p.embedding_2d ? p.embedding_2d[0] : 0),
-          y: previewData.sub_points.map(p => p.embedding_2d ? p.embedding_2d[1] : 0),
-          text: previewData.sub_points.map(fullLabel),
-          mode: 'markers',
-          type: 'scatter',
-          name: 'Selected SUBTRACT song(s)',
-          marker: { size: 16, color: 'rgba(239, 68, 68, 1)', line: { width: 3, color: 'rgba(220, 38, 38, 1)' } }
-        });
+        const subSongs = previewData.sub_points.filter(p => !p.is_artist_component);
+        const subArtistComponents = previewData.sub_points.filter(p => p.is_artist_component);
+        
+        if (subSongs.length > 0) {
+          traces.push({
+            x: subSongs.map(p => p.embedding_2d ? p.embedding_2d[0] : 0),
+            y: subSongs.map(p => p.embedding_2d ? p.embedding_2d[1] : 0),
+            text: subSongs.map(fullLabel),
+            mode: 'markers',
+            type: 'scatter',
+            name: 'Selected SUBTRACT Songs',
+            marker: { size: 12, color: 'rgba(239, 68, 68, 1)', symbol: 'circle', line: { width: 2, color: 'rgba(220, 38, 38, 1)' } }
+          });
+        }
+        
+        if (subArtistComponents.length > 0) {
+          traces.push({
+            x: subArtistComponents.map(p => p.embedding_2d ? p.embedding_2d[0] : 0),
+            y: subArtistComponents.map(p => p.embedding_2d ? p.embedding_2d[1] : 0),
+            text: subArtistComponents.map(fullLabel),
+            mode: 'markers',
+            type: 'scatter',
+            name: 'Selected SUBTRACT Artist Components',
+            marker: { size: 10, color: 'rgba(239, 68, 68, 1)', symbol: 'square', line: { width: 2, color: 'rgba(220, 38, 38, 1)' } }
+          });
+        }
       }
       
       const layout = {
@@ -315,7 +413,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
           }
         }
       }
-      const items = rowsCopy.filter(r => r.id).map(r => ({ id: r.id, op: r.op }));
+      const items = rowsCopy.filter(r => r.id).map(r => ({ id: r.id, op: r.op, type: r.type || 'song' }));
       if (!items.some(i => i.op === 'ADD')) {
         setError('Please include at least one ADD song.');
         setLoading(false);
@@ -384,7 +482,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
           }
         }
       }
-      const items = rowsCopy.filter(r => r.id).map(r => ({ id: r.id, op: r.op }));
+      const items = rowsCopy.filter(r => r.id).map(r => ({ id: r.id, op: r.op, type: r.type || 'song' }));
       if (!items.some(i => i.op === 'ADD')) {
         setError('Please include at least one ADD song.');
         setLoading(false);
@@ -432,38 +530,147 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
 
   return (
     <div className="text-gray-100">
-      <p className="mb-4 text-gray-300">Select tracks to Include or Exclude — boost favorites with Include and remove unwanted flavors with Exclude.</p>
+      <p className="mb-4 text-gray-300">Select tracks or artists to Include or Exclude — boost favorites with Include and remove unwanted flavors with Exclude.</p>
       <form onSubmit={handleSubmit} className="space-y-4">
         <fieldset className="border border-gray-700 rounded p-4 bg-gray-800">
-          <legend className="font-semibold text-teal-300">Song Selection</legend>
+          <legend className="font-semibold text-teal-300">Artist and/or Song Selection</legend>
           {rows.map((row, idx) => (
-            <div key={idx} className="flex flex-col sm:flex-row sm:items-center gap-2 mb-2 w-full">
-              <div className="flex-shrink-0">
-                <select value={row.op} onChange={e => handleRowChange(idx, 'op', e.target.value)} className="border border-gray-600 bg-gray-900 text-gray-100 rounded px-2 py-1">
+            <div key={idx} className="flex flex-col gap-2 mb-4 p-3 border border-gray-600 rounded bg-gray-900">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Type Toggle Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newType = row.type === 'song' ? 'artist' : 'song';
+                    console.log(`Toggle type for idx=${idx}: ${row.type} -> ${newType}`);
+                    setRows(rows => {
+                      const newRows = rows.map((r, i) => {
+                        if (i === idx) {
+                          if (newType === 'artist') {
+                            // Switching to artist mode - keep artist name, clear ID and title
+                            const updated = { ...r, type: newType, id: '', title: '' };
+                            console.log('Row after type toggle to artist:', updated);
+                            // Trigger artist search if we have an artist name
+                            if (updated.artist && updated.artist.trim().length >= 2) {
+                              console.log('Auto-triggering artist search after toggle');
+                              setTimeout(() => triggerDebouncedArtistSearch(idx), 100);
+                            }
+                            return updated;
+                          } else {
+                            // Switching to song mode - keep artist name, clear ID, keep title if exists
+                            const updated = { ...r, type: newType, id: '' };
+                            console.log('Row after type toggle to song:', updated);
+                            return updated;
+                          }
+                        }
+                        return r;
+                      });
+                      return newRows;
+                    });
+                  }}
+                  className={`px-3 py-1.5 rounded-lg font-semibold text-sm transition-all ${
+                    row.type === 'artist' 
+                      ? 'bg-purple-500/20 border-2 border-purple-500 text-purple-400 hover:bg-purple-500/30' 
+                      : 'bg-blue-500/20 border-2 border-blue-500 text-blue-400 hover:bg-blue-500/30'
+                  }`}
+                  title="Toggle Song/Artist"
+                >
+                  {row.type === 'artist' ? '🎤 Artist' : '🎵 Song'}
+                </button>
+
+                {/* Operation Selector */}
+                <select 
+                  value={row.op} 
+                  onChange={e => handleRowChange(idx, 'op', e.target.value)} 
+                  className="border border-gray-600 bg-gray-900 text-gray-100 rounded px-2 py-1"
+                >
                   <option value="ADD">Include</option>
                   <option value="SUBTRACT">Exclude</option>
                 </select>
+
+                {/* Remove Button */}
+                <button 
+                  type="button" 
+                  onClick={() => removeRow(idx)} 
+                  className="ml-auto text-red-400 hover:text-red-200 text-2xl font-bold px-2"
+                >
+                  &times;
+                </button>
               </div>
-              <input type="text" placeholder="Artist" value={row.artist} onChange={e => handleRowChange(idx, 'artist', e.target.value)} className="border border-gray-600 bg-gray-900 text-gray-100 rounded px-2 py-1 w-full sm:w-48" />
-              <div className="relative w-full sm:w-64">
-                <input type="text" placeholder="Title" value={row.title} onChange={e => handleRowChange(idx, 'title', e.target.value)} className="border border-gray-600 bg-gray-900 text-gray-100 rounded px-2 py-1 w-full" />
-                {suggestions[idx] && suggestions[idx].length > 0 && (
+
+              {/* Artist Field */}
+              <div className="relative">
+                <input 
+                  type="text" 
+                  placeholder="Artist" 
+                  value={row.artist} 
+                  onChange={e => handleRowChange(idx, 'artist', e.target.value)} 
+                  className="border border-gray-600 bg-gray-900 text-gray-100 rounded px-3 py-2 w-full"
+                />
+                {/* Artist Suggestions (only show in artist mode) */}
+                {row.type === 'artist' && artistSuggestions[idx] && artistSuggestions[idx].length > 0 && (
                   <div className="absolute left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded z-50 max-h-48 overflow-auto">
-                    {suggestions[idx].map((s, si) => (
-                      <div key={si} onMouseDown={() => selectSuggestion(idx, s)} className="px-3 py-2 hover:bg-gray-700 cursor-pointer text-sm">
-                        <div className="font-semibold">{s.title}</div>
-                        <div className="text-gray-400 text-xs">{s.artist || s.author}</div>
+                    {artistSuggestions[idx].map((artist, si) => (
+                      <div 
+                        key={si} 
+                        onMouseDown={() => selectArtistSuggestion(idx, artist)} 
+                        className="px-3 py-2 hover:bg-gray-700 cursor-pointer text-sm"
+                      >
+                        <div className="font-semibold">{artist.artist}</div>
+                        <div className="text-gray-400 text-xs">{artist.track_count} tracks</div>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
-              <div className="flex-shrink-0">
-                <button type="button" onClick={() => removeRow(idx)} className="text-red-400 hover:text-red-200 text-xl">&times;</button>
-              </div>
+
+              {/* Title Field (only for songs) */}
+              {row.type === 'song' && (
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    placeholder="Title" 
+                    value={row.title} 
+                    onChange={e => handleRowChange(idx, 'title', e.target.value)} 
+                    className="border border-gray-600 bg-gray-900 text-gray-100 rounded px-3 py-2 w-full"
+                  />
+                  {/* Song Suggestions */}
+                  {suggestions[idx] && suggestions[idx].length > 0 && (
+                    <div className="absolute left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded z-50 max-h-48 overflow-auto">
+                      {suggestions[idx].map((s, si) => (
+                        <div 
+                          key={si} 
+                          onMouseDown={() => selectSuggestion(idx, s)} 
+                          className="px-3 py-2 hover:bg-gray-700 cursor-pointer text-sm"
+                        >
+                          <div className="font-semibold">{s.title}</div>
+                          <div className="text-gray-400 text-xs">{s.artist || s.author}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Selected Item Display */}
+              {row.id ? (
+                <div className="text-xs text-teal-400 mt-1 font-semibold">
+                  ✓ Selected: {row.type === 'artist' ? `${row.artist} (ID: ${row.id})` : `${row.title} — ${row.artist} (ID: ${row.id})`}
+                </div>
+              ) : (
+                <div className="text-xs text-yellow-400 mt-1">
+                  ⚠ Not selected yet - {row.type === 'artist' ? 'type artist name and select from dropdown' : 'type song details and select from dropdown'}
+                </div>
+              )}
             </div>
           ))}
-          <button type="button" onClick={addRow} className="border-2 border-blue-500 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 hover:scale-105 transition-all px-3 py-1.5 rounded-lg">Add Another Song</button>
+          <button 
+            type="button" 
+            onClick={addRow} 
+            className="border-2 border-blue-500 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 hover:scale-105 transition-all px-3 py-1.5 rounded-lg"
+          >
+            Add Another Item
+          </button>
         </fieldset>
         <fieldset className="border border-gray-700 rounded p-4 bg-gray-800">
           <legend className="font-semibold text-teal-300">Parameters</legend>

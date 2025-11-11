@@ -209,6 +209,7 @@ func main() {
 
 	// Public endpoint used by the frontend to run Alchemy (may be allowed for non-admin flows)
 	r.POST("/api/alchemy", AlchemyHandler)
+	r.GET("/api/alchemy/search_artists", SearchArtistsHandler)
 
 	// Radio endpoints (authenticated)
 	r.POST("/api/radios", AuthMiddleware(), createRadioHandler)

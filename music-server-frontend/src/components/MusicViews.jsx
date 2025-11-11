@@ -1565,7 +1565,7 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
                                 </svg>
                             </button>
                             {/* Instant Mix button in bottom-left corner aligned with star */}
-                            {audioMuseUrl && onSimilarArtists && artist.songCount >= 5 && (
+                            {audioMuseUrl && onSimilarArtists && (
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();
