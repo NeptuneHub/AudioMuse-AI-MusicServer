@@ -12,21 +12,32 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type AudioMuseSongInfo struct {
+	ItemID string `json:"item_id"`
+	Title  string `json:"title"`
+	Artist string `json:"author"`
+}
+
 // getSongsByIDs is a helper function to fetch song details from a list of IDs, preserving order.
 func getSongsByIDs(ids []string) ([]SubsonicSong, error) {
 	if len(ids) == 0 {
 		return []SubsonicSong{}, nil
 	}
 
-	// Convert string IDs to []interface{} for the query
-	args := "'" + strings.Join(ids, `','`) + `'`
+	// Create placeholders for the IN clause, e.g., (?, ?, ?)
+	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
 	query := fmt.Sprintf(`
 		SELECT id, title, artist, album, path, play_count, last_played, duration
 		FROM songs WHERE id IN (%s)
-	`, args)
+	`, placeholders)
 
-	log.Printf("Query for songs by IDs: %v", query)
-	rows, err := db.Query(query)
+	// Convert string IDs to []interface{} for the query
+	args := make([]interface{}, len(ids))
+	for i, v := range ids {
+		args[i] = v
+	}
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -59,46 +70,30 @@ func getSongsByIDs(ids []string) ([]SubsonicSong, error) {
 	return orderedSongs, nil
 }
 
-func getItemIdByTitleAndArtist(title string, artist string) (songId string) {
-	// Resolving local DB song IDs by title and artist. AudioMuse-AI Core maintains its
-	// database and the item_id is a base62 UUID. By definition, this will be
-	// different between the music server and the AI server.
-	query := fmt.Sprintf(`SELECT id FROM songs WHERE title = "%s" AND artist = "%s" LIMIT 1`,
-		title, artist)
+func getSongsByTitleAndArtist(tracks []AudioMuseSongInfo) ([]SubsonicSong, error) {
 
-	var songID string
-	err := db.QueryRow(query, title, artist).Scan(&songID)
-	if err != nil {
-		log.Printf("Error getting song row by title and artist: %v", err)
-		return
+	var songs []SubsonicSong
+	for _, track := range tracks {
+		query := fmt.Sprintf(`SELECT id, title, artist, album, path, play_count, last_played, duration FROM songs WHERE title = "%s" AND artist = "%s" LIMIT 1`,
+			track.Title, track.Artist)
+
+		var song SubsonicSong
+		var lastPlayed, path, playCount, duration interface{} // Use interface{} to handle NULLs gracefully
+		// Set duration if it's a valid integer
+		if dur, ok := duration.(int64); ok {
+			song.Duration = int(dur)
+		}
+		err := db.QueryRow(query).Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &path, &playCount, &lastPlayed, &duration)
+		if err != nil {
+			log.Printf("Failed to find Title: %s by Artist: %s, is it in your library?", track.Title, track.Artist)
+			log.Printf("You can check by conencting to your local DB and running the query:")
+			log.Printf("SELECT id, title, artist, album, path, play_count, last_played, duration FROM songs WHERE title = \"%s\" AND artist = \"%s\" LIMIT 1;", track.Title, track.Artist)
+		} else {
+			songs = append(songs, song)
+		}
 	}
 
-	if songID == "" {
-		log.Printf("songID not found for %s and %s. Confirm local database has track.",
-			title, artist)
-		return
-	}
-
-	return songID
-}
-
-func getSongByTitleAndArtist(title string, artist string) (SubsonicSong, error) {
-	query := fmt.Sprintf(`SELECT id, title, artist, album, path, play_count, last_played, duration FROM songs WHERE title = "%s" AND artist = "%s" LIMIT 1`,
-		title, artist)
-
-	var song SubsonicSong
-	var lastPlayed, path, playCount, duration interface{} // Use interface{} to handle NULLs gracefully
-	// Set duration if it's a valid integer
-	if dur, ok := duration.(int64); ok {
-		song.Duration = int(dur)
-	}
-	err := db.QueryRow(query).Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &path, &playCount, &lastPlayed, &duration)
-	if err != nil {
-		log.Printf("Error getting song row by title and artist: %v", err)
-		return song, err
-	}
-
-	return song, nil
+	return songs, nil
 }
 
 func subsonicGetSimilarSongs(c *gin.Context) {
@@ -142,25 +137,16 @@ func subsonicGetSimilarSongs(c *gin.Context) {
 		return
 	}
 
-	var similarTracks []struct {
-		Title  string `json:"title"`
-		Artist string `json:"author"`
-	}
+	var similarTracks []AudioMuseSongInfo
 	if err := json.Unmarshal(body, &similarTracks); err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to parse similar tracks from AudioMuse-AI Core."))
 		return
 	}
 
 	var songs []SubsonicSong
-	for _, track := range similarTracks {
-		var song, err = getSongByTitleAndArtist(track.Title, track.Artist)
-		if err != nil {
-			log.Printf("Failed to find Title: %s by Artist: %s, is it in your library?", track.Title, track.Artist)
-			log.Printf("You can check by conencting to your local DB and running the query:")
-			log.Printf("SELECT id, title, artist, album, path, play_count, last_played, duration FROM songs WHERE title = \"%s\" AND artist = \"%s\" LIMIT 1;", track.Title, track.Artist)
-		} else {
-			songs = append(songs, song)
-		}
+	songs, err = getSongsByTitleAndArtist(similarTracks)
+	if err != nil {
+		log.Printf("Failed to retrieve songs from local database: %v", err)
 	}
 
 	response := newSubsonicResponse(&SubsonicDirectory{
