@@ -68,11 +68,12 @@ func subsonicGetSimilarSongs(c *gin.Context) {
 	// Allow all authenticated users to request similar songs (Instant Mix).
 	_ = c.MustGet("user").(User)
 
-	songId := c.Query("id")
+	songTitle := c.Query("title")
+	songArtist := c.Query("artist")
 	count := c.DefaultQuery("count", "20")
 
-	if songId == "" {
-		subsonicRespond(c, newSubsonicErrorResponse(10, "Parameter 'id' is required."))
+	if songTitle == "" || songArtist == "" {
+		subsonicRespond(c, newSubsonicErrorResponse(10, "Parameters 'artist' and 'title' are required."))
 		return
 	}
 
@@ -84,7 +85,7 @@ func subsonicGetSimilarSongs(c *gin.Context) {
 	}
 
 	// Forward the request
-	resp, err := http.Get(fmt.Sprintf("%s/api/similar_tracks?item_id=%s&n=%s", coreURL, songId, count))
+	resp, err := http.Get(fmt.Sprintf("%s/api/similar_tracks?title=%s&artist=%s&n=%s", coreURL, songTitle, songArtist, count))
 	if err != nil {
 		log.Printf("Error calling AudioMuse-AI Core for similar tracks: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))

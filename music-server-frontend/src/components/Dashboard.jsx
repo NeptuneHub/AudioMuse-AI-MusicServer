@@ -321,7 +321,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
         setMixMessage(`Generating Instant Mix for "${song.title}"...`);
         setQueueViewOpen(false); // Close queue if it's open
         try {
-            const data = await subsonicFetch('getSimilarSongs.view', { id: song.id, count: 20 });
+            const data = await subsonicFetch('getSimilarSongs.view', { title: song.title, artist: song.artist, count: 20 });
             let similarSongs = data.directory?.song || [];
             similarSongs = Array.isArray(similarSongs) ? similarSongs : [similarSongs].filter(Boolean);
 
