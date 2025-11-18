@@ -47,6 +47,11 @@ func subsonicGetPlaylists(c *gin.Context) {
 		playlists = append(playlists, p)
 	}
 
+	// Ensure playlists is never nil for proper JSON marshaling
+	if playlists == nil {
+		playlists = []SubsonicPlaylist{}
+	}
+
 	subsonicRespond(c, newSubsonicResponse(&SubsonicPlaylists{Playlists: playlists}))
 }
 
@@ -326,7 +331,6 @@ func subsonicUpdatePlaylist(c *gin.Context) {
 
 func subsonicDeletePlaylist(c *gin.Context) {
 	user := c.MustGet("user").(User)
-	_ = user // Auth is handled by middleware
 
 	playlistID := c.Query("id")
 	if playlistID == "" {
@@ -334,37 +338,68 @@ func subsonicDeletePlaylist(c *gin.Context) {
 		return
 	}
 
-	// ON DELETE CASCADE in the schema handles deleting from playlist_songs
-	// Check owner and admin status to decide if deletion is allowed
+	log.Printf("[DELETE_PLAYLIST] User '%s' (ID: %d, IsAdmin: %t) requesting to delete playlist ID: %s",
+		user.Username, user.ID, user.IsAdmin, playlistID)
+
+	// Check if playlist exists and get owner info
 	var ownerId int
 	var ownerIsAdmin bool
 	err := db.QueryRow("SELECT p.user_id, u.is_admin FROM playlists p JOIN users u ON p.user_id = u.id WHERE p.id = ?", playlistID).Scan(&ownerId, &ownerIsAdmin)
 	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or permission denied."))
+		log.Printf("[DELETE_PLAYLIST] Failed to find playlist ID %s: %v", playlistID, err)
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found."))
 		return
 	}
 
-	if ownerId != user.ID {
-		// If the playlist was created by an admin, only admins can delete it
-		if ownerIsAdmin && user.IsAdmin {
-			// allowed
+	log.Printf("[DELETE_PLAYLIST] Playlist ID %s owned by user ID %d (IsAdmin: %t)", playlistID, ownerId, ownerIsAdmin)
+
+	// Permission check:
+	// - Admin playlists: can be deleted by ANY admin
+	// - User playlists: can ONLY be deleted by the owner
+	canDelete := false
+
+	if ownerIsAdmin {
+		// Admin playlist - any admin can delete
+		if user.IsAdmin {
+			canDelete = true
+			log.Printf("[DELETE_PLAYLIST] Admin playlist - requester is admin - deletion allowed")
 		} else {
-			subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or permission denied."))
-			return
+			log.Printf("[DELETE_PLAYLIST] Admin playlist - requester is not admin - deletion denied")
+		}
+	} else {
+		// User playlist - only owner can delete
+		if ownerId == user.ID {
+			canDelete = true
+			log.Printf("[DELETE_PLAYLIST] User playlist - owner matches requester - deletion allowed")
+		} else {
+			log.Printf("[DELETE_PLAYLIST] User playlist - owner does not match requester - deletion denied")
 		}
 	}
 
+	if !canDelete {
+		log.Printf("[DELETE_PLAYLIST] Permission denied - ownerID=%d, ownerIsAdmin=%t, userID=%d, userIsAdmin=%t",
+			ownerId, ownerIsAdmin, user.ID, user.IsAdmin)
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Permission denied."))
+		return
+	}
+
+	log.Printf("[DELETE_PLAYLIST] Executing DELETE FROM playlists WHERE id = %s", playlistID)
 	res, err := db.Exec("DELETE FROM playlists WHERE id = ?", playlistID)
 	if err != nil {
+		log.Printf("[DELETE_PLAYLIST] DELETE query failed: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Error deleting playlist."))
 		return
 	}
 
 	rowsAffected, _ := res.RowsAffected()
+	log.Printf("[DELETE_PLAYLIST] DELETE query executed - rows affected: %d", rowsAffected)
+
 	if rowsAffected == 0 {
-		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found or permission denied."))
+		log.Printf("[DELETE_PLAYLIST] No rows deleted for playlist ID %s", playlistID)
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Playlist not found."))
 		return
 	}
 
+	log.Printf("[DELETE_PLAYLIST] Successfully deleted playlist ID %s", playlistID)
 	subsonicRespond(c, newSubsonicResponse(nil))
 }
