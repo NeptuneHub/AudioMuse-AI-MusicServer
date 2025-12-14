@@ -379,7 +379,10 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                 if (baseList.length === 0 && !searchTerm) {
                     let songList = [];
                     if (filter?.preloadedSongs) songList = filter.preloadedSongs;
-                    else if (filter?.similarToSongId) {
+                    else if (filter?.type === 'clap-search' && filter?.results) {
+                        // Handle CLAP search results
+                        songList = filter.results;
+                    } else if (filter?.similarToSongId) {
                         const data = await subsonicFetch('getSimilarSongs.view', { id: filter.similarToSongId, count: PAGE_SIZE });
                         songList = data.directory?.song || [];
                     } else if (filter) {

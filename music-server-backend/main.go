@@ -223,6 +223,10 @@ func main() {
 	r.GET("/api/voyager/search_tracks", AuthMiddleware(), VoyagerSearchTracksHandler)
 	r.POST("/api/map/create_playlist", AuthMiddleware(), MapCreatePlaylistHandler)
 
+	// CLAP search endpoints (authenticated)
+	r.POST("/api/clap/search", AuthMiddleware(), clapSearchHandler)
+	r.GET("/api/clap/top_queries", AuthMiddleware(), clapTopQueriesHandler)
+
 	// Serve static files from React build
 	r.Static("/static", "/app/music-server-frontend/build/static")
 	r.StaticFile("/favicon.ico", "/app/music-server-frontend/build/favicon.ico")

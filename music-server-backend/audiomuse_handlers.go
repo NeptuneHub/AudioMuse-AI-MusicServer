@@ -258,3 +258,147 @@ func subsonicGetSonicFingerprint(c *gin.Context) {
 	})
 	subsonicRespond(c, response)
 }
+
+// clapSearchHandler handles CLAP-based text search for songs.
+func clapSearchHandler(c *gin.Context) {
+	// Allow all authenticated users to search via CLAP.
+	// JWT auth sets username in context
+	_ = c.MustGet("username").(string)
+
+	var requestBody struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+
+	if err := c.ShouldBindJSON(&requestBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	if requestBody.Query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Query parameter is required"})
+		return
+	}
+
+	if requestBody.Limit == 0 {
+		requestBody.Limit = 50
+	}
+
+	var coreURL string
+	err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "AudioMuse-AI Core URL not configured"})
+		return
+	}
+
+	// Prepare the request to the AudioMuse-AI Core
+	reqBody := map[string]interface{}{
+		"query": requestBody.Query,
+		"limit": requestBody.Limit,
+	}
+	reqJSON, _ := json.Marshal(reqBody)
+
+	resp, err := http.Post(
+		fmt.Sprintf("%s/api/clap/search", coreURL),
+		"application/json",
+		strings.NewReader(string(reqJSON)),
+	)
+	if err != nil {
+		log.Printf("Error calling AudioMuse-AI Core for CLAP search: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to AudioMuse-AI Core service"})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from AudioMuse-AI Core"})
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("AudioMuse-AI Core returned non-OK status for CLAP search: %d - %s", resp.StatusCode, string(body))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AudioMuse-AI Core error: %s", string(body))})
+		return
+	}
+
+	var clapResponse struct {
+		Query   string `json:"query"`
+		Count   int    `json:"count"`
+		Results []struct {
+			ItemID     string  `json:"item_id"`
+			Title      string  `json:"title"`
+			Author     string  `json:"author"`
+			Similarity float64 `json:"similarity"`
+		} `json:"results"`
+	}
+
+	if err := json.Unmarshal(body, &clapResponse); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse CLAP search results"})
+		return
+	}
+
+	// Extract song IDs and fetch full song details
+	var songIDs []string
+	for _, result := range clapResponse.Results {
+		songIDs = append(songIDs, result.ItemID)
+	}
+
+	songs, err := getSongsByIDs(songIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error fetching song details"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"query": clapResponse.Query,
+		"count": clapResponse.Count,
+		"songs": songs,
+	})
+}
+
+// clapTopQueriesHandler retrieves the top CLAP queries.
+func clapTopQueriesHandler(c *gin.Context) {
+	// Allow all authenticated users to view top queries.
+	// JWT auth sets username in context
+	_ = c.MustGet("username").(string)
+
+	var coreURL string
+	err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "AudioMuse-AI Core URL not configured"})
+		return
+	}
+
+	resp, err := http.Get(fmt.Sprintf("%s/api/clap/top_queries", coreURL))
+	if err != nil {
+		log.Printf("Error calling AudioMuse-AI Core for CLAP top queries: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to AudioMuse-AI Core service"})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from AudioMuse-AI Core"})
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("AudioMuse-AI Core returned non-OK status for CLAP top queries: %d - %s", resp.StatusCode, string(body))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AudioMuse-AI Core error: %s", string(body))})
+		return
+	}
+
+	var topQueriesResponse struct {
+		Queries []string `json:"queries"`
+		Ready   bool     `json:"ready"`
+	}
+
+	if err := json.Unmarshal(body, &topQueriesResponse); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse CLAP top queries"})
+		return
+	}
+
+	c.JSON(http.StatusOK, topQueriesResponse)
+}

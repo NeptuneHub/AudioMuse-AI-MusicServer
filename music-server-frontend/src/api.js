@@ -216,3 +216,18 @@ export async function updateRadioName(radioId, name) {
 export async function getSimilarArtists(artistId, count = 20) {
     return await subsonicFetch('getSimilarArtists2.view', { id: artistId, count });
 }
+
+// CLAP search functions
+export async function clapSearch(query, limit = 50) {
+    const res = await apiFetch('/api/clap/search', {
+        method: 'POST',
+        body: JSON.stringify({ query, limit })
+    });
+    return await res.json();
+}
+
+export async function getClapTopQueries() {
+    const res = await apiFetch('/api/clap/top_queries');
+    return await res.json();
+}
+

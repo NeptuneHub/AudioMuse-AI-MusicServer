@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Songs, Albums, Artists, AddToPlaylistModal } from './MusicViews.jsx';
 import RadioPage from './RadioPage.jsx';
+import TextSongSearch from './TextSongSearch.jsx';
 import Map from './Map.jsx';
 import Playlists from './Playlists.jsx';
 import AdminPanel from './AdminPanel.jsx';
@@ -423,26 +424,28 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     });
     
     // --- Navigation ---
-    const NavLink = ({ page, title, children }) => {
+	const NavLink = ({ page, title, children, disabled = false }) => {
 		const isActive = currentView.page === page;
 		return (
 			<button 
-				onClick={() => handleResetNavigation(page, title)} 
+				onClick={() => !disabled && handleResetNavigation(page, title)} 
+				disabled={disabled}
+				title={disabled ? 'AudioMuse-AI Core must be configured to use this feature' : ''}
 				className={`relative w-full md:w-auto text-left px-3 lg:px-4 py-2 rounded-lg font-semibold transition-all duration-300 text-sm lg:text-base ${
-					isActive 
-						? 'bg-gradient-accent text-white shadow-glow' 
-						: 'text-gray-300 hover:bg-dark-700 hover:text-white'
+					disabled
+						? 'text-gray-600 cursor-not-allowed'
+						: isActive 
+							? 'bg-gradient-accent text-white shadow-glow' 
+							: 'text-gray-300 hover:bg-dark-700 hover:text-white'
 				}`}
 			>
 				{children}
-				{isActive && (
+				{isActive && !disabled && (
 					<span className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-1/2 h-0.5 bg-accent-400"></span>
 				)}
 			</button>
 		);
-	};
-
-	return (
+	};	return (
 		<div className="bg-dark-800 min-h-screen">
 			{/* Enhanced Navigation Bar */}
 			<nav className="glass fixed top-0 left-0 right-0 z-20 border-b border-dark-600">
@@ -457,8 +460,9 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						<NavLink page="artists" title="Artists">Artists</NavLink>
 						<NavLink page="albums" title="All Albums">Albums</NavLink>
 						<NavLink page="songs" title="Songs">Songs</NavLink>
-						<NavLink page="radio" title="Radio">Radio</NavLink>
-						<NavLink page="map" title="Map">Map</NavLink>
+						<NavLink page="text-search" title="Text Search" disabled={!audioMuseUrl}>Text Search</NavLink>
+						<NavLink page="radio" title="Radio" disabled={!audioMuseUrl}>Radio</NavLink>
+						<NavLink page="map" title="Map" disabled={!audioMuseUrl}>Map</NavLink>
 						<NavLink page="playlists" title="Playlists">Playlists</NavLink>
 						{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
 						
@@ -513,8 +517,9 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						<NavLink page="artists" title="Artists">Artists</NavLink>
 						<NavLink page="albums" title="All Albums">Albums</NavLink>
 						<NavLink page="songs" title="Songs">Songs</NavLink>
-						<NavLink page="radio" title="Radio">Radio</NavLink>
-						<NavLink page="map" title="Map">Map</NavLink>
+						<NavLink page="text-search" title="Text Search" disabled={!audioMuseUrl}>Text Search</NavLink>
+						<NavLink page="radio" title="Radio" disabled={!audioMuseUrl}>Radio</NavLink>
+						<NavLink page="map" title="Map" disabled={!audioMuseUrl}>Map</NavLink>
 						<NavLink page="playlists" title="Playlists">Playlists</NavLink>
 						{isAdmin && <NavLink page="admin" title="Admin Panel">Admin</NavLink>}
 						<NavLink page="settings" title="Settings">Settings</NavLink>
@@ -552,6 +557,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                     {currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
                     {currentView.page === 'artists' && <Artists credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onSimilarArtists={handleSimilarArtists} similarTo={currentView.similarTo} />}
                     {currentView.page === 'playlists' && <Playlists credentials={credentials} isAdmin={isAdmin} onNavigate={handleNavigate} />}
+                    {currentView.page === 'text-search' && <TextSongSearch onNavigate={handleNavigate} />}
                     {currentView.page === 'radio' && <RadioPage onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} />}
                     {currentView.page === 'map' && <Map onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} onRemoveFromQueue={handleRemoveFromQueue} onClearQueue={handleClearQueue} playQueue={playQueue} />}
                     {currentView.page === 'admin' && isAdmin && <AdminPanel onConfigChange={fetchConfig} />}
