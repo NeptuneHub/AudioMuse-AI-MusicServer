@@ -34,9 +34,9 @@ After deploying AudioMsue-AI-Music server it could be reached BOTH from this url
 
 ## Music server configuration
 
-The first login can be don with:
+The first login can be done with:
 * User: admin
-* passwoord: admin
+* password: admin
 
 The configuration needed is go in the admin tab and:
 * add the path of the song, and start the scanning, depending from the size of the library could takes several minutes. This is just to add the  song to the mediaserver
@@ -52,7 +52,7 @@ After both of this point done, you can start the Sonic Analysis directly from th
 **IMPORTANT:** This is a Open Subsonic API compliant server, so you need to configure AudioMuse-AI with the **navidrome** deployment, setting url, user and password correctly.
 
 # Developer
-This is instruction to run both backend and frontned on your developing envirorment
+This is instruction to run both backend and frontned on your developing environment
 
 ## Compile and run backend
 Going in /music-server-backend/
@@ -182,5 +182,6 @@ npm start
 Frontend will be reacheable on http://localhost:3000/ you can do the first login with admin/admin
 
 **IMPORTANT** as you can see, running the code OUT of the container, you had the front-end on the different port 3000
+
 
 
