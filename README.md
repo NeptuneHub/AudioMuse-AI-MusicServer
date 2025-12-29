@@ -42,7 +42,7 @@ The configuration needed is go in the admin tab and:
 * add the path of the song, and start the scanning, depending from the size of the library could takes several minutes. This is just to add the  song to the mediaserver
 * configure the path of `AudioMuse-AI` (the core contianer)
 
-After both of this point done, you can start the Sonic Analysis diectly from the Music Server, after the analysis is completed you can run the integrated Sonic Analysis function that now are:
+After both of this point done, you can start the Sonic Analysis directly from the Music Server, after the analysis is completed you can run the integrated Sonic Analysis function that now are:
 * Instan mix for both Artist and Song
 * Sonic Path
 * Sonic Fingerprint
@@ -182,4 +182,5 @@ npm start
 Frontend will be reacheable on http://localhost:3000/ you can do the first login with admin/admin
 
 **IMPORTANT** as you can see, running the code OUT of the container, you had the front-end on the different port 3000
+
 
