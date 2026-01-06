@@ -89,6 +89,8 @@ func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 			bodyMap["configurations"] = body
 		case *SubsonicLibraryPaths:
 			bodyMap["libraryPaths"] = body
+		case *SubsonicMusicFolders:
+			bodyMap["musicFolders"] = body
 		case *OpenSubsonicExtensions:
 			bodyMap["openSubsonicExtensions"] = body.Extensions // Directly embed the slice
 		case *ApiKeyResponse:
