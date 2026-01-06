@@ -253,7 +253,7 @@ type SubsonicGenres struct {
 
 type SubsonicGenre struct {
 	XMLName    xml.Name `xml:"genre" json:"-"`
-	Name       string   `xml:",chardata" json:"name"`
+	Name       string   `xml:",chardata" json:"value"`
 	SongCount  int      `xml:"songCount,attr" json:"songCount"`
 	AlbumCount int      `xml:"albumCount,attr" json:"albumCount"`
 }
