@@ -184,8 +184,10 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                 // Split semicolon-separated genres and remove duplicates
                 const individualGenres = [];
                 allGenres.forEach(genre => {
-                    if (genre.name) {
-                        const splitGenres = genre.name.split(';').map(g => g.trim()).filter(g => g);
+                    // Backend returns genre name in 'value' field
+                    const genreName = genre.value || genre.name;
+                    if (genreName) {
+                        const splitGenres = genreName.split(';').map(g => g.trim()).filter(g => g);
                         splitGenres.forEach(g => {
                             if (!individualGenres.find(existing => existing.name === g)) {
                                 individualGenres.push({ name: g });
@@ -1131,8 +1133,10 @@ export function Albums({ credentials, filter, onNavigate }) {
                 // Split semicolon-separated genres and remove duplicates
                 const individualGenres = [];
                 allGenres.forEach(genre => {
-                    if (genre.name) {
-                        const splitGenres = genre.name.split(';').map(g => g.trim()).filter(g => g);
+                    // Backend returns genre name in 'value' field
+                    const genreName = genre.value || genre.name;
+                    if (genreName) {
+                        const splitGenres = genreName.split(';').map(g => g.trim()).filter(g => g);
                         splitGenres.forEach(g => {
                             if (!individualGenres.find(existing => existing.name === g)) {
                                 individualGenres.push({ name: g });

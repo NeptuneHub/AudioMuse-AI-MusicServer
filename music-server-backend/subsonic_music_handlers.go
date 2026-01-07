@@ -850,7 +850,11 @@ func subsonicGetArtists(c *gin.Context) {
 	query := `
 		SELECT
 			s.artist,
-			COUNT(DISTINCT s.album_path),
+			COUNT(DISTINCT CASE
+				WHEN s.album_artist IS NOT NULL AND s.album_artist != '' THEN s.album_artist || '|||' || s.album
+				WHEN s.artist IS NOT NULL AND s.artist != '' THEN s.artist || '|||' || s.album
+				ELSE s.album_path
+			END),
 			COUNT(*)
 		FROM songs s
 		WHERE s.artist != ''
@@ -1614,7 +1618,13 @@ func subsonicGetGenres(c *gin.Context) {
 	}
 
 	query := `
-		SELECT COALESCE(genre, 'Unknown') as genre, COUNT(*) as song_count, COUNT(DISTINCT album_path) as album_count
+		SELECT COALESCE(genre, 'Unknown') as genre, COUNT(*) as song_count, COUNT(DISTINCT 
+			CASE
+				WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
+				WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
+				ELSE album_path
+			END
+		) as album_count
 		FROM songs 
 		GROUP BY COALESCE(genre, 'Unknown')
 		ORDER BY genre COLLATE NOCASE

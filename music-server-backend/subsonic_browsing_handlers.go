@@ -46,11 +46,15 @@ func subsonicGetIndexes(c *gin.Context) {
 		}
 	}
 
-	// Query all artists with album counts (by folder path)
+	// Query all artists with album counts using priority grouping
 	query := `
 		SELECT
 			s.artist,
-			COUNT(DISTINCT s.album_path)
+			COUNT(DISTINCT CASE
+				WHEN s.album_artist IS NOT NULL AND s.album_artist != '' THEN s.album_artist || '|||' || s.album
+				WHEN s.artist IS NOT NULL AND s.artist != '' THEN s.artist || '|||' || s.album
+				ELSE s.album_path
+			END)
 		FROM songs s
 		WHERE s.artist != '' AND s.cancelled = 0
 		GROUP BY s.artist

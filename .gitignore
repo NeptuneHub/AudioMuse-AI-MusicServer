@@ -109,5 +109,5 @@ music-server-frontend-go
 music-server-backend/data/music.db
 music-server-backend/data/music.db-shm
 music-server-backend/data/music.db-wal
-.vscode/settings.json
+.vscode/
 music-server-backend/data/.DS_Store
