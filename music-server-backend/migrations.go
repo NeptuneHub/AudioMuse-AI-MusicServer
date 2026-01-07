@@ -183,6 +183,11 @@ func migrateDB() error {
 		log.Printf("migrateDB: ensureColumnExists waveform_peaks: %v", err)
 	}
 
+	// Add album_artist column for proper album grouping
+	if err := ensureColumnExists(db, "songs", "album_artist", "TEXT DEFAULT ''"); err != nil {
+		log.Printf("migrateDB: ensureColumnExists album_artist: %v", err)
+	}
+
 	log.Println("migrateDB: completed migrations (idempotent)")
 	return nil
 }

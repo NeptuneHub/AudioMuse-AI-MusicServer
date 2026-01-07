@@ -21,6 +21,7 @@ type Song struct {
 	Title               string   `json:"title"`
 	Artist              string   `json:"artist"`
 	Album               string   `json:"album"`
+	AlbumArtist         string   `json:"albumArtist"`
 	Path                string   `json:"-"`        // Don't expose path in JSON
 	Duration            int      `json:"duration"` // Duration in seconds
 	PlayCount           int      `json:"playCount"`

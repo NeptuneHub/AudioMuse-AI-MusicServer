@@ -356,6 +356,12 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     const songList = data.searchResult2?.song || data.searchResult3?.song || [];
                     let newSongs = Array.isArray(songList) ? songList : [songList].filter(Boolean);
                     
+                    // Update total count from search response
+                    const totalFromSearch = data.searchResult2?.songCount || data.searchResult3?.songCount || 0;
+                    if (totalFromSearch > 0) {
+                        setTotalCount(totalFromSearch);
+                    }
+                    
                     // Client-side genre filtering for search results
                     if (selectedGenre) {
                         newSongs = newSongs.filter(song => {
@@ -372,6 +378,12 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     setSongs(newSongs);
                     setAllSongs(newSongs);
                     setHasMore(false);  // No pagination
+                    return;
+                } else if (searchTerm.length > 0 && searchTerm.length < 3) {
+                    // Don't search yet (0,1,2 chars), just clear results
+                    setSongs([]);
+                    setAllSongs([]);
+                    setHasMore(false);
                     return;
                 }
 
@@ -1210,8 +1222,21 @@ export function Albums({ credentials, filter, onNavigate }) {
                     const data = await subsonicFetch('getAlbumList2.view', params);
                     albumList = data.albumList2?.album || [];
                 } else if (query) {
+                    // Only search if query is >= 3 characters
+                    if (query.length < 3) {
+                        setHasMore(false);
+                        return;
+                    }
                     const data = await subsonicFetch('search2.view', { query, albumCount: PAGE_SIZE, albumOffset: albums.length });
                     albumList = data.searchResult2?.album || data.searchResult3?.album || [];
+                    
+                    // Update total count from search response (only on first load)
+                    if (albums.length === 0) {
+                        const totalFromSearch = data.searchResult2?.albumCount || data.searchResult3?.albumCount || 0;
+                        if (totalFromSearch > 0) {
+                            setTotalCount(totalFromSearch);
+                        }
+                    }
                 } else {
                     const params = { type: 'alphabeticalByName', size: PAGE_SIZE, offset: albums.length };
                     if (selectedGenre) params.genre = selectedGenre;
@@ -1435,14 +1460,21 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
                         const data = await getStarredSongs();
                         const artistList = data.starred2?.artist || [];
                         newArtists = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
+                        setTotalCount(newArtists.length);
                         setHasMore(false); // All starred artists loaded at once
                     } else {
                         setHasMore(false);
                     }
                 } else {
-                    // Use search2.view for all cases with proper pagination
-                    // Use "*" as query for listing all artists (backend supports this)
-                    const query = searchTerm.length >= 1 ? searchTerm : '*';
+                    // Only search when searchTerm is >= 3 characters (never search at 0,1,2)
+                    if (searchTerm.length > 0 && searchTerm.length < 3) {
+                        // Don't search yet, just stop loading
+                        setHasMore(false);
+                        return;
+                    }
+                    
+                    const query = searchTerm.length >= 3 ? searchTerm : '*';
+                    
                     const data = await subsonicFetch('search2.view', { 
                         query: query, 
                         artistCount: PAGE_SIZE, 
@@ -1453,6 +1485,15 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
                     
                     const artistList = data.searchResult2?.artist || data.searchResult3?.artist || [];
                     newArtists = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
+                    
+                    // Update total count from search response (only on first load)
+                    if (artists.length === 0) {
+                        const totalFromSearch = data.searchResult2?.artistCount || data.searchResult3?.artistCount || 0;
+                        if (totalFromSearch > 0) {
+                            setTotalCount(totalFromSearch);
+                        }
+                    }
+                    
                     setHasMore(newArtists.length === PAGE_SIZE);
                 }
                 
@@ -1508,7 +1549,7 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
                     </div>
                     <input
                         type="text"
-                        placeholder="Search for an artist..."
+                        placeholder="Search for an artist... (min 3 characters)"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         disabled={isStarredFilter}

@@ -169,11 +169,12 @@ func processPath(scanPath string) int64 {
 				// This ensures date_added is set for old songs missing it, and date_updated is always current
 				// Mark as not cancelled when re-adding
 				albumPath := filepath.Dir(path) // Store directory path for grouping
-				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, cancelled) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
 						artist=excluded.artist, 
+						album_artist=excluded.album_artist,
 						album=excluded.album,
 						album_path=excluded.album_path, 
 						genre=excluded.genre,
@@ -181,7 +182,7 @@ func processPath(scanPath string) int64 {
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated,
 						cancelled=0`,
-					songID, meta.Title(), meta.Artist(), meta.Album(), path, albumPath, genre, duration, currentTime, currentTime)
+					songID, meta.Title(), meta.Artist(), meta.Album(), meta.AlbumArtist(), path, albumPath, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -261,11 +262,12 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 
 				// Use UPSERT to update existing songs or insert new ones
 				albumPath := filepath.Dir(path) // Store directory path for grouping
-				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, cancelled) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
 						artist=excluded.artist, 
+						album_artist=excluded.album_artist,
 						album=excluded.album,
 						album_path=excluded.album_path, 
 						genre=excluded.genre,
@@ -273,7 +275,7 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated,
 						cancelled=0`,
-					songID, meta.Title(), meta.Artist(), meta.Album(), path, albumPath, genre, duration, currentTime, currentTime)
+					songID, meta.Title(), meta.Artist(), meta.Album(), meta.AlbumArtist(), path, albumPath, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -339,6 +341,7 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				title := meta.Title()
 				artist := meta.Artist()
 				album := meta.Album()
+				albumArtist := meta.AlbumArtist()
 
 				// Fallback to filename parsing if metadata is empty (like Navidrome does)
 				// Priority: 1. Metadata tags, 2. Filename parsing, 3. Folder structure
@@ -409,12 +412,13 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				var res sql.Result
 				if shouldComputeWaveform && waveformPeaks != "" {
 					// NEW song: Insert with waveform
-					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, waveform_peaks, cancelled) 
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, waveform_peaks, cancelled) 
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 						ON CONFLICT(path) DO UPDATE SET 
 							title=excluded.title, 
 							artist=excluded.artist, 
 							album=excluded.album,
+							album_artist=excluded.album_artist,
 							album_path=excluded.album_path, 
 							genre=excluded.genre,
 							duration=excluded.duration,
@@ -422,10 +426,10 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 							date_updated=excluded.date_updated,
 							waveform_peaks=excluded.waveform_peaks,
 							cancelled=0`,
-						songID, title, artist, album, path, albumPath, genre, duration, currentTime, currentTime, waveformPeaks)
+						songID, title, artist, album, albumArtist, path, albumPath, genre, duration, currentTime, currentTime, waveformPeaks)
 				} else {
 					// EXISTING song (rescan) or new song without waveform: Preserve existing waveform
-					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
 						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 						ON CONFLICT(path) DO UPDATE SET 
 							title=excluded.title, 
@@ -437,7 +441,7 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 							date_added=COALESCE(songs.date_added, excluded.date_added),
 							date_updated=excluded.date_updated,
 							cancelled=0`,
-						songID, title, artist, album, path, albumPath, genre, duration, currentTime, currentTime)
+						songID, title, artist, album, albumArtist, path, albumPath, genre, duration, currentTime, currentTime)
 				}
 
 				if err != nil {
@@ -516,6 +520,7 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 				artist := meta.Artist()
 				album := meta.Album()
 
+				albumArtist := meta.AlbumArtist()
 				// Fallback to filename parsing if metadata is empty (like Navidrome does)
 				// Priority: 1. Metadata tags, 2. Filename parsing, 3. Folder structure
 				if title == "" {
@@ -585,12 +590,13 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 				var res sql.Result
 				if shouldComputeWaveform && waveformPeaks != "" {
 					// NEW song: Insert with waveform
-					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, waveform_peaks, cancelled) 
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, waveform_peaks, cancelled) 
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 						ON CONFLICT(path) DO UPDATE SET 
 							title=excluded.title, 
 							artist=excluded.artist, 
 							album=excluded.album,
+							album_artist=excluded.album_artist,
 							album_path=excluded.album_path, 
 							genre=excluded.genre,
 							duration=excluded.duration,
@@ -598,10 +604,10 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 							date_updated=excluded.date_updated,
 							waveform_peaks=excluded.waveform_peaks,
 							cancelled=0`,
-						songID, title, artist, album, path, albumPath, genre, duration, currentTime, currentTime, waveformPeaks)
+						songID, title, artist, album, albumArtist, path, albumPath, genre, duration, currentTime, currentTime, waveformPeaks)
 				} else {
 					// EXISTING song (rescan) or new song without waveform: Preserve existing waveform
-					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
 						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 						ON CONFLICT(path) DO UPDATE SET 
 							title=excluded.title, 
@@ -613,7 +619,7 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 							date_added=COALESCE(songs.date_added, excluded.date_added),
 							date_updated=excluded.date_updated,
 							cancelled=0`,
-						songID, title, artist, album, path, albumPath, genre, duration, currentTime, currentTime)
+						songID, title, artist, album, albumArtist, path, albumPath, genre, duration, currentTime, currentTime)
 				}
 
 				if err != nil {

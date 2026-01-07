@@ -119,7 +119,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
     };
     const handleBack = () => navigation.length > 1 && setNavigation(prev => prev.slice(0, -1));
     const handleResetNavigation = (page, title) => {
-        setNavigation([{ page, title }]);
+        setNavigation([{ page, title, filter: null }]); // Reset with null filter to clear all
         setIsMenuOpen(false);
     }
 

@@ -970,10 +970,16 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		orderByClause = "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE"
 	}
 
-	// Count distinct albums by folder path - 1 folder = 1 album
+	// Count distinct albums using same priority grouping logic
 	var totalAlbums int
 	countQuery := fmt.Sprintf(`
-		SELECT COUNT(DISTINCT album_path) 
+		SELECT COUNT(DISTINCT 
+			CASE
+				WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
+				WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
+				ELSE album_path
+			END
+		)
 		FROM songs 
 		%s
 	`, whereClause)
@@ -992,14 +998,17 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		return
 	}
 
-	// Query albums grouped by album_path (directory) ONLY
-	// SIMPLE: 1 folder = 1 album, regardless of metadata differences
-	// Takes album/artist name from first song in each folder
+	// Query albums with priority grouping: 1) album_artist+album, 2) artist+album, 3) path fallback
 	query := fmt.Sprintf(`
-		SELECT album, artist, COALESCE(genre, '') as genre, MIN(id) as album_id
+		SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, '') as genre, MIN(id) as album_id
 		FROM songs 
 		%s
-		GROUP BY album_path
+		GROUP BY 
+			CASE
+				WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
+				WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
+				ELSE album_path
+			END
 		%s 
 		LIMIT ? OFFSET ?
 	`, whereClause, orderByClause)

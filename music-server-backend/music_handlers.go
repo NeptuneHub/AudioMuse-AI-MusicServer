@@ -43,15 +43,26 @@ func getArtists(c *gin.Context) {
 
 func getAlbums(c *gin.Context) {
 	artistFilter := c.Query("artist")
-	// Group by album_path (directory) ONLY - 1 folder = 1 album
-	query := "SELECT album, artist, MIN(id) FROM songs WHERE album != '' AND cancelled = 0"
+	// Group with priority: 1) album_artist+album, 2) artist+album, 3) path (fallback)
+	query := `SELECT 
+		album, 
+		COALESCE(NULLIF(album_artist, ''), artist) as effective_artist, 
+		MIN(id) 
+	FROM songs 
+	WHERE album != '' AND cancelled = 0`
 	args := []interface{}{}
 
 	if artistFilter != "" {
-		query += " AND artist = ?"
-		args = append(args, artistFilter)
+		query += " AND (album_artist = ? OR (album_artist = '' AND artist = ?))"
+		args = append(args, artistFilter, artistFilter)
 	}
-	query += " GROUP BY album_path ORDER BY artist, album"
+	query += ` GROUP BY 
+		CASE
+			WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
+			WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
+			ELSE album_path
+		END
+	ORDER BY effective_artist COLLATE NOCASE, album COLLATE NOCASE`
 
 	rows, err := db.Query(query, args...)
 	if err != nil {

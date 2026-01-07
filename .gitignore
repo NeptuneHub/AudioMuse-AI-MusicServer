@@ -106,3 +106,8 @@ music-server-frontend/package-lock.json
 
 #go frontend
 music-server-frontend-go
+music-server-backend/data/music.db
+music-server-backend/data/music.db-shm
+music-server-backend/data/music.db-wal
+.vscode/settings.json
+music-server-backend/data/.DS_Store

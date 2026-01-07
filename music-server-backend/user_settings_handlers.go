@@ -120,8 +120,14 @@ func getMusicCounts(c *gin.Context) {
 	}
 	db.QueryRow(artistQuery, args...).Scan(&counts.Artists)
 
-	// Count albums by folder path - 1 folder = 1 album
-	albumQuery := "SELECT COUNT(DISTINCT album_path) FROM songs WHERE album_path != '' AND cancelled = 0"
+	// Count albums using priority grouping: album_artist+album, artist+album, or path
+	albumQuery := `SELECT COUNT(DISTINCT 
+		CASE
+			WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
+			WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
+			ELSE album_path
+		END
+	) FROM songs WHERE album != '' AND cancelled = 0`
 	args = []interface{}{}
 	if genre != "" {
 		albumQuery += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
