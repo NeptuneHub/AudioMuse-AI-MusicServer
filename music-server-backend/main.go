@@ -375,7 +375,7 @@ func initDB() {
 	}
 
 	// Populate album_path for existing songs that don't have it set
-	log.Println("Updating album_path for existing songs...")
+	log.Println("Checking/Updating album_path for existing songs...")
 	rows, err := db.Query("SELECT id, path FROM songs WHERE album_path = '' OR album_path IS NULL")
 	if err == nil {
 		defer rows.Close()
@@ -392,9 +392,7 @@ func initDB() {
 					updateCount++
 				}
 			}
-			if updateCount > 0 {
-				log.Printf("Updated album_path for %d existing songs", updateCount)
-			}
+			log.Printf("Checked album_path for existing songs: updated %d rows", updateCount)
 		}
 	}
 
@@ -484,6 +482,55 @@ func initDB() {
 	);`)
 	if err != nil {
 		log.Fatalf("Failed to create library_paths table: %v", err)
+	}
+
+	// Create play_history table for Recently Played tracking (matches migration)
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS play_history (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		song_id TEXT NOT NULL,
+		played_at TEXT NOT NULL,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+		FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE
+	);`)
+	if err != nil {
+		log.Fatalf("Failed to create play_history table: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_play_history_user_played ON play_history (user_id, played_at DESC);`)
+	if err != nil {
+		log.Fatalf("Failed to create play_history index: %v", err)
+	}
+
+	// Create transcoding_settings table (matches migration)
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS transcoding_settings (
+		user_id INTEGER PRIMARY KEY NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 0,
+		format TEXT NOT NULL DEFAULT 'mp3',
+		bitrate INTEGER NOT NULL DEFAULT 128,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	);`)
+	if err != nil {
+		log.Fatalf("Failed to create transcoding_settings table: %v", err)
+	}
+
+	// Create radio_stations table for Radio feature (matches migration)
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS radio_stations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		name TEXT NOT NULL,
+		seed_songs TEXT NOT NULL,
+		temperature REAL NOT NULL DEFAULT 1.0,
+		subtract_distance REAL NOT NULL DEFAULT 0.3,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	);`)
+	if err != nil {
+		log.Fatalf("Failed to create radio_stations table: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_radio_stations_user ON radio_stations (user_id);`)
+	if err != nil {
+		log.Fatalf("Failed to create radio_stations index: %v", err)
 	}
 
 	// Default admin user
