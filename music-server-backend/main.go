@@ -329,11 +329,21 @@ func initDB() {
 		title TEXT,
 		artist TEXT,
 		album TEXT,
+		album_artist TEXT DEFAULT '',
 		path TEXT UNIQUE NOT NULL,
 		play_count INTEGER NOT NULL DEFAULT 0,
 		last_played TEXT,
 		date_added TEXT,
 		date_updated TEXT,
+		starred INTEGER NOT NULL DEFAULT 0,
+		genre TEXT DEFAULT '',
+		album_path TEXT DEFAULT '',
+		duration INTEGER DEFAULT 0,
+		replaygain_track_gain REAL,
+		replaygain_track_peak REAL,
+		replaygain_album_gain REAL,
+		replaygain_album_peak REAL,
+		waveform_peaks TEXT,
 		cancelled INTEGER NOT NULL DEFAULT 0
 	);`)
 	if err != nil {
