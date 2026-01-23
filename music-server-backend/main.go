@@ -533,10 +533,10 @@ func initDB() {
 		log.Fatalf("Failed to create radio_stations index: %v", err)
 	}
 
-	// Default admin user
-	var count int
-	row := db.QueryRow("SELECT COUNT(*) FROM users WHERE username = 'admin'")
-	if err := row.Scan(&count); err == nil && count == 0 {
+	// Default admin user - only create on fresh DB (no users present)
+	var userCount int
+	row := db.QueryRow("SELECT COUNT(*) FROM users")
+	if err := row.Scan(&userCount); err == nil && userCount == 0 {
 		hashedPassword, _ := hashPassword("admin")
 		_, err := db.Exec("INSERT INTO users (username, password_hash, password_plain, is_admin) VALUES (?, ?, ?, ?)", "admin", hashedPassword, "admin", true)
 		if err != nil {
