@@ -47,6 +47,12 @@ func scanSingleLibrary(pathId int) {
 
 	db.Exec("UPDATE scan_status SET songs_added = ? WHERE id = 1", songsAdded)
 
+	// Create a post-scan backup capturing changes from this scan
+	dbPath := getEnv("DATABASE_PATH", "/config/music.db")
+	if err := performBackup(db, dbPath); err != nil {
+		log.Printf("Warning: post-scan backup failed: %v", err)
+	}
+
 	if isScanCancelled.Load() {
 		log.Printf("Scan was cancelled for path %s. Songs added before stop: %d.", path, songsAdded)
 	} else {
@@ -108,6 +114,12 @@ func scanAllLibraries() {
 
 	log.Printf("Total new songs added in this run across all paths: %d.", totalSongsAdded)
 	db.Exec("UPDATE scan_status SET songs_added = ? WHERE id = 1", totalSongsAdded)
+
+	// Create a post-scan backup after finishing the ALL-libraries scan
+	dbPath := getEnv("DATABASE_PATH", "/config/music.db")
+	if err := performBackup(db, dbPath); err != nil {
+		log.Printf("Warning: post-scan backup for all libraries failed: %v", err)
+	}
 }
 
 func processPath(scanPath string) int64 {
@@ -835,6 +847,13 @@ func rescanAllLibraries(c *gin.Context) {
 		return
 	}
 
+	// Create a pre-rescan backup, then clear the database
+	dbPath := getEnv("DATABASE_PATH", "/config/music.db")
+	if err := performBackup(db, dbPath); err != nil {
+		log.Printf("Error: pre-rescan backup failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Pre-rescan backup failed; aborting rescan"})
+		return
+	}
 	// Clear the database first
 	log.Println("Starting full library rescan - clearing existing data...")
 

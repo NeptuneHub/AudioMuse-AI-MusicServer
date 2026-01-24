@@ -32,6 +32,14 @@ func subsonicStartScan(c *gin.Context) {
 		return
 	}
 
+	// Perform a synchronous pre-scan backup first; abort scan if backup fails
+	dbPath := getEnv("DATABASE_PATH", "/config/music.db")
+	if err := performBackup(db, dbPath); err != nil {
+		log.Printf("Pre-scan backup failed: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Pre-scan backup failed; aborting scan."))
+		return
+	}
+
 	_, err = db.Exec("UPDATE scan_status SET is_scanning = 1, songs_added = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
 	if err != nil {
 		log.Printf("Error starting scan in DB: %v", err)

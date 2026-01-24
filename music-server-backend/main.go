@@ -4,13 +4,19 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/mattn/go-sqlite3"
@@ -24,6 +30,9 @@ var isScanCancelled atomic.Bool // Global flag to signal scan cancellation.
 var scheduler *cron.Cron
 var isAnalysisRunning atomic.Bool
 var isClusteringRunning atomic.Bool
+
+// backupMu ensures only one backup runs at a time
+var backupMu sync.Mutex
 
 func loggingMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -80,7 +89,24 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
-	defer db.Close()
+	// NOTE: Do not defer db.Close() here. DB will be closed during graceful shutdown or if a restore is performed.
+
+	// Strengthen SQLite durability and timeouts
+	if _, err := db.Exec("PRAGMA synchronous = FULL"); err != nil {
+		log.Printf("Warning: could not set PRAGMA synchronous: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA wal_autocheckpoint = 1000"); err != nil {
+		log.Printf("Warning: could not set PRAGMA wal_autocheckpoint: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		log.Printf("Warning: could not set PRAGMA busy_timeout: %v", err)
+	}
+
+	// Verify DB integrity on startup and attempt restore from single rotating backup if corrupted
+	if err := checkAndRestoreDB(dbPath); err != nil {
+		log.Printf("ERROR: %v", err)
+		log.Fatal("Database is corrupted and no valid backup available.")
+	}
 
 	initDB()
 	// Run idempotent migrations to cover older DBs that may be missing new tables/keys
@@ -89,6 +115,9 @@ func main() {
 	}
 	startScheduler()
 	StartSessionCleanup() // Start HLS session cleanup
+
+	// Start periodic DB maintenance (checkpoint, integrity checks, optional backups)
+	startDBMaintenance(db, dbPath)
 
 	if _, err := db.Exec("UPDATE scan_status SET is_scanning = 0 WHERE id = 1"); err != nil {
 		log.Fatalf("Failed to reset scan status on startup: %v", err)
@@ -259,6 +288,35 @@ func main() {
 	log.Println("[HTTP/2] h2c (HTTP/2 Cleartext) enabled - multiplexing active for parallel cover art requests")
 	log.Println("[HTTP/2] Multiple cover art images can now be downloaded simultaneously over a single connection")
 
+	// Setup graceful shutdown on SIGINT/SIGTERM
+	stopSig := make(chan os.Signal, 1)
+	signal.Notify(stopSig, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-stopSig
+		log.Printf("Signal %s received, initiating graceful shutdown...", sig)
+		isScanCancelled.Store(true)
+		if scheduler != nil {
+			scheduler.Stop()
+		}
+		// Give background tasks a short grace period to stop
+		grace := 30 * time.Second
+		log.Printf("Waiting up to %s for background tasks to stop...", grace)
+		time.Sleep(grace)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf("HTTP server shutdown error: %v", err)
+		}
+		// Final DB checkpoint and close
+		if _, err := db.Exec("PRAGMA wal_checkpoint(FULL)"); err != nil {
+			log.Printf("Final WAL checkpoint failed: %v", err)
+		}
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing DB: %v", err)
+		}
+		os.Exit(0)
+	}()
+
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server failed to start: %v", err)
 	}
@@ -294,6 +352,227 @@ func corsMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// startDBMaintenance runs periodic WAL checkpoint and integrity checks and optionally writes backups.
+// Config via env: DB_MAINTENANCE_INTERVAL_MIN (default 10), DB_BACKUP_DIR (optional)
+func startDBMaintenance(db *sql.DB, dbPath string) {
+	intervalStr := getEnv("DB_MAINTENANCE_INTERVAL_MIN", "10")
+	intervalMin, err := strconv.Atoi(intervalStr)
+	if err != nil || intervalMin <= 0 {
+		intervalMin = 10
+	}
+	backupDir := getEnv("DB_BACKUP_DIR", "")
+	// Enable periodic backup writes only when DB_PERIODIC_BACKUP_ENABLED=true (default: disabled)
+	backupEnabled := (getEnv("DB_PERIODIC_BACKUP_ENABLED", "false") == "true")
+	ticker := time.NewTicker(time.Duration(intervalMin) * time.Minute)
+	go func() {
+		for range ticker.C {
+			log.Println("DB maintenance: running WAL checkpoint and integrity_check")
+			if _, err := db.Exec("PRAGMA wal_checkpoint(FULL)"); err != nil {
+				log.Printf("WAL checkpoint failed: %v", err)
+			}
+			var integrity string
+			if err := db.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil {
+				log.Printf("Integrity check failed: %v", err)
+			} else {
+				if integrity != "ok" {
+					log.Printf("Integrity check reported issues: %s", integrity)
+				} else {
+					log.Println("Integrity check OK")
+				}
+			}
+			if !backupEnabled {
+				// Periodic backup disabled by default; skip writing backup this tick
+				continue
+			}
+			// Single rotating backup strategy: write one backup file and overwrite it on each run.
+			// If DB_BACKUP_DIR is set we write backup there, otherwise use the same directory as DB.
+			var backupPath string
+			if backupDir != "" {
+				if err := os.MkdirAll(backupDir, 0755); err != nil {
+					log.Printf("Could not create backup dir: %v", err)
+					continue
+				}
+				backupPath = filepath.Join(backupDir, filepath.Base(dbPath)+"_backup")
+			} else {
+				backupPath = filepath.Join(filepath.Dir(dbPath), filepath.Base(dbPath)+"_backup")
+			}
+			// ensure checkpoint before copy
+			if _, err := db.Exec("PRAGMA wal_checkpoint(FULL)"); err != nil {
+				log.Printf("WAL checkpoint before backup failed: %v", err)
+				// still try to copy; checkpoint failure is not fatal here
+			}
+			tmpBackup := backupPath + ".tmp"
+			if err := copyFile(dbPath, tmpBackup); err != nil {
+				log.Printf("DB backup failed: %v", err)
+				_ = os.Remove(tmpBackup)
+			} else {
+				if err := os.Rename(tmpBackup, backupPath); err != nil {
+					log.Printf("Failed to rename temp backup to final: %v", err)
+				} else {
+					log.Printf("DB backup saved to %s (rotated single file)", backupPath)
+				}
+			}
+		}
+	}()
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = out.Close() }()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
+}
+
+// checkAndRestoreDB verifies DB readability on startup and, if the DB is not readable, attempts to restore
+// from a single rotating backup file after validating the backup's integrity. The backup file is named
+// <basename>_backup in the DB directory (or in DB_BACKUP_DIR if set).
+func checkAndRestoreDB(dbPath string) error {
+	// First try a lightweight read to determine if the DB is readable.
+	tempDB, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
+	if err != nil {
+		log.Printf("Could not open DB file for read test: %v", err)
+		// If we cannot even open the DB, attempt restore below
+	} else {
+		defer tempDB.Close()
+
+		// Try a simple query that requires the schema to be readable
+		var tblName string
+		err = tempDB.QueryRow("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1").Scan(&tblName)
+		if err == nil {
+			// DB is readable; run integrity_check but do not auto-restore on integrity failures (just warn)
+			var integrity string
+			if err := tempDB.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil {
+				log.Printf("Integrity check query failed: %v", err)
+			} else {
+				if integrity == "ok" {
+					log.Println("DB integrity check OK")
+					return nil
+				}
+				// DB is readable but integrity_check reports issues. Log and continue without restoring.
+				log.Printf("DB integrity check reported issues at startup: %s (will not auto-restore)", integrity)
+				return nil
+			}
+		} else {
+			log.Printf("DB read test failed: %v", err)
+			// fall through to attempt restore from backup
+		}
+	}
+
+	// At this point the DB is not readable -> attempt restore from backup
+	backupDir := getEnv("DB_BACKUP_DIR", "")
+	var backupPath string
+	if backupDir != "" {
+		backupPath = filepath.Join(backupDir, filepath.Base(dbPath)+"_backup")
+	} else {
+		backupPath = filepath.Join(filepath.Dir(dbPath), filepath.Base(dbPath)+"_backup")
+	}
+
+	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+		return fmt.Errorf("DB is not readable and no backup found at %s", backupPath)
+	}
+
+	// Sanity-check the backup before restoring
+	backupDB, err := sql.Open("sqlite3", backupPath+"?_journal_mode=WAL")
+	if err != nil {
+		return fmt.Errorf("could not open backup for sanity check: %v", err)
+	}
+	defer backupDB.Close()
+
+	var backupIntegrity string
+	if err := backupDB.QueryRow("PRAGMA integrity_check").Scan(&backupIntegrity); err != nil {
+		return fmt.Errorf("backup integrity_check failed: %v", err)
+	}
+	if backupIntegrity != "ok" {
+		return fmt.Errorf("backup integrity_check not ok: %s", backupIntegrity)
+	}
+
+	log.Printf("Backup sanity check OK; attempting to restore database from backup: %s", backupPath)
+
+	tmpRestore := dbPath + ".restore_tmp"
+	if err := copyFile(backupPath, tmpRestore); err != nil {
+		_ = os.Remove(tmpRestore)
+		return fmt.Errorf("failed to copy backup to temp: %v", err)
+	}
+	if err := os.Rename(tmpRestore, dbPath); err != nil {
+		_ = os.Remove(tmpRestore)
+		return fmt.Errorf("failed to rename restored file: %v", err)
+	}
+
+	// Re-open global DB replacing previous handle
+	if db != nil {
+		_ = db.Close()
+	}
+	newDB, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
+	if err != nil {
+		return fmt.Errorf("failed to reopen DB after restore: %v", err)
+	}
+	db = newDB
+
+	// Re-apply PRAGMAs
+	if _, err := db.Exec("PRAGMA synchronous = FULL"); err != nil {
+		log.Printf("Warning: could not set PRAGMA synchronous after restore: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA wal_autocheckpoint = 1000"); err != nil {
+		log.Printf("Warning: could not set PRAGMA wal_autocheckpoint after restore: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		log.Printf("Warning: could not set PRAGMA busy_timeout after restore: %v", err)
+	}
+
+	// Verify restored DB integrity
+	var integrity2 string
+	if err := db.QueryRow("PRAGMA integrity_check").Scan(&integrity2); err != nil {
+		return fmt.Errorf("integrity_check after restore failed: %v", err)
+	}
+	if integrity2 != "ok" {
+		return fmt.Errorf("integrity_check after restore not ok: %s", integrity2)
+	}
+
+	log.Println("Database successfully restored from backup and verified OK")
+	return nil
+}
+
+// performBackup creates a single rotating backup file (basename + _backup).
+// It performs a WAL checkpoint, copies the DB to a tmp file and renames it atomically.
+func performBackup(db *sql.DB, dbPath string) error {
+	// Ensure only one backup runs at once
+	backupMu.Lock()
+	defer backupMu.Unlock()
+
+	backupDir := getEnv("DB_BACKUP_DIR", "")
+	var backupPath string
+	if backupDir != "" {
+		backupPath = filepath.Join(backupDir, filepath.Base(dbPath)+"_backup")
+	} else {
+		backupPath = filepath.Join(filepath.Dir(dbPath), filepath.Base(dbPath)+"_backup")
+	}
+	log.Printf("DB backup: writing rotating backup to %s", backupPath)
+	// Try to checkpoint the WAL to ensure DB file is as up-to-date as possible
+	if _, err := db.Exec("PRAGMA wal_checkpoint(FULL)"); err != nil {
+		log.Printf("WAL checkpoint before backup failed: %v", err)
+	}
+	tmp := backupPath + ".tmp"
+	if err := copyFile(dbPath, tmp); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("DB backup copy failed: %v", err)
+	}
+	if err := os.Rename(tmp, backupPath); err != nil {
+		return fmt.Errorf("DB backup rename failed: %v", err)
+	}
+	log.Printf("DB backup saved to %s (rotated single file)", backupPath)
+	return nil
 }
 
 func initDB() {
@@ -572,6 +851,12 @@ func startScheduler() {
 			var isScanning bool
 			db.QueryRow("SELECT is_scanning FROM scan_status WHERE id = 1").Scan(&isScanning)
 			if !isScanning {
+				// Perform pre-scan backup synchronously; skip scan on failure
+				dbPath := getEnv("DATABASE_PATH", "/config/music.db")
+				if err := performBackup(db, dbPath); err != nil {
+					log.Printf("Scheduled pre-scan backup failed: %v - skipping scheduled scan", err)
+					return
+				}
 				db.Exec("UPDATE scan_status SET is_scanning = 1, songs_added = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
 				scanAllLibraries()
 			} else {
