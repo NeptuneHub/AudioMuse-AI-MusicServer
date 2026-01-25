@@ -55,6 +55,15 @@ func readFileMetadata(path string) (title, artist, album, albumArtist, genre str
 		album = "Unknown Album"
 	}
 
+	// Album artist fallback: prefer albumArtist tag, then artist tag, else Unknown Artist
+	if albumArtist == "" {
+		// If no albumArtist tag, use artist (which may already be 'Unknown Artist')
+		albumArtist = artist
+	}
+	if albumArtist == "" || isNumericString(albumArtist) {
+		albumArtist = "Unknown Artist"
+	}
+
 	return
 }
 
@@ -69,6 +78,32 @@ func isNumericString(s string) bool {
 		}
 	}
 	return true
+}
+
+// normalizeArtistAndAlbumArtist ensures both artist and albumArtist have canonical values.
+// Prefers artist when albumArtist is missing; numeric-only values become "Unknown Artist".
+func normalizeArtistAndAlbumArtist(artist *string, albumArtist *string) {
+	if *artist == "" || isNumericString(*artist) {
+		*artist = "Unknown Artist"
+	}
+	// If albumArtist missing, fall back to artist (which may already be 'Unknown Artist')
+	if *albumArtist == "" {
+		*albumArtist = *artist
+	}
+	if *albumArtist == "" || isNumericString(*albumArtist) {
+		*albumArtist = "Unknown Artist"
+	}
+}
+
+// chooseAlbumArtist returns a canonical albumArtist string for DB insertion
+func chooseAlbumArtist(albumArtist, artist string) string {
+	if albumArtist == "" || isNumericString(albumArtist) {
+		if artist != "" {
+			return artist
+		}
+		return "Unknown Artist"
+	}
+	return albumArtist
 }
 
 func scanSingleLibrary(pathId int) {
@@ -107,6 +142,24 @@ func scanSingleLibrary(pathId int) {
 	dbPath := getEnv("DATABASE_PATH", "/config/music.db")
 	if err := performBackup(db, dbPath); err != nil {
 		log.Printf("Warning: post-scan backup failed: %v", err)
+	}
+
+	// Run a light normalization to collapse legacy Unknown values and trim whitespace
+	_, err = db.Exec("UPDATE songs SET artist = 'Unknown Artist' WHERE artist IS NULL OR TRIM(artist) = '' OR LOWER(TRIM(artist)) = 'unknown'")
+	if err != nil {
+		log.Printf("Warning: normalization update for artist failed: %v", err)
+	}
+	_, err = db.Exec("UPDATE songs SET album = 'Unknown Album' WHERE album IS NULL OR TRIM(album) = '' OR LOWER(TRIM(album)) = 'unknown'")
+	if err != nil {
+		log.Printf("Warning: normalization update for album failed: %v", err)
+	}
+	_, err = db.Exec("UPDATE songs SET album_artist = 'Unknown Artist' WHERE album_artist IS NULL OR TRIM(album_artist) = '' OR LOWER(TRIM(album_artist)) = 'unknown'")
+	if err != nil {
+		log.Printf("Warning: normalization update for album_artist failed: %v", err)
+	}
+	_, err = db.Exec("UPDATE songs SET artist = TRIM(artist), album = TRIM(album), album_artist = TRIM(album_artist)")
+	if err != nil {
+		log.Printf("Warning: whitespace normalization failed: %v", err)
 	}
 
 	if isScanCancelled.Load() {
@@ -175,6 +228,19 @@ func scanAllLibraries() {
 	dbPath := getEnv("DATABASE_PATH", "/config/music.db")
 	if err := performBackup(db, dbPath); err != nil {
 		log.Printf("Warning: post-scan backup for all libraries failed: %v", err)
+	}
+	// Normalize legacy Unknown values across the DB after a full rescan
+	_, err = db.Exec("UPDATE songs SET artist = 'Unknown Artist' WHERE artist IS NULL OR TRIM(artist) = '' OR LOWER(TRIM(artist)) = 'unknown'")
+	if err != nil {
+		log.Printf("Warning: normalization update for artist failed after full rescan: %v", err)
+	}
+	_, err = db.Exec("UPDATE songs SET album = 'Unknown Album' WHERE album IS NULL OR TRIM(album) = '' OR LOWER(TRIM(album)) = 'unknown'")
+	if err != nil {
+		log.Printf("Warning: normalization update for album failed after full rescan: %v", err)
+	}
+	_, err = db.Exec("UPDATE songs SET artist = TRIM(artist), album = TRIM(album), album_artist = TRIM(album_artist)")
+	if err != nil {
+		log.Printf("Warning: whitespace normalization failed after full rescan: %v", err)
 	}
 }
 
@@ -258,7 +324,7 @@ func processPath(scanPath string) int64 {
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated,
 						cancelled=0`,
-				songID, title, artist, album, albumArtist, path, albumPath, genre, duration, currentTime, currentTime)
+				songID, title, artist, album, chooseAlbumArtist(albumArtist, artist), path, albumPath, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -360,7 +426,7 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated,
 						cancelled=0`,
-					songID, title, artist, album, albumArtist, path, albumPath, genre, duration, currentTime, currentTime)
+					songID, title, artist, album, chooseAlbumArtist(albumArtist, artist), path, albumPath, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -446,6 +512,8 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 			if album == "" || isNumericString(album) {
 				album = "Unknown Album"
 			}
+			// Ensure album artist is canonicalized to match artist
+			normalizeArtistAndAlbumArtist(&artist, &albumArtist)
 				// Get duration using ffprobe
 				duration := getDuration(path)
 

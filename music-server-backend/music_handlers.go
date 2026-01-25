@@ -14,31 +14,18 @@ import (
 // --- Music Library Handlers (JSON API) ---
 
 func getArtists(c *gin.Context) {
-	rows, err := db.Query("SELECT DISTINCT COALESCE(NULLIF(album_artist, ''), artist) AS artist FROM songs WHERE COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0 ORDER BY artist")
+	artistNames, err := fetchEffectiveArtists(db)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query artists"})
 		return
 	}
-	defer rows.Close()
-
 	type ArtistWithID struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	}
 
 	var artists []ArtistWithID
-	seen := make(map[string]bool)
-	for rows.Next() {
-		var artistName string
-		if err := rows.Scan(&artistName); err != nil {
-			log.Printf("Error scanning artist row: %v", err)
-			continue
-		}
-		key := normalizeKey(artistName)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
+	for _, artistName := range artistNames {
 		artists = append(artists, ArtistWithID{
 			ID:   GenerateArtistID(artistName),
 			Name: artistName,
@@ -85,6 +72,10 @@ func getAlbums(c *gin.Context) {
 		if err := rows.Scan(&album.Name, &album.Artist, &minID); err != nil {
 			log.Printf("Error scanning album row: %v", err)
 			continue
+		}
+		// Normalize legacy 'Unknown' album label
+		if album.Name == "Unknown" {
+			album.Name = "Unknown Album"
 		}
 		key := normalizeKey(album.Artist) + "|||" + normalizeKey(album.Name)
 		if seen[key] {

@@ -849,17 +849,17 @@ func subsonicGetArtists(c *gin.Context) {
 
 	query := `
 		SELECT
-			s.artist,
+			COALESCE(NULLIF(album_artist, ''), artist) AS effective_artist,
 			COUNT(DISTINCT CASE
-				WHEN s.album_artist IS NOT NULL AND s.album_artist != '' THEN s.album_artist || '|||' || s.album
-				WHEN s.artist IS NOT NULL AND s.artist != '' THEN s.artist || '|||' || s.album
-				ELSE s.album_path
-			END),
-			COUNT(*)
+				WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
+				WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
+				ELSE album_path
+			END) AS album_count,
+			COUNT(*) as song_count
 		FROM songs s
-		WHERE s.artist != ''
-		GROUP BY s.artist
-		ORDER BY s.artist COLLATE NOCASE
+		WHERE COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0
+		GROUP BY effective_artist
+		ORDER BY effective_artist COLLATE NOCASE
 	`
 	rows, err := db.Query(query)
 	if err != nil {
@@ -868,14 +868,18 @@ func subsonicGetArtists(c *gin.Context) {
 	}
 	defer rows.Close()
 
+	artistNames, err := fetchEffectiveArtists(db)
+	if err != nil {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying artists."))
+		return
+	}
+
 	artistIndex := make(map[string][]SubsonicArtist)
-	for rows.Next() {
+	for _, name := range artistNames {
 		var artist SubsonicArtist
-		if err := rows.Scan(&artist.Name, &artist.AlbumCount, &artist.SongCount); err != nil {
-			log.Printf("Error scanning artist for subsonicGetArtists: %v", err)
-			continue
-		}
-		artist.ID = GenerateArtistID(artist.Name) // Generate MD5 artist ID
+		artist.Name = name
+		// AlbumCount and SongCount are not fetched by helper; we can approximate or leave 0. Keep it 0 to avoid confusion.
+		artist.ID = GenerateArtistID(artist.Name)
 		artist.CoverArt = artist.Name
 
 		var indexChar string
@@ -1033,6 +1037,10 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		if err := rows.Scan(&album.Name, &album.Artist, &album.Genre, &album.ID); err != nil {
 			log.Printf("Error scanning album row: %v", err)
 			continue
+		}
+		// Normalize legacy 'Unknown' album label
+		if album.Name == "Unknown" {
+			album.Name = "Unknown Album"
 		}
 		key := normalizeKey(album.Artist) + "|||" + normalizeKey(album.Name)
 		if seen[key] {
