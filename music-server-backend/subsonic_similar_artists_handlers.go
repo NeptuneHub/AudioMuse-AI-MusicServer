@@ -94,24 +94,31 @@ func subsonicGetSimilarArtists2(c *gin.Context) {
 	// Convert to Subsonic format
 	var subsonicArtists []SubsonicArtist
 	for _, sa := range similarArtists {
-		// Get album count for this artist from database using priority grouping
-		var albumCount int
-		err := db.QueryRow(`
-			SELECT COUNT(DISTINCT 
-				CASE
-					WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
-					WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
-					ELSE album_path
-				END
-			)
-			FROM songs 
-			WHERE artist = ? AND cancelled = 0
-		`, sa.Artist).Scan(&albumCount)
-
-		if err != nil {
-			log.Printf("Warning: Failed to get album count for artist '%s': %v", sa.Artist, err)
-			albumCount = 0
+		// Get album count for this artist from database using normalized deduplication
+		seenAlbums := make(map[string]bool)
+		rowsAlbums, rErr := db.Query("SELECT album, album_path FROM songs WHERE artist = ? AND cancelled = 0", sa.Artist)
+		if rErr == nil {
+			for rowsAlbums.Next() {
+				var albumName, albumPath string
+				if err := rowsAlbums.Scan(&albumName, &albumPath); err != nil {
+					continue
+				}
+				var nameForKey string
+				albumName = strings.TrimSpace(albumName)
+				albumPath = strings.TrimSpace(albumPath)
+				if albumName != "" {
+					nameForKey = albumName
+				} else {
+					nameForKey = albumPath
+				}
+				if nameForKey == "" {
+					continue
+				}
+				seenAlbums[normalizeKey(nameForKey)] = true
+			}
+			rowsAlbums.Close()
 		}
+		albumCount := len(seenAlbums)
 
 		log.Printf("Processing artist: %s (ID: %s, Albums: %d)", sa.Artist, sa.ArtistID, albumCount)
 

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -111,29 +112,59 @@ func getMusicCounts(c *gin.Context) {
 
 	var counts CountsResponse
 
-	// Count artists
-	artistQuery := "SELECT COUNT(DISTINCT artist) FROM songs WHERE artist != '' AND cancelled = 0"
+	// Count artists (deduplicate by normalized artist name)
+	artistQuery := "SELECT artist FROM songs WHERE artist != '' AND cancelled = 0"
 	args := []interface{}{}
 	if genre != "" {
 		artistQuery += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
 		args = append(args, genre, genre+";%", "%;"+genre+";%", "%;"+genre)
 	}
-	db.QueryRow(artistQuery, args...).Scan(&counts.Artists)
+	rows, err := db.Query(artistQuery, args...)
+	if err == nil {
+		defer rows.Close()
+		seen := make(map[string]bool)
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				continue
+			}
+			name = normalizeArtistName(name)
+			seen[normalizeKey(name)] = true
+		}
+		counts.Artists = len(seen)
+	}
 
-	// Count albums using priority grouping: album_artist+album, artist+album, or path
-	albumQuery := `SELECT COUNT(DISTINCT 
-		CASE
-			WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
-			WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
-			ELSE album_path
-		END
-	) FROM songs WHERE album != '' AND cancelled = 0`
+	// Count albums using normalized deduplication (album name or path fallback)
+	albumQuery := "SELECT album, album_path FROM songs WHERE cancelled = 0"
 	args = []interface{}{}
 	if genre != "" {
 		albumQuery += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
 		args = append(args, genre, genre+";%", "%;"+genre+";%", "%;"+genre)
 	}
-	db.QueryRow(albumQuery, args...).Scan(&counts.Albums)
+	rowsA, err := db.Query(albumQuery, args...)
+	if err == nil {
+		defer rowsA.Close()
+		seenAlbums := make(map[string]bool)
+		for rowsA.Next() {
+			var albumName, albumPath string
+			if err := rowsA.Scan(&albumName, &albumPath); err != nil {
+				continue
+			}
+			albumName = strings.TrimSpace(albumName)
+			albumPath = strings.TrimSpace(albumPath)
+			var nameForKey string
+			if albumName != "" {
+				nameForKey = albumName
+			} else {
+				nameForKey = albumPath
+			}
+			if nameForKey == "" {
+				continue
+			}
+			seenAlbums[normalizeKey(nameForKey)] = true
+		}
+		counts.Albums = len(seenAlbums)
+	}
 
 	// Count songs
 	songQuery := "SELECT COUNT(*) FROM songs WHERE cancelled = 0"

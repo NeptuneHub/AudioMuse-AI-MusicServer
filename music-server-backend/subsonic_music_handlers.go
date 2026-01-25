@@ -847,9 +847,9 @@ func subsonicScrobble(c *gin.Context) {
 func subsonicGetArtists(c *gin.Context) {
 	_ = c.MustGet("user") // Auth is handled by middleware
 
+	// List effective artists using album_artist fallback and dedupe exact matches
 	query := `
-		SELECT
-			COALESCE(NULLIF(album_artist, ''), artist) AS effective_artist,
+		SELECT COALESCE(NULLIF(album_artist, ''), artist) AS effective_artist,
 			COUNT(DISTINCT CASE
 				WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
 				WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
@@ -868,19 +868,46 @@ func subsonicGetArtists(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	artistNames, err := fetchEffectiveArtists(db)
-	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying artists."))
-		return
-	}
-
 	artistIndex := make(map[string][]SubsonicArtist)
-	for _, name := range artistNames {
+	seenArtists := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		var albumCount, songCount int
+		if err := rows.Scan(&name, &albumCount, &songCount); err != nil {
+			continue
+		}
+		// Compute deduplicated album count for this effective artist
+		seenAlbums := make(map[string]bool)
+		rowsAlbums, rErr := db.Query("SELECT album FROM songs WHERE COALESCE(NULLIF(album_artist, ''), artist) = ? AND album != '' AND cancelled = 0", name)
+		if rErr == nil {
+			for rowsAlbums.Next() {
+				var albumName string
+				if err := rowsAlbums.Scan(&albumName); err != nil {
+					continue
+				}
+				albumName = strings.TrimSpace(albumName)
+				if albumName == "" {
+					continue
+				}
+				seenAlbums[normalizeKey(albumName)] = true
+			}
+			rowsAlbums.Close()
+		}
+		albumCount = len(seenAlbums)
+
+		// Deduplicate exact string matches by normalized name (same approach as search)
+		key := normalizeKey(name)
+		if seenArtists[key] {
+			continue
+		}
+		seenArtists[key] = true
+
 		var artist SubsonicArtist
 		artist.Name = name
-		// AlbumCount and SongCount are not fetched by helper; we can approximate or leave 0. Keep it 0 to avoid confusion.
 		artist.ID = GenerateArtistID(artist.Name)
 		artist.CoverArt = artist.Name
+		artist.AlbumCount = albumCount
+		artist.SongCount = songCount
 
 		var indexChar string
 		for _, r := range artist.Name {
@@ -978,25 +1005,35 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		orderByClause = "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE"
 	}
 
-	// Count distinct albums using same priority grouping logic
-	var totalAlbums int
-	countQuery := fmt.Sprintf(`
-		SELECT COUNT(DISTINCT 
-			CASE
-				WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
-				WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
-				ELSE album_path
-			END
-		)
-		FROM songs 
-		%s
-	`, whereClause)
-	err = db.QueryRow(countQuery, args...).Scan(&totalAlbums)
+// Count distinct albums using normalization (dedupe by normalized album name)
+	seenAlbumKeys := make(map[string]bool)
+	countQ := fmt.Sprintf("SELECT album, album_path FROM songs %s AND cancelled = 0", whereClause)
+	rowsCount, err := db.Query(countQ, args...)
 	if err != nil {
 		log.Printf("Error counting albums for pagination: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying albums."))
 		return
 	}
+	defer rowsCount.Close()
+	for rowsCount.Next() {
+		var albumName, albumPath string
+		if err := rowsCount.Scan(&albumName, &albumPath); err != nil {
+			continue
+		}
+		var nameForKey string
+		albumName = strings.TrimSpace(albumName)
+		albumPath = strings.TrimSpace(albumPath)
+		if albumName != "" {
+			nameForKey = albumName
+		} else {
+			nameForKey = albumPath
+		}
+		if nameForKey == "" {
+			continue
+		}
+		seenAlbumKeys[normalizeKey(nameForKey)] = true
+	}
+	totalAlbums := len(seenAlbumKeys)
 
 	// If offset is beyond total, return empty result (like Navidrome)
 	if offset >= totalAlbums {
@@ -1725,6 +1762,31 @@ func subsonicGetGenres(c *gin.Context) {
 			log.Printf("Error scanning genre: %v", err)
 			continue
 		}
+		// Recompute album count using normalized deduplication
+		seenAlbums := make(map[string]bool)
+		rowsAlbums, rErr := db.Query("SELECT album, album_path FROM songs WHERE COALESCE(genre, 'Unknown') = ? AND cancelled = 0", g.Name)
+		if rErr == nil {
+			for rowsAlbums.Next() {
+				var albumName, albumPath string
+				if err := rowsAlbums.Scan(&albumName, &albumPath); err != nil {
+					continue
+				}
+				var nameForKey string
+				albumName = strings.TrimSpace(albumName)
+				albumPath = strings.TrimSpace(albumPath)
+				if albumName != "" {
+					nameForKey = albumName
+				} else {
+					nameForKey = albumPath
+				}
+				if nameForKey == "" {
+					continue
+				}
+				seenAlbums[normalizeKey(nameForKey)] = true
+			}
+			rowsAlbums.Close()
+		}
+		g.AlbumCount = len(seenAlbums)
 		genres = append(genres, g)
 	}
 

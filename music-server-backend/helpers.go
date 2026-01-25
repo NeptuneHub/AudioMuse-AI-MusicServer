@@ -48,3 +48,32 @@ func fetchEffectiveArtists(db *sql.DB) ([]string, error) {
 	}
 	return artists, nil
 }
+
+// fetchArtists returns a deduplicated list of artists using the artist field only
+func fetchArtists(db *sql.DB) ([]string, error) {
+	rows, err := db.Query(`SELECT DISTINCT artist FROM songs WHERE artist != '' AND cancelled = 0`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	seen := make(map[string]bool)
+	var artists []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		key := normalizeKey(name)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		artists = append(artists, name)
+	}
+	return artists, nil
+}

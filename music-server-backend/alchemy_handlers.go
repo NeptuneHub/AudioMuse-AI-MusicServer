@@ -118,16 +118,16 @@ func SearchArtistsHandler(c *gin.Context) {
 		return
 	}
 
-	// Search for artists matching the query
+	// Search for artists matching the query across artist and album_artist, deduplicated
 	searchPattern := "%" + strings.ToLower(query) + "%"
 	rows, err := db.Query(`
-		SELECT artist, COUNT(DISTINCT id) as track_count 
-		FROM songs 
-		WHERE LOWER(artist) LIKE ? AND artist != '' AND cancelled = 0
-		GROUP BY artist 
-		ORDER BY track_count DESC, artist COLLATE NOCASE 
+		SELECT COALESCE(NULLIF(album_artist, ''), artist) as artist, COUNT(DISTINCT id) as track_count
+		FROM songs
+		WHERE (LOWER(artist) LIKE ? OR LOWER(album_artist) LIKE ?) AND COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0
+		GROUP BY COALESCE(NULLIF(album_artist, ''), artist)
+		ORDER BY track_count DESC, artist COLLATE NOCASE
 		LIMIT 20
-	`, searchPattern)
+	`, searchPattern, searchPattern)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})

@@ -71,12 +71,46 @@ func subsonicGetIndexes(c *gin.Context) {
 
 	// Build artist index map
 	artistIndex := make(map[string][]SubsonicIndexArtist)
+	seenArtists := make(map[string]bool)
 	for rows.Next() {
 		var artist SubsonicIndexArtist
 		if err := rows.Scan(&artist.Name, &artist.AlbumCount); err != nil {
 			log.Printf("Error scanning artist for getIndexes: %v", err)
 			continue
 		}
+		// Deduplicate artists by normalized name
+		key := normalizeKey(artist.Name)
+		if seenArtists[key] {
+			continue
+		}
+		seenArtists[key] = true
+
+		// Compute deduplicated album count for this artist
+		seenAlbums := make(map[string]bool)
+		rowsAlbums, rErr := db.Query("SELECT album, album_path FROM songs WHERE artist = ? AND cancelled = 0", artist.Name)
+		if rErr == nil {
+			for rowsAlbums.Next() {
+				var albumName, albumPath string
+				if err := rowsAlbums.Scan(&albumName, &albumPath); err != nil {
+					continue
+				}
+				var nameForKey string
+				albumName = strings.TrimSpace(albumName)
+				albumPath = strings.TrimSpace(albumPath)
+				if albumName != "" {
+					nameForKey = albumName
+				} else {
+					nameForKey = albumPath
+				}
+				if nameForKey == "" {
+					continue
+				}
+				seenAlbums[normalizeKey(nameForKey)] = true
+			}
+			rowsAlbums.Close()
+		}
+		artist.AlbumCount = len(seenAlbums)
+
 		artistID := GenerateArtistID(artist.Name)
 		artist.ID = artistID       // Use MD5 hash as artist ID
 		artist.CoverArt = artistID // Set cover art ID for artist images
