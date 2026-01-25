@@ -52,6 +52,8 @@ RUN chmod +x ./music-server
 # Copy React frontend source and dependencies
 # Copy only the built frontend (static files)
 COPY --from=frontend-builder /src/music-server-frontend/build ./music-server-frontend/build
+# Ensure a /favicon.ico exists in the build by copying the PNG if ICO is missing
+RUN if [ -f /app/music-server-frontend/build/audiomuseai.png ] && [ ! -f /app/music-server-frontend/build/favicon.ico ]; then cp /app/music-server-frontend/build/audiomuseai.png /app/music-server-frontend/build/favicon.ico; fi
 
 # Copy configurations and startup script
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf

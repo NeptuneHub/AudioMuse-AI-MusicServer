@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
@@ -257,18 +258,139 @@ func main() {
 	r.GET("/api/clap/top_queries", AuthMiddleware(), clapTopQueriesHandler)
 
 	// Serve static files from React build
-	r.Static("/static", "/app/music-server-frontend/build/static")
-	r.StaticFile("/favicon.ico", "/app/music-server-frontend/build/favicon.ico")
-	r.StaticFile("/manifest.json", "/app/music-server-frontend/build/manifest.json")
+	buildDir := getEnv("FRONTEND_BUILD_DIR", "/app/music-server-frontend/build")
+	// If the absolute path used in containers doesn't exist locally, try
+	// to fall back to the repo's build or public folders for local dev.
+	if _, err := os.Stat(buildDir); os.IsNotExist(err) {
+		localBuild := filepath.Join(".", "music-server-frontend", "build")
+		if _, err := os.Stat(localBuild); err == nil {
+			buildDir = localBuild
+		} else {
+			localPublic := filepath.Join(".", "music-server-frontend", "public")
+			if _, err := os.Stat(localPublic); err == nil {
+				buildDir = localPublic
+			}
+		}
+	}
 
-	// Serve React app for all non-API routes
+	// Log which build directory we're using so it's easy to verify in dev
+	log.Printf("Using frontend build directory: %s", buildDir)
+
+	// Serve static subdirectory (may be absent in some dev setups)
+	r.Static("/static", filepath.Join(buildDir, "static"))
+	// Favicon endpoint: serve favicon.ico if present, otherwise fall back to audiomuseai.png
+	// This handles cases where browsers request /favicon.ico even if the HTML links to a PNG favicon.
+	r.GET("/favicon.ico", func(c *gin.Context) {
+		fav := filepath.Join(buildDir, "favicon.ico")
+		if stat, err := os.Stat(fav); err == nil && !stat.IsDir() {
+			// Set explicit MIME and caching headers
+			if t := mime.TypeByExtension(filepath.Ext(fav)); t != "" {
+				c.Header("Content-Type", t)
+			} else {
+				c.Header("Content-Type", "application/octet-stream")
+			}
+			c.Header("Cache-Control", "public, max-age=86400")
+			log.Printf("Serving favicon file: %s to %s", fav, c.ClientIP())
+			c.File(fav)
+			return
+		}
+		png := filepath.Join(buildDir, "audiomuseai.png")
+		if stat, err := os.Stat(png); err == nil && !stat.IsDir() {
+			if t := mime.TypeByExtension(filepath.Ext(png)); t != "" {
+				c.Header("Content-Type", t)
+			} else {
+				c.Header("Content-Type", "application/octet-stream")
+			}
+			c.Header("Cache-Control", "public, max-age=86400")
+			log.Printf("Serving favicon fallback (PNG): %s to %s", png, c.ClientIP())
+			c.File(png)
+			return
+		}
+		log.Printf("Favicon not found in buildDir: %s", buildDir)
+		c.Status(http.StatusNotFound)
+	})
+	// Ensure HEAD requests return the same headers for tools like curl -I
+	r.HEAD("/favicon.ico", func(c *gin.Context) {
+		fav := filepath.Join(buildDir, "favicon.ico")
+		if stat, err := os.Stat(fav); err == nil && !stat.IsDir() {
+			if t := mime.TypeByExtension(filepath.Ext(fav)); t != "" {
+				c.Header("Content-Type", t)
+			}
+			c.Header("Cache-Control", "public, max-age=86400")
+			c.Status(http.StatusOK)
+			return
+		}
+		png := filepath.Join(buildDir, "audiomuseai.png")
+		if stat, err := os.Stat(png); err == nil && !stat.IsDir() {
+			if t := mime.TypeByExtension(filepath.Ext(png)); t != "" {
+				c.Header("Content-Type", t)
+			}
+			c.Header("Cache-Control", "public, max-age=86400")
+			c.Status(http.StatusOK)
+			return
+		}
+		c.Status(http.StatusNotFound)
+	})
+	// Manifest may exist as a file in the build dir
+	r.StaticFile("/manifest.json", filepath.Join(buildDir, "manifest.json"))
+
+	// Explicit route for the logo file so we always return the correct MIME
+	r.GET("/audiomuseai.png", func(c *gin.Context) {
+		png := filepath.Join(buildDir, "audiomuseai.png")
+		log.Printf("Logo handler: checking for file at %s", png)
+		if stat, err := os.Stat(png); err == nil && !stat.IsDir() {
+			c.Header("Content-Type", "image/png")
+			c.Header("Cache-Control", "public, max-age=86400")
+			log.Printf("Serving logo file: %s to %s", png, c.ClientIP())
+			c.File(png)
+			return
+		}
+		log.Printf("Logo handler: file not found: %s", png)
+		c.Status(http.StatusNotFound)
+	})
+	// Ensure HEAD requests return the same headers for tools like curl -I
+	r.HEAD("/audiomuseai.png", func(c *gin.Context) {
+		png := filepath.Join(buildDir, "audiomuseai.png")
+		if stat, err := os.Stat(png); err == nil && !stat.IsDir() {
+			c.Header("Content-Type", "image/png")
+			c.Header("Cache-Control", "public, max-age=86400")
+			c.Status(http.StatusOK)
+			return
+		}
+		c.Status(http.StatusNotFound)
+	})
+
+	// SPA fallback: serve existing files from the chosen buildDir if present
+	// otherwise return index.html for client-side routing. Avoids registering
+	// a catch-all route that would conflict with existing API prefixes (/rest, /api).
 	r.NoRoute(func(c *gin.Context) {
-		// Don't serve index.html for API routes
+		// Don't serve index.html for API or Subsonic routes
 		if strings.HasPrefix(c.Request.URL.Path, "/api/") || strings.HasPrefix(c.Request.URL.Path, "/rest/") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 			return
 		}
-		c.File("/app/music-server-frontend/build/index.html")
+
+		// If requesting root, serve index.html
+		if c.Request.URL.Path == "/" {
+			c.File(filepath.Join(buildDir, "index.html"))
+			return
+		}
+
+		// Try to serve a static file from the build dir if it exists
+		fpath := filepath.Join(buildDir, c.Request.URL.Path)
+		if stat, err := os.Stat(fpath); err == nil && !stat.IsDir() {
+			// Set explicit MIME and caching headers for static assets
+			if t := mime.TypeByExtension(filepath.Ext(fpath)); t != "" {
+				c.Header("Content-Type", t)
+			}
+			c.Header("Cache-Control", "public, max-age=86400")
+			log.Printf("Serving static file: %s to %s", fpath, c.ClientIP())
+			c.File(fpath)
+			return
+		}
+
+		// Fallback to index.html for SPA routes
+		c.File(filepath.Join(buildDir, "index.html"))
 	})
 
 	// Configure server with HTTP/2 h2c (cleartext) support for multiplexing
