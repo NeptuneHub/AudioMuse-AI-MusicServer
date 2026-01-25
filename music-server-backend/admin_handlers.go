@@ -10,10 +10,66 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/dhowden/tag"
 	"github.com/gin-gonic/gin"
 )
+
+// readFileMetadata attempts to read tags from an audio file. If tags aren't available or readable,
+// it returns empty strings so that callers can fallback to filename/path parsing.
+func readFileMetadata(path string) (title, artist, album, albumArtist, genre string) {
+	file, err := os.Open(path)
+	if err != nil {
+		log.Printf("Error opening file for metadata %s: %v", path, err)
+		return
+	}
+	defer file.Close()
+	meta, err := tag.ReadFrom(file)
+	if err != nil {
+		// No tags or unreadable tags; we will fallback to filename/path parsing below.
+		log.Printf("INFO: no readable tags for %s: %v", path, err)
+	} else {
+		title = meta.Title()
+		artist = meta.Artist()
+		album = meta.Album()
+		albumArtist = meta.AlbumArtist()
+		genre = meta.Genre()
+	}
+
+	// Fallbacks (centralized): title <- filename, artist <- path, album <- path
+	if title == "" {
+		title = extractTitleFromFilename(path)
+	}
+	if artist == "" {
+		artist = extractArtistFromPath(path)
+	}
+	// Treat numeric-only artist names as unknown (indicates we couldn't get a real artist)
+	if artist == "" || isNumericString(artist) {
+		artist = "Unknown Artist"
+	}
+	if album == "" {
+		album = extractAlbumFromPath(path, artist)
+	}
+	if album == "" || isNumericString(album) {
+		album = "Unknown Album"
+	}
+
+	return
+}
+
+// isNumericString returns true if s consists only of digits.
+func isNumericString(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
 
 func scanSingleLibrary(pathId int) {
 	defer func() {
@@ -124,6 +180,8 @@ func scanAllLibraries() {
 
 func processPath(scanPath string) int64 {
 	var songsAdded int64
+	var filesSeen int64
+	var supportedSeen int64
 	log.Printf("Processing path: %s", scanPath)
 
 	walkErr := filepath.WalkDir(scanPath, func(path string, d os.DirEntry, err error) error {
@@ -136,10 +194,12 @@ func processPath(scanPath string) int64 {
 		}
 
 		if !d.IsDir() {
+			filesSeen++
 			ext := strings.ToLower(filepath.Ext(path))
-			supportedExts := map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".ogg": true}
+			supportedExts := map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".ogg": true, ".wav": true, ".aiff": true, ".aac": true, ".opus": true}
 
 			if supportedExts[ext] {
+				supportedSeen++
 				file, err := os.Open(path)
 				if err != nil {
 					log.Printf("Error opening file %s: %v", path, err)
@@ -147,14 +207,9 @@ func processPath(scanPath string) int64 {
 				}
 				defer file.Close()
 
-				meta, err := tag.ReadFrom(file)
-				if err != nil {
-					log.Printf("Error reading tags from %s: %v", path, err)
-					return nil
-				}
+				title, artist, album, albumArtist, genre := readFileMetadata(path)
 
 				currentTime := time.Now().Format(time.RFC3339)
-				genre := meta.Genre()
 				if genre == "" {
 					genre = "Unknown"
 				}
@@ -180,8 +235,17 @@ func processPath(scanPath string) int64 {
 				// Use INSERT ... ON CONFLICT to update existing songs or insert new ones
 				// This ensures date_added is set for old songs missing it, and date_updated is always current
 				// Mark as not cancelled when re-adding
-				albumPath := filepath.Dir(path) // Store directory path for grouping
-				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+			albumPath := filepath.Dir(path) // Store directory path for grouping
+
+			// Normalize unknown/numeric-only artist/album to "Unknown"
+			if artist == "" || isNumericString(artist) {
+				artist = "Unknown Artist"
+			}
+			if album == "" || isNumericString(album) {
+				album = "Unknown Album"
+			}
+
+			res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
 					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
@@ -194,7 +258,7 @@ func processPath(scanPath string) int64 {
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated,
 						cancelled=0`,
-					songID, meta.Title(), meta.Artist(), meta.Album(), meta.AlbumArtist(), path, albumPath, genre, duration, currentTime, currentTime)
+				songID, title, artist, album, albumArtist, path, albumPath, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -215,10 +279,13 @@ func processPath(scanPath string) int64 {
 	if walkErr != nil {
 		log.Printf("Stopped walking path %s due to error: %v", scanPath, walkErr)
 	}
+	log.Printf("Scan summary for %s: filesSeen=%d supported=%d songsAdded=%d", scanPath, filesSeen, supportedSeen, songsAdded)
 	return songsAdded
 }
 
 func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
+	var filesSeen int64
+	var supportedSeen int64
 	log.Printf("Processing path: %s", scanPath)
 
 	walkErr := filepath.WalkDir(scanPath, func(path string, d os.DirEntry, err error) error {
@@ -231,10 +298,12 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 		}
 
 		if !d.IsDir() {
+			filesSeen++
 			ext := strings.ToLower(filepath.Ext(path))
-			supportedExts := map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".ogg": true}
+			supportedExts := map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".ogg": true, ".wav": true, ".aiff": true, ".aac": true, ".opus": true}
 
 			if supportedExts[ext] {
+				supportedSeen++
 				file, err := os.Open(path)
 				if err != nil {
 					log.Printf("Error opening file %s: %v", path, err)
@@ -242,14 +311,9 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 				}
 				defer file.Close()
 
-				meta, err := tag.ReadFrom(file)
-				if err != nil {
-					log.Printf("Error reading tags from %s: %v", path, err)
-					return nil
-				}
+				title, artist, album, albumArtist, genre := readFileMetadata(path)
 
 				currentTime := time.Now().Format(time.RFC3339)
-				genre := meta.Genre()
 				if genre == "" {
 					genre = "Unknown"
 				}
@@ -273,8 +337,17 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 				}
 
 				// Use UPSERT to update existing songs or insert new ones
-				albumPath := filepath.Dir(path) // Store directory path for grouping
-				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+			albumPath := filepath.Dir(path) // Store directory path for grouping
+
+			// Normalize unknown/numeric-only artist/album to "Unknown"
+			if artist == "" || isNumericString(artist) {
+				artist = "Unknown Artist"
+			}
+			if album == "" || isNumericString(album) {
+				album = "Unknown Album"
+			}
+
+			res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
 					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
@@ -287,7 +360,7 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated,
 						cancelled=0`,
-					songID, meta.Title(), meta.Artist(), meta.Album(), meta.AlbumArtist(), path, albumPath, genre, duration, currentTime, currentTime)
+					songID, title, artist, album, albumArtist, path, albumPath, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -308,10 +381,13 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 	if walkErr != nil {
 		log.Printf("Stopped walking path %s due to error: %v", scanPath, walkErr)
 	}
+	log.Printf("Scan summary for %s: filesSeen=%d supported=%d totalSongsAdded=%d", scanPath, filesSeen, supportedSeen, *totalSongsAdded)
 }
 
 func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int64 {
 	var songsAdded int64
+	var filesSeen int64
+	var supportedSeen int64
 	log.Printf("Processing path with tracking: %s", scanPath)
 
 	walkErr := filepath.WalkDir(scanPath, func(path string, d os.DirEntry, err error) error {
@@ -324,36 +400,25 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 		}
 
 		if !d.IsDir() {
+			filesSeen++
 			ext := strings.ToLower(filepath.Ext(path))
-			supportedExts := map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".ogg": true}
+			supportedExts := map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".ogg": true, ".wav": true, ".aiff": true, ".aac": true, ".opus": true}
 
 			if supportedExts[ext] {
+				supportedSeen++
 				// Track this file path
 				(*scannedPaths)[path] = true
 
-				file, err := os.Open(path)
-				if err != nil {
-					log.Printf("Error opening file %s: %v", path, err)
-					return nil
-				}
-				defer file.Close()
+				// Read metadata with centralized fallbacks
+			title, artist, album, albumArtist, genre := readFileMetadata(path)
 
-				meta, err := tag.ReadFrom(file)
-				if err != nil {
-					log.Printf("Error reading tags from %s: %v", path, err)
-					return nil
-				}
 
 				currentTime := time.Now().Format(time.RFC3339)
-				genre := meta.Genre()
 				if genre == "" {
 					genre = "Unknown"
 				}
 
-				title := meta.Title()
-				artist := meta.Artist()
-				album := meta.Album()
-				albumArtist := meta.AlbumArtist()
+
 
 				// Fallback to filename parsing if metadata is empty (like Navidrome does)
 				// Priority: 1. Metadata tags, 2. Filename parsing, 3. Folder structure
@@ -374,7 +439,13 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 						log.Printf("💿 No album metadata, parsed: '%s' from folder: %s", album, filepath.Base(filepath.Dir(path)))
 					}
 				}
-
+			// Normalize unknown/numeric-only artist/album to "Unknown"
+			if artist == "" || isNumericString(artist) {
+				artist = "Unknown Artist"
+			}
+			if album == "" || isNumericString(album) {
+				album = "Unknown Album"
+			}
 				// Get duration using ffprobe
 				duration := getDuration(path)
 
@@ -420,7 +491,19 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 
 				// Use UPSERT to update existing songs or insert new ones
 				albumPath := filepath.Dir(path) // Store directory path for grouping
-
+			// Normalize unknown/numeric-only artist/album to "Unknown"
+			if artist == "" || isNumericString(artist) {
+				artist = "Unknown Artist"
+			}
+			if album == "" || isNumericString(album) {
+				album = "Unknown Album"
+			}
+			if artist == "" || isNumericString(artist) {
+				artist = "Unknown Artist"
+			}
+			if album == "" || isNumericString(album) {
+				album = "Unknown Album"
+			}
 				var res sql.Result
 				if shouldComputeWaveform && waveformPeaks != "" {
 					// NEW song: Insert with waveform
@@ -442,7 +525,7 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				} else {
 					// EXISTING song (rescan) or new song without waveform: Preserve existing waveform
 					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 						ON CONFLICT(path) DO UPDATE SET 
 							title=excluded.title, 
 							artist=excluded.artist, 
@@ -486,10 +569,13 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 	if walkErr != nil {
 		log.Printf("Stopped walking path %s due to error: %v", scanPath, walkErr)
 	}
+	log.Printf("Scan summary for %s: filesSeen=%d supported=%d songsAdded=%d", scanPath, filesSeen, supportedSeen, songsAdded)
 	return songsAdded
 }
 
 func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *int64, scannedPaths *map[string]bool) {
+	var filesSeen int64
+	var supportedSeen int64
 	log.Printf("Processing path with running total and tracking: %s", scanPath)
 
 	walkErr := filepath.WalkDir(scanPath, func(path string, d os.DirEntry, err error) error {
@@ -502,37 +588,18 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 		}
 
 		if !d.IsDir() {
+			filesSeen++
 			ext := strings.ToLower(filepath.Ext(path))
-			supportedExts := map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".ogg": true}
+			supportedExts := map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".ogg": true, ".wav": true, ".aiff": true, ".aac": true, ".opus": true}
 
 			if supportedExts[ext] {
+				supportedSeen++
 				// Track this file path
 				(*scannedPaths)[path] = true
 
-				file, err := os.Open(path)
-				if err != nil {
-					log.Printf("Error opening file %s: %v", path, err)
-					return nil
-				}
-				defer file.Close()
+				// Read metadata with centralized fallbacks
+			title, artist, album, albumArtist, genre := readFileMetadata(path)
 
-				meta, err := tag.ReadFrom(file)
-				if err != nil {
-					log.Printf("Error reading tags from %s: %v", path, err)
-					return nil
-				}
-
-				currentTime := time.Now().Format(time.RFC3339)
-				genre := meta.Genre()
-				if genre == "" {
-					genre = "Unknown"
-				}
-
-				title := meta.Title()
-				artist := meta.Artist()
-				album := meta.Album()
-
-				albumArtist := meta.AlbumArtist()
 				// Fallback to filename parsing if metadata is empty (like Navidrome does)
 				// Priority: 1. Metadata tags, 2. Filename parsing, 3. Folder structure
 				if title == "" {
@@ -553,33 +620,41 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 					}
 				}
 
-				// Get duration using ffprobe
-				duration := getDuration(path)
+			// Normalize unknown/numeric-only artist/album to "Unknown"
+			if artist == "" || isNumericString(artist) {
+				artist = "Unknown Artist"
+			}
+			if album == "" || isNumericString(album) {
+				album = "Unknown Album"
+			}
 
-				// DEBUG: Log the first few songs being inserted
-				if *totalSongsAdded < 3 {
-					log.Printf("DEBUG [processPathWithRunningTotalAndTracking]: Inserting song #%d: title='%s', artist='%s', album='%s', duration=%ds",
-						*totalSongsAdded+1, title, artist, album, duration)
-				}
+			// Ensure genre is set
+			if genre == "" {
+				genre = "Unknown"
+			}
 
-				// Check if song already exists (by path) to reuse UUID
-				var existingID string
-				err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
+			// Timestamps and duration for DB
+			currentTime := time.Now().Format(time.RFC3339)
+			duration := getDuration(path)
 
-				var songID string
-				var shouldComputeWaveform bool
-				if err == sql.ErrNoRows {
-					// New song - generate UUID and compute waveform
-					songID = GenerateBase62UUID()
-					shouldComputeWaveform = true
-				} else if err != nil {
-					log.Printf("Error checking for existing song: %v", err)
-					return nil
-				} else {
-					// Existing song (rescan) - reuse UUID, DON'T recompute waveform
-					songID = existingID
-					shouldComputeWaveform = false
-				}
+			// Check if song already exists (by path) to reuse UUID
+			var existingID string
+			err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
+
+			var songID string
+			var shouldComputeWaveform bool
+			if err == sql.ErrNoRows {
+				// New song - generate UUID and compute waveform
+				songID = GenerateBase62UUID()
+				shouldComputeWaveform = true
+			} else if err != nil {
+				log.Printf("Error checking for existing song: %v", err)
+				return nil
+			} else {
+				// Existing song (rescan) - reuse UUID, DON'T recompute waveform
+				songID = existingID
+				shouldComputeWaveform = false
+			}
 
 				// Pre-compute waveform ONLY for new songs
 				var waveformPeaks string
@@ -620,7 +695,7 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 				} else {
 					// EXISTING song (rescan) or new song without waveform: Preserve existing waveform
 					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 						ON CONFLICT(path) DO UPDATE SET 
 							title=excluded.title, 
 							artist=excluded.artist, 
@@ -664,6 +739,7 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 	if walkErr != nil {
 		log.Printf("Stopped walking path %s due to error: %v", scanPath, walkErr)
 	}
+	log.Printf("Scan summary for %s: filesSeen=%d supported=%d totalSongsAdded=%d", scanPath, filesSeen, supportedSeen, *totalSongsAdded)
 }
 
 func removeMissingSongsFromPath(libraryPath string, scannedPaths map[string]bool) {

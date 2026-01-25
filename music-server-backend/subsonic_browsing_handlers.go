@@ -287,19 +287,19 @@ func subsonicGetArtist(c *gin.Context) {
 
 	log.Printf("getArtist called with ID: %s", artistID)
 
-	// Resolve artist ID to artist name by finding any song with matching artist ID
+	// Resolve artist ID to artist name by finding any song with matching effective artist ID
 	var artistName string
 	err := db.QueryRow(`
-		SELECT DISTINCT artist 
-		FROM songs 
-		WHERE artist != '' 
+		SELECT DISTINCT COALESCE(NULLIF(album_artist, ''), artist) AS artist
+		FROM songs
+		WHERE COALESCE(NULLIF(album_artist, ''), artist) != ''
 		AND cancelled = 0
 		LIMIT 1000
 	`).Scan(&artistName)
 
 	// Scan through artists to find matching ID (since we generate IDs dynamically)
 	var foundArtist string
-	artistRows, err := db.Query(`SELECT DISTINCT artist FROM songs WHERE artist != '' AND cancelled = 0`)
+	artistRows, err := db.Query(`SELECT DISTINCT COALESCE(NULLIF(album_artist, ''), artist) AS artist FROM songs WHERE COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0`)
 	if err != nil {
 		log.Printf("Error querying artists: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
