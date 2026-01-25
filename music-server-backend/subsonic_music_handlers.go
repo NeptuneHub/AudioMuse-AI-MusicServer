@@ -98,6 +98,7 @@ func extractTitleFromFilename(filePath string) string {
 
 // extractArtistFromPath extracts artist with proper priority
 // Priority: 1. Metadata, 2. Filename "Artist - Title", 3. Folder structure
+// NOTE: skip the configured library root folder when deriving artist from folders
 func extractArtistFromPath(filePath string) string {
 	filename := filepath.Base(filePath)
 	ext := filepath.Ext(filename)
@@ -123,10 +124,30 @@ func extractArtistFromPath(filePath string) string {
 		}
 	}
 
-	// Priority 3: Fall back to folder structure (grandparent = Artist folder)
+	// Priority 3: Fall back to folder structure using the configured library root
 	dir := filepath.Dir(filePath)
-	pathParts := strings.Split(filepath.Clean(dir), string(filepath.Separator))
 
+	// If a library root is configured and contains this file, derive artist as the
+	// first path component under the root (if present). This ensures we skip the
+	// library root itself and correctly handle both root/artist/album/file and
+	// root/artist/file structures.
+	if libRoot, ok := findLibraryRootForFile(filePath); ok {
+		rel, rErr := filepath.Rel(libRoot, filePath)
+		if rErr == nil {
+			relParts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
+			if len(relParts) >= 2 {
+				artist := cleanMetadataString(relParts[0])
+				if artist != "" && !isCommonFolderName(artist) {
+					return artist
+				}
+			}
+			// If there's no component under root aside from the filename, treat as unknown
+			return "Unknown Artist"
+		}
+	}
+
+	// Fallback to previous behavior: use grandparent folder
+	pathParts := strings.Split(filepath.Clean(dir), string(filepath.Separator))
 	if len(pathParts) >= 2 {
 		artist := cleanMetadataString(pathParts[len(pathParts)-2])
 		if artist != "" && !isCommonFolderName(artist) {
@@ -140,12 +161,33 @@ func extractArtistFromPath(filePath string) string {
 // extractAlbumFromPath extracts album name with proper priority
 // Priority: 1. Metadata, 2. Filename patterns, 3. Parent folder name
 // artistName parameter is used to remove redundant "Artist - Album" patterns
+// NOTE: If the parent folder is actually the artist folder (i.e., parent is directly under library root)
+// then treat as no album (Unknown Album).
 func extractAlbumFromPath(filePath string, artistName string) string {
 	// Priority 2: Could check filename for "Artist - Album - Title" patterns
 	// but this is extremely rare, so we skip directly to folder-based extraction
 
 	// Priority 3: Use parent folder as album name (most common pattern)
 	dir := filepath.Dir(filePath)
+
+	// If the file is under a configured library root, use the relative path to
+	// determine whether an album exists: root/artist/album/file -> album=component[1]
+	if libRoot, ok := findLibraryRootForFile(filePath); ok {
+		rel, rErr := filepath.Rel(libRoot, filePath)
+		if rErr == nil {
+			relParts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
+			// If we have at least 3 components (artist/album/file), use the 2nd as album
+			if len(relParts) >= 3 {
+				albumName := cleanMetadataString(relParts[1])
+				if albumName != "" && !isCommonFolderName(albumName) {
+					return albumName
+				}
+			}
+			// Otherwise, there's no album component under this library layout
+			return "Unknown Album"
+		}
+	}
+
 	albumName := filepath.Base(dir)
 
 	// Remove artist prefix if present: "SUPERARE - Rich Party People" -> "Rich Party People"
@@ -219,6 +261,18 @@ func isCommonFolderName(name string) bool {
 	}
 
 	return false
+}
+
+// findLibraryRootForFile returns the configured library root path that contains filePath, if any
+func findLibraryRootForFile(filePath string) (string, bool) {
+	var libPath string
+	// Find the longest matching prefix path from library_paths
+	// Use LIKE with path||'%' to match files under a library path
+	err := db.QueryRow("SELECT path FROM library_paths WHERE ? LIKE path || '%' ORDER BY LENGTH(path) DESC LIMIT 1", filePath).Scan(&libPath)
+	if err != nil {
+		return "", false
+	}
+	return filepath.Clean(libPath), true
 }
 
 // detectAudioFormat detects the format and bitrate of an audio file using FFprobe
