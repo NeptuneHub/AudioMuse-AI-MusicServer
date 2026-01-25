@@ -465,6 +465,11 @@ func checkAndRestoreDB(dbPath string) error {
 				return nil
 			}
 		} else {
+			// If the DB is empty (no tables), treat this as a fresh install and allow initialization
+			if err == sql.ErrNoRows {
+				log.Println("DB appears to be empty (no tables); treating as fresh DB and will initialize.")
+				return nil
+			}
 			log.Printf("DB read test failed: %v", err)
 			// fall through to attempt restore from backup
 		}
