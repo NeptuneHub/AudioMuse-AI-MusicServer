@@ -21,7 +21,13 @@ Music Server built on the Open Subsonic API, designed to showcase AudioMuse-AI's
 You can run AudioMuse-AI-MusicServer using our automatically built and published Docker containers from GitHub Container Registry. This is the easiest way to get started without needing to compile anything.
 
 ```bash
-docker pull ghcr.io/neptunehub/audiomuse-ai-musicserver:latest
+docker run -d \
+  --name audiomuse \
+  -p 3000:3000 \
+  -p 8080:8080 \
+  -v /path/to/music:/music \
+  -v /path/to/config:/config \
+  ghcr.io/neptunehub/audiomuse-ai-musicserver:latest
 ```
 
 For detailed container usage instructions, deployment options, and release information, see: **[CONTAINER_RELEASE.md](CONTAINER_RELEASE.md)**
@@ -182,6 +188,7 @@ npm start
 Frontend will be reacheable on http://localhost:3000/ you can do the first login with admin/admin
 
 **IMPORTANT** as you can see, running the code OUT of the container, you had the front-end on the different port 3000
+
 
 
 
