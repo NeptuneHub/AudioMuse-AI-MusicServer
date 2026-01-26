@@ -23,9 +23,57 @@ func normalizeArtistName(s string) string {
 	return s
 }
 
+// getArtistAlbumCounts returns a map of artist names to their album counts
+// OPTIMIZED: Single query instead of N queries (critical for 100k songs)
+func getArtistAlbumCounts(db *sql.DB, artistNames []string) (map[string]int, error) {
+	if len(artistNames) == 0 {
+		return make(map[string]int), nil
+	}
+
+	// Build a query that counts albums per artist in a single pass
+	// Use album_path + album for grouping (not just album name)
+	query := `
+		SELECT
+			artist,
+			COUNT(DISTINCT CASE
+				WHEN album_path IS NOT NULL AND album_path != ''
+				THEN album_path || '|||' || album
+				ELSE album
+			END) as album_count
+		FROM songs
+		WHERE artist IN (` + strings.Repeat("?,", len(artistNames)-1) + `?)
+			AND cancelled = 0
+			AND album != ''
+		GROUP BY artist
+	`
+
+	args := make([]interface{}, len(artistNames))
+	for i, name := range artistNames {
+		args[i] = name
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var artist string
+		var count int
+		if err := rows.Scan(&artist, &count); err != nil {
+			continue
+		}
+		counts[artist] = count
+	}
+
+	return counts, nil
+}
+
 // fetchEffectiveArtists fetches and returns a deduplicated list of effective artists (album_artist fallback)
 func fetchEffectiveArtists(db *sql.DB) ([]string, error) {
-	rows, err := db.Query(`SELECT DISTINCT COALESCE(NULLIF(album_artist, ''), artist) AS artist FROM songs WHERE COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0`)
+	rows, err := db.Query(`SELECT DISTINCT CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END AS artist FROM songs WHERE ((album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')) OR artist != '') AND cancelled = 0`)
 	if err != nil {
 		return nil, err
 	}
@@ -81,68 +129,58 @@ func fetchArtists(db *sql.DB) ([]string, error) {
 // getAlbumDisplayArtist returns a display string for an album's artist(s).
 // Priority: distinct non-empty album_artist values (sorted) concatenated with "; ",
 // otherwise distinct non-empty artist values concatenated with "; ". Returns "Unknown Artist" if none found.
+// OPTIMIZED: Single query for better performance with 100k+ songs
 func getAlbumDisplayArtist(db *sql.DB, albumName, albumPath string) (string, error) {
-	// Simplified logic per request:
-	// 1) album_artist for songs matching album + album_path
-	rows, err := db.Query("SELECT DISTINCT TRIM(album_artist) FROM songs WHERE album = ? AND album_path = ? AND album_artist != '' AND cancelled = 0 ORDER BY album_artist COLLATE NOCASE", albumName, albumPath)
-	if err == nil {
-		defer rows.Close()
-		parts := []string{}
-		seen := make(map[string]bool)
-		for rows.Next() {
-			var a string
-			if err := rows.Scan(&a); err != nil {
-				continue
-			}
-			a = strings.TrimSpace(a)
-			if a == "" {
-				continue
-			}
-			// Ignore placeholder/unknown values that may have been written previously
-			nk := normalizeKey(a)
-			if nk == "unknown artist" || nk == "unknown" {
-				continue
-			}
-			if seen[nk] {
-				continue
-			}
-			seen[nk] = true
-			parts = append(parts, a)
+	// Use a single query with CASE to prioritize album_artist, fallback to artist
+	// This is MUCH faster than two separate queries
+	query := `
+		SELECT DISTINCT
+			CASE
+				WHEN album_artist IS NOT NULL
+					AND TRIM(album_artist) != ''
+					AND LOWER(TRIM(album_artist)) NOT IN ('unknown', 'unknown artist')
+				THEN TRIM(album_artist)
+				WHEN artist IS NOT NULL
+					AND TRIM(artist) != ''
+					AND LOWER(TRIM(artist)) NOT IN ('unknown', 'unknown artist')
+				THEN TRIM(artist)
+				ELSE NULL
+			END as display_artist
+		FROM songs
+		WHERE album = ? AND album_path = ? AND cancelled = 0
+		ORDER BY display_artist COLLATE NOCASE
+	`
+
+	rows, err := db.Query(query, albumName, albumPath)
+	if err != nil {
+		return "Unknown Artist", err
+	}
+	defer rows.Close()
+
+	parts := []string{}
+	seen := make(map[string]bool)
+
+	for rows.Next() {
+		var displayArtist sql.NullString
+		if err := rows.Scan(&displayArtist); err != nil {
+			continue
 		}
-		if len(parts) > 0 {
-			return strings.Join(parts, "; "), nil
+
+		if !displayArtist.Valid || displayArtist.String == "" {
+			continue
 		}
+
+		// Normalize for deduplication
+		nk := normalizeKey(displayArtist.String)
+		if seen[nk] {
+			continue
+		}
+		seen[nk] = true
+		parts = append(parts, displayArtist.String)
 	}
 
-	// 2) track artists for songs matching album + album_path
-	rows2, err2 := db.Query("SELECT DISTINCT TRIM(artist) FROM songs WHERE album = ? AND album_path = ? AND artist != '' AND cancelled = 0 ORDER BY artist COLLATE NOCASE", albumName, albumPath)
-	if err2 == nil {
-		defer rows2.Close()
-		parts := []string{}
-		seen := make(map[string]bool)
-		for rows2.Next() {
-			var a string
-			if err := rows2.Scan(&a); err != nil {
-				continue
-			}
-			a = strings.TrimSpace(a)
-			if a == "" {
-				continue
-			}
-			// Ignore placeholder/unknown values when considering track artists
-			nk := normalizeKey(a)
-			if nk == "unknown artist" || nk == "unknown" {
-				continue
-			}
-			if seen[nk] {
-				continue
-			}
-			seen[nk] = true
-			parts = append(parts, a)
-		}
-		if len(parts) > 0 {
-			return strings.Join(parts, "; "), nil
-		}
+	if len(parts) > 0 {
+		return strings.Join(parts, "; "), nil
 	}
 
 	return "Unknown Artist", nil

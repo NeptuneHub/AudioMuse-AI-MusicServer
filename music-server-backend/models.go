@@ -159,13 +159,14 @@ type SubsonicAlbumList2 struct {
 }
 
 type SubsonicAlbum struct {
-	XMLName  xml.Name `xml:"album" json:"-"`
-	ID       string   `xml:"id,attr" json:"id"`
-	Name     string   `xml:"name,attr" json:"name"`
-	Artist   string   `xml:"artist,attr" json:"artist"`
-	ArtistID string   `xml:"artistId,attr,omitempty" json:"artistId,omitempty"`
-	CoverArt string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
-	Genre    string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
+	XMLName   xml.Name `xml:"album" json:"-"`
+	ID        string   `xml:"id,attr" json:"id"`
+	Name      string   `xml:"name,attr" json:"name"`
+	Artist    string   `xml:"artist,attr" json:"artist"`
+	ArtistID  string   `xml:"artistId,attr,omitempty" json:"artistId,omitempty"`
+	CoverArt  string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	Genre     string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
+	SongCount int      `xml:"songCount,attr,omitempty" json:"songCount,omitempty"`
 }
 
 type SubsonicPlaylists struct {

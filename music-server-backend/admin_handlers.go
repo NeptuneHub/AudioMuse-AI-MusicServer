@@ -56,12 +56,14 @@ func readFileMetadata(path string) (title, artist, album, albumArtist, genre str
 	}
 
 	// Album artist fallback: prefer albumArtist tag, then artist tag, else Unknown Artist
-	if albumArtist == "" {
-		// If no albumArtist tag, use artist (which may already be 'Unknown Artist')
-		albumArtist = artist
-	}
-	if albumArtist == "" || isNumericString(albumArtist) {
-		albumArtist = "Unknown Artist"
+	// CRITICAL: Replace "Unknown Artist" album_artist with real artist to avoid showing albums with Unknown Artist that have real songs
+	if albumArtist == "" || isNumericString(albumArtist) || isUnknownString(albumArtist) {
+		// Use the artist field if it's valid
+		if artist != "" && !isNumericString(artist) && !isUnknownString(artist) {
+			albumArtist = artist
+		} else {
+			albumArtist = "Unknown Artist"
+		}
 	}
 
 	return
@@ -80,14 +82,27 @@ func isNumericString(s string) bool {
 	return true
 }
 
+// isUnknownString returns true if the string contains the token 'unknown' (case-insensitive)
+// This helps treat values like 'Unknown Artist' or 'unknown - scraped' as missing.
+func isUnknownString(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return false
+	}
+	if s == "unknown" || s == "unknown artist" {
+		return true
+	}
+	return strings.Contains(s, "unknown")
+}
+
 // normalizeArtistAndAlbumArtist ensures both artist and albumArtist have canonical values.
-// Prefers artist when albumArtist is missing; numeric-only values become "Unknown Artist".
+// Prefers artist when albumArtist is missing or contains 'unknown'; numeric-only values become "Unknown Artist".
 func normalizeArtistAndAlbumArtist(artist *string, albumArtist *string) {
-	if *artist == "" || isNumericString(*artist) {
+	if *artist == "" || isNumericString(*artist) || isUnknownString(*artist) {
 		*artist = "Unknown Artist"
 	}
-	// If albumArtist missing, fall back to artist (which may already be 'Unknown Artist')
-	if *albumArtist == "" {
+	// If albumArtist missing or effectively unknown, fall back to artist (which may already be 'Unknown Artist')
+	if *albumArtist == "" || isNumericString(*albumArtist) || isUnknownString(*albumArtist) {
 		*albumArtist = *artist
 	}
 	if *albumArtist == "" || isNumericString(*albumArtist) {
@@ -96,9 +111,11 @@ func normalizeArtistAndAlbumArtist(artist *string, albumArtist *string) {
 }
 
 // chooseAlbumArtist returns a canonical albumArtist string for DB insertion
+// CRITICAL: This ensures album_artist is NEVER "Unknown Artist" if we have a real artist
 func chooseAlbumArtist(albumArtist, artist string) string {
-	if albumArtist == "" || isNumericString(albumArtist) {
-		if artist != "" {
+	if albumArtist == "" || isNumericString(albumArtist) || isUnknownString(albumArtist) {
+		// Use artist if it's valid (not empty, not numeric, not unknown)
+		if artist != "" && !isNumericString(artist) && !isUnknownString(artist) {
 			return artist
 		}
 		return "Unknown Artist"
@@ -153,14 +170,20 @@ func scanSingleLibrary(pathId int) {
 	if err != nil {
 		log.Printf("Warning: normalization update for album failed: %v", err)
 	}
-	_, err = db.Exec("UPDATE songs SET album_artist = 'Unknown Artist' WHERE album_artist IS NULL OR TRIM(album_artist) = '' OR LOWER(TRIM(album_artist)) = 'unknown'")
+	// Backfill missing album_artist from artist when available (safe, idempotent)
+	// This catches any songs where album_artist is NULL, empty, 'unknown', or 'Unknown Artist'
+	res, err := db.Exec("UPDATE songs SET album_artist = artist WHERE (album_artist IS NULL OR TRIM(album_artist) = '' OR LOWER(TRIM(album_artist)) = 'unknown' OR LOWER(TRIM(album_artist)) = 'unknown artist') AND artist != '' AND LOWER(TRIM(artist)) NOT IN ('unknown', 'unknown artist') AND cancelled = 0")
 	if err != nil {
-		log.Printf("Warning: normalization update for album_artist failed: %v", err)
+		log.Printf("Warning: backfill album_artist from artist failed: %v", err)
+	} else {
+		if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("Backfilled album_artist from artist for %d songs", n)
+		}
 	}
 	_, err = db.Exec("UPDATE songs SET artist = TRIM(artist), album = TRIM(album), album_artist = TRIM(album_artist)")
 	if err != nil {
 		log.Printf("Warning: whitespace normalization failed: %v", err)
-	}
+	} 
 
 	if isScanCancelled.Load() {
 		log.Printf("Scan was cancelled for path %s. Songs added before stop: %d.", path, songsAdded)
@@ -238,10 +261,20 @@ func scanAllLibraries() {
 	if err != nil {
 		log.Printf("Warning: normalization update for album failed after full rescan: %v", err)
 	}
+	// Backfill missing album_artist from artist when available (safe, idempotent)
+	// This catches any songs where album_artist is NULL, empty, 'unknown', or 'Unknown Artist'
+	res, err := db.Exec("UPDATE songs SET album_artist = artist WHERE (album_artist IS NULL OR TRIM(album_artist) = '' OR LOWER(TRIM(album_artist)) = 'unknown' OR LOWER(TRIM(album_artist)) = 'unknown artist') AND artist != '' AND LOWER(TRIM(artist)) NOT IN ('unknown', 'unknown artist') AND cancelled = 0")
+	if err != nil {
+		log.Printf("Warning: backfill album_artist from artist failed after full rescan: %v", err)
+	} else {
+		if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("Backfilled album_artist from artist for %d songs after full rescan", n)
+		}
+	}
 	_, err = db.Exec("UPDATE songs SET artist = TRIM(artist), album = TRIM(album), album_artist = TRIM(album_artist)")
 	if err != nil {
 		log.Printf("Warning: whitespace normalization failed after full rescan: %v", err)
-	}
+	} 
 }
 
 func processPath(scanPath string) int64 {
@@ -1040,3 +1073,6 @@ func rescanAllLibraries(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Full library rescan started successfully"})
 }
+
+// backfillAlbumArtists endpoint removed at user's request.
+

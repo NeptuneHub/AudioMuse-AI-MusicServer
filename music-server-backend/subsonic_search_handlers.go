@@ -57,7 +57,7 @@ func subsonicSearch2(c *gin.Context) {
 		var rows *sql.Rows
 		var err error
 		if isShortQuery || query == "" || query == "*" {
-			rows, err = db.Query("SELECT COALESCE(NULLIF(album_artist, ''), artist) AS artist FROM songs WHERE COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0")
+			rows, err = db.Query("SELECT DISTINCT CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END AS artist FROM songs WHERE ((album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')) OR artist != '') AND cancelled = 0")
 		} else {
 			var conditions []string
 			var args []interface{}
@@ -66,7 +66,7 @@ func subsonicSearch2(c *gin.Context) {
 				like := "%" + word + "%"
 				args = append(args, like, like)
 			}
-			q := "SELECT COALESCE(NULLIF(album_artist, ''), artist) AS artist FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0"
+			q := "SELECT DISTINCT CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END AS artist FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND ((album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')) OR artist != '') AND cancelled = 0"
 			rows, err = db.Query(q, args...)
 		}
 		if err == nil {
@@ -92,15 +92,37 @@ func subsonicSearch2(c *gin.Context) {
 		if isShortQuery {
 			rows, err = db.Query("SELECT album, album_path FROM songs WHERE album != '' AND cancelled = 0")
 		} else {
-			var conditions []string
-			var args []interface{}
-			for _, word := range searchWords {
-				conditions = append(conditions, "(album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)")
-				likeWord := "%" + word + "%"
-				args = append(args, likeWord, likeWord, likeWord)
+			// For counting, iterate distinct album groups and apply display-artist filter per-album
+			rows, err = db.Query("SELECT album, MIN(NULLIF(album_path, '')) as album_path FROM songs WHERE album != '' AND cancelled = 0 GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END ORDER BY album")
+			if err == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var albumName, albumPath string
+					if err := rows.Scan(&albumName, &albumPath); err != nil {
+						continue
+					}
+					albumName = strings.TrimSpace(albumName)
+					albumPath = strings.TrimSpace(albumPath)
+					if albumName == "" && albumPath == "" {
+						continue
+					}
+					// Compute display artist and only count album if display artist or album name match all search words
+					displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumPath)
+					match := true
+					for _, word := range searchWords {
+						lw := strings.ToLower(word)
+						if !strings.Contains(strings.ToLower(albumName), lw) && !strings.Contains(strings.ToLower(displayArtist), lw) {
+							match = false
+							break
+						}
+					}
+					if match {
+						key := normalizeKey(albumPath + "|||" + albumName)
+						seenAlbums[key] = true
+					}
+				}
+				// 'rows' already deferred closed above
 			}
-			q := "SELECT album, album_path FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND cancelled = 0"
-			rows, err = db.Query(q, args...)
 		}
 		if err == nil {
 			defer rows.Close()
@@ -144,20 +166,47 @@ func subsonicSearch2(c *gin.Context) {
 		var artistQuery string
 		var artistArgs []interface{}
 
+		// OPTIMIZED: Changed to aggregate album count in the main query instead of N+1 queries
 		if isShortQuery || query == "" || query == "*" {
-			// Return all artists with pagination when query is short, empty, or wildcard
-			artistQuery = "SELECT artist, COUNT(*) FROM songs WHERE artist != '' AND cancelled = 0 GROUP BY artist ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
-			artistArgs = append(artistArgs, artistCount, artistOffset)
+			artistQuery = `
+				SELECT
+					CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')
+					THEN album_artist ELSE artist END AS artist,
+					COUNT(*) as song_count,
+					COUNT(DISTINCT CASE
+						WHEN album != '' AND album_path != '' THEN album_path || '|||' || album
+						WHEN album != '' THEN album
+						ELSE NULL
+					END) as album_count
+				FROM songs
+				WHERE ((album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')) OR artist != '') AND cancelled = 0
+				GROUP BY CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END
+				ORDER BY artist COLLATE NOCASE
+				LIMIT ? OFFSET ?`
+			artistArgs = []interface{}{artistCount, artistOffset}
 		} else {
-			// Search artists with query across artist field
 			var artistConditions []string
 			for _, word := range searchWords {
-				artistConditions = append(artistConditions, "artist LIKE ?")
+				artistConditions = append(artistConditions, "(CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END) LIKE ?")
 				like := "%" + word + "%"
 				artistArgs = append(artistArgs, like)
 			}
 			artistArgs = append(artistArgs, artistCount, artistOffset)
-			artistQuery = "SELECT artist, COUNT(*) FROM songs WHERE " + strings.Join(artistConditions, " AND ") + " AND artist != '' AND cancelled = 0 GROUP BY artist ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
+			artistQuery = `
+				SELECT
+					CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')
+					THEN album_artist ELSE artist END AS artist,
+					COUNT(*) as song_count,
+					COUNT(DISTINCT CASE
+						WHEN album != '' AND album_path != '' THEN album_path || '|||' || album
+						WHEN album != '' THEN album
+						ELSE NULL
+					END) as album_count
+				FROM songs
+				WHERE ` + strings.Join(artistConditions, " AND ") + ` AND ((album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')) OR artist != '') AND cancelled = 0
+				GROUP BY CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END
+				ORDER BY artist COLLATE NOCASE
+				LIMIT ? OFFSET ?`
 		}
 
 		artistRows, err := db.Query(artistQuery, artistArgs...)
@@ -169,31 +218,13 @@ func subsonicSearch2(c *gin.Context) {
 			for artistRows.Next() {
 				var artistName string
 				var songCount int
-				if err := artistRows.Scan(&artistName, &songCount); err == nil {
+				var albumCount int
+				if err := artistRows.Scan(&artistName, &songCount, &albumCount); err == nil {
 					key := normalizeKey(artistName)
 					if seenArtists[key] {
 						continue
 					}
 					seenArtists[key] = true
-					// Compute deduplicated album count for this artist by album + album_path
-					seenAlbums := make(map[string]bool)
-					rows, rErr := db.Query("SELECT album, album_path FROM songs WHERE artist = ? AND album != '' AND cancelled = 0", artistName)
-					if rErr == nil {
-						for rows.Next() {
-							var albumName, albumPath string
-							if err := rows.Scan(&albumName, &albumPath); err != nil {
-								continue
-							}
-							albumName = strings.TrimSpace(albumName)
-							albumPath = strings.TrimSpace(albumPath)
-							if albumName == "" && albumPath == "" {
-								continue
-							}
-							seenAlbums[normalizeKey(albumPath+"|||"+albumName)] = true
-						}
-						rows.Close()
-					}
-					albumCount := len(seenAlbums)
 					artistID := GenerateArtistID(artistName)
 					result.Artists = append(result.Artists, SubsonicArtist{
 						ID:         artistID, // Generate MD5 artist ID
@@ -208,24 +239,44 @@ func subsonicSearch2(c *gin.Context) {
 	} 
 
 	// --- Enhanced Album Search Logic ---
+	// OPTIMIZED: Use display artist computation with proper song count
 	if albumCount > 0 {
 		var albumQuery string
 		var albumArgs []interface{}
-		
+
 		if isShortQuery {
 			// Show all albums when query is short
-			albumQuery = "SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as albumId FROM songs WHERE album != '' AND cancelled = 0 GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END ORDER BY album LIMIT ? OFFSET ?"
+			albumQuery = `
+				SELECT
+					album,
+					MIN(NULLIF(album_path, '')) as album_path,
+					COALESCE(genre, '') as genre,
+					MIN(id) as albumId,
+					COUNT(*) as song_count
+				FROM songs
+				WHERE album != '' AND cancelled = 0
+				GROUP BY CASE
+					WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
+					ELSE album
+				END
+				ORDER BY album LIMIT ? OFFSET ?`
 			albumArgs = append(albumArgs, albumCount, albumOffset)
 		} else {
-			// Filter by search terms (match album name, artist, or album artist)
-			var albumConditions []string
-			for _, word := range searchWords {
-				albumConditions = append(albumConditions, "(album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)")
-				likeWord := "%" + word + "%"
-				albumArgs = append(albumArgs, likeWord, likeWord, likeWord)
-			}
-			albumArgs = append(albumArgs, albumCount, albumOffset)
-			albumQuery = "SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as albumId, MIN(album_path) as albumPath FROM songs WHERE " + strings.Join(albumConditions, " AND ") + " AND cancelled = 0 GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END ORDER BY album LIMIT ? OFFSET ?"
+			// For search terms, fetch distinct album groups then filter per-album in Go using displayArtist
+			albumQuery = `
+				SELECT
+					album,
+					MIN(NULLIF(album_path, '')) as albumPath,
+					COALESCE(genre, '') as genre,
+					MIN(id) as albumId,
+					COUNT(*) as song_count
+				FROM songs
+				WHERE album != '' AND cancelled = 0
+				GROUP BY CASE
+					WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
+					ELSE album
+				END
+				ORDER BY album`
 		}
 		albumRows, err := db.Query(albumQuery, albumArgs...)
 		if err != nil {
@@ -236,26 +287,49 @@ func subsonicSearch2(c *gin.Context) {
 			seen := make(map[string]SubsonicAlbum)
 			order := []string{}
 			for albumRows.Next() {
-				var albumName, artistName, genre, albumPath string
+				var albumName, albumPath, genre string
 				var albumID string
-				if err := albumRows.Scan(&albumName, &artistName, &genre, &albumID, &albumPath); err == nil {
+				var songCount int
+				if err := albumRows.Scan(&albumName, &albumPath, &genre, &albumID, &songCount); err == nil {
+					albumName = strings.TrimSpace(albumName)
+					albumPath = strings.TrimSpace(albumPath)
+					if albumName == "" && albumPath == "" {
+						continue
+					}
 					// Compute display artist for this album
-					displayArtist, _ := getAlbumDisplayArtist(db, albumName, strings.TrimSpace(albumPath))
+					displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumPath)
+					// Apply search word matching against album name and display artist
+					match := true
+					for _, word := range searchWords {
+						lw := strings.ToLower(word)
+						if !strings.Contains(strings.ToLower(albumName), lw) && !strings.Contains(strings.ToLower(displayArtist), lw) {
+							match = false
+							break
+						}
+					}
+					if !match {
+						continue
+					}
 					key := normalizeKey(albumName)
 					candidate := SubsonicAlbum{
-						ID:       albumID,
-						Name:     albumName,
-						Artist:   displayArtist,
-						ArtistID: GenerateArtistID(displayArtist),
-						Genre:    genre,
-						CoverArt: albumID,
+						ID:        albumID,
+						Name:      albumName,
+						Artist:    displayArtist,
+						ArtistID:  GenerateArtistID(displayArtist),
+						Genre:     genre,
+						CoverArt:  albumID,
+						SongCount: songCount,
 					}
 					if existing, ok := seen[key]; ok {
 						// If candidate is backed by album_artist and existing is not, replace existing
 						var candIsAlbumArtist int
-						db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE album = ? AND album_artist = ? AND cancelled = 0)", albumName, artistName).Scan(&candIsAlbumArtist)
+						if albumPath != "" {
+							db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE album = ? AND album_path = ? AND album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') AND cancelled = 0)", albumName, albumPath).Scan(&candIsAlbumArtist)
+						} else {
+							db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE album = ? AND (album_path IS NULL OR album_path = '') AND album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') AND cancelled = 0)", albumName).Scan(&candIsAlbumArtist)
+						}
 						var existIsAlbumArtist int
-						db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE album = ? AND album_artist = ? AND cancelled = 0)", existing.Name, existing.Artist).Scan(&existIsAlbumArtist)
+						db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE album = ? AND album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') AND cancelled = 0)", existing.Name).Scan(&existIsAlbumArtist)
 						if candIsAlbumArtist == 1 && existIsAlbumArtist == 0 {
 							seen[key] = candidate
 						}
@@ -265,8 +339,19 @@ func subsonicSearch2(c *gin.Context) {
 					}
 				}
 			}
-			// Reconstruct result preserving original order
-			for _, k := range order {
+			// Apply pagination to the ordered results
+			start := albumOffset
+			end := start + albumCount
+			if start < 0 {
+				start = 0
+			}
+			if start > len(order) {
+				start = len(order)
+			}
+			if end > len(order) {
+				end = len(order)
+			}
+			for _, k := range order[start:end] {
 				result.Albums = append(result.Albums, seen[k])
 			}
 		}
@@ -418,9 +503,10 @@ func subsonicSearch3(c *gin.Context) {
 			var conditions []string
 			var args []interface{}
 			for _, word := range searchWords {
-				conditions = append(conditions, "(album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)")
+				// Match album name or effective artist (ignore 'unknown' album_artist)
+				conditions = append(conditions, "(album LIKE ? OR (CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END) LIKE ?)")
 				likeWord := "%" + word + "%"
-				args = append(args, likeWord, likeWord, likeWord)
+				args = append(args, likeWord, likeWord)
 			}
 			q := "SELECT album FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND cancelled = 0"
 			rows, err = db.Query(q, args...)
@@ -461,13 +547,27 @@ func subsonicSearch3(c *gin.Context) {
 	}
 
 	// --- Artist Search ---
+	// OPTIMIZED: Single query with album count aggregation (no N+1 queries)
 	if artistCount > 0 {
 		var artistQuery string
 		var artistArgs []interface{}
-		
+
 		if isShortQuery {
 			// Show all artists when query is short
-			artistQuery = "SELECT artist, COUNT(*) FROM songs WHERE artist != '' AND cancelled = 0 GROUP BY artist ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
+			artistQuery = `
+				SELECT
+					artist,
+					COUNT(*) as song_count,
+					COUNT(DISTINCT CASE
+						WHEN album != '' AND album_path != '' THEN album_path || '|||' || album
+						WHEN album != '' THEN album
+						ELSE NULL
+					END) as album_count
+				FROM songs
+				WHERE artist != '' AND cancelled = 0
+				GROUP BY artist
+				ORDER BY artist COLLATE NOCASE
+				LIMIT ? OFFSET ?`
 			artistArgs = append(artistArgs, artistCount, artistOffset)
 		} else {
 			// Filter by search terms
@@ -477,7 +577,20 @@ func subsonicSearch3(c *gin.Context) {
 				artistArgs = append(artistArgs, "%"+word+"%")
 			}
 			artistArgs = append(artistArgs, artistCount, artistOffset)
-			artistQuery = "SELECT artist, COUNT(*) FROM songs WHERE " + strings.Join(artistConditions, " AND ") + " AND artist != '' AND cancelled = 0 GROUP BY artist ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
+			artistQuery = `
+				SELECT
+					artist,
+					COUNT(*) as song_count,
+					COUNT(DISTINCT CASE
+						WHEN album != '' AND album_path != '' THEN album_path || '|||' || album
+						WHEN album != '' THEN album
+						ELSE NULL
+					END) as album_count
+				FROM songs
+				WHERE ` + strings.Join(artistConditions, " AND ") + ` AND artist != '' AND cancelled = 0
+				GROUP BY artist
+				ORDER BY artist COLLATE NOCASE
+				LIMIT ? OFFSET ?`
 		}
 
 		artistRows, err := db.Query(artistQuery, artistArgs...)
@@ -488,26 +601,8 @@ func subsonicSearch3(c *gin.Context) {
 			for artistRows.Next() {
 				var artistName string
 				var songCount int
-				if err := artistRows.Scan(&artistName, &songCount); err == nil {
-					// Compute deduplicated album count for this artist
-					seenAlbums := make(map[string]bool)
-					rows, rErr := db.Query("SELECT album, album_path FROM songs WHERE artist = ? AND album != '' AND cancelled = 0", artistName)
-					if rErr == nil {
-						for rows.Next() {
-							var albumName, albumPath string
-							if err := rows.Scan(&albumName, &albumPath); err != nil {
-								continue
-							}
-							albumName = strings.TrimSpace(albumName)
-							albumPath = strings.TrimSpace(albumPath)
-							if albumName == "" && albumPath == "" {
-								continue
-							}
-							seenAlbums[normalizeKey(albumPath+"|||"+albumName)] = true
-						}
-						rows.Close()
-					}
-					albumCount := len(seenAlbums)
+				var albumCount int
+				if err := artistRows.Scan(&artistName, &songCount, &albumCount); err == nil {
 					artistID := GenerateArtistID(artistName)
 					result.Artists = append(result.Artists, SubsonicArtist{
 						ID:         artistID, // Generate MD5 artist ID
@@ -522,24 +617,53 @@ func subsonicSearch3(c *gin.Context) {
 	}
 
 	// --- Album Search ---
+	// OPTIMIZED: Include song count in query
 	if albumCount > 0 {
 		var albumQuery string
 		var albumArgs []interface{}
-		
+
 		if isShortQuery {
 			// Show all albums when query is short
-			albumQuery = "SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as albumId, MIN(NULLIF(album_path, '')) as albumPath FROM songs WHERE album != '' AND cancelled = 0 GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END ORDER BY album COLLATE NOCASE LIMIT ? OFFSET ?"
+			albumQuery = `
+				SELECT
+					album,
+					MIN(NULLIF(album_path, '')) as albumPath,
+					COALESCE(genre, '') as genre,
+					MIN(id) as albumId,
+					COUNT(*) as song_count
+				FROM songs
+				WHERE album != '' AND cancelled = 0
+				GROUP BY CASE
+					WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
+					ELSE album
+				END
+				ORDER BY album COLLATE NOCASE
+				LIMIT ? OFFSET ?`
 			albumArgs = append(albumArgs, albumCount, albumOffset)
 		} else {
-			// Filter by search terms (match album name, artist, or album artist)
+			// Filter by search terms (match album name or effective album artist)
 			var albumConditions []string
 			for _, word := range searchWords {
-				albumConditions = append(albumConditions, "(album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)")
+				// Match album name or effective artist (ignore 'unknown' album_artist)
+				albumConditions = append(albumConditions, "(album LIKE ? OR (CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END) LIKE ?)")
 				likeWord := "%" + word + "%"
-				albumArgs = append(albumArgs, likeWord, likeWord, likeWord)
+				albumArgs = append(albumArgs, likeWord, likeWord)
 			}
-			albumArgs = append(albumArgs, albumCount, albumOffset)
-			albumQuery = "SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as albumId, MIN(NULLIF(album_path, '')) as albumPath FROM songs WHERE " + strings.Join(albumConditions, " AND ") + " AND cancelled = 0 GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END ORDER BY album COLLATE NOCASE LIMIT ? OFFSET ?"
+			// Fetch all candidates and apply display-artist filtering + pagination in Go
+			albumQuery = `
+				SELECT
+					album,
+					MIN(NULLIF(album_path, '')) as albumPath,
+					COALESCE(genre, '') as genre,
+					MIN(id) as albumId,
+					COUNT(*) as song_count
+				FROM songs
+				WHERE ` + strings.Join(albumConditions, " AND ") + ` AND cancelled = 0
+				GROUP BY CASE
+					WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
+					ELSE album
+				END
+				ORDER BY album COLLATE NOCASE`
 		}
 
 		albumRows, err := db.Query(albumQuery, albumArgs...)
@@ -548,39 +672,71 @@ func subsonicSearch3(c *gin.Context) {
 		} else {
 			defer albumRows.Close()
 			// Deduplicate albums preferring entries backed by album_artist when duplicates exist
-			seen := make(map[string]SubsonicAlbum)
-			order := []string{}
+			seenAlbums := make(map[string]SubsonicAlbum)
+			orderAlbums := []string{}
+			candidates := []SubsonicAlbum{}
 			for albumRows.Next() {
-				var albumName, artistName, genre, albumPath string
+				var albumName, genre, albumPath string
 				var albumID string
-				if err := albumRows.Scan(&albumName, &artistName, &genre, &albumID, &albumPath); err == nil {
+				var songCount int
+				if err := albumRows.Scan(&albumName, &albumPath, &genre, &albumID, &songCount); err == nil {
 					// Compute display artist for this album
 					displayArtist, _ := getAlbumDisplayArtist(db, albumName, strings.TrimSpace(albumPath))
-					key := normalizeKey(albumName)
-					candidate := SubsonicAlbum{
-						ID:       albumID,
-						Name:     albumName,
-						Artist:   displayArtist,
-						ArtistID: GenerateArtistID(displayArtist),
-						Genre:    genre,
-						CoverArt: albumID,
-					}
-					if existing, ok := seen[key]; ok {
-						var candIsAlbumArtist int
-						db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE album = ? AND album_artist = ? AND cancelled = 0)", albumName, artistName).Scan(&candIsAlbumArtist)
-						var existIsAlbumArtist int
-						db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE album = ? AND album_artist = ? AND cancelled = 0)", existing.Name, existing.Artist).Scan(&existIsAlbumArtist)
-						if candIsAlbumArtist == 1 && existIsAlbumArtist == 0 {
-							seen[key] = candidate
+					// Ensure album matches search words by album name or display artist (case-insensitive)
+					match := true
+					for _, word := range searchWords {
+						lw := strings.ToLower(word)
+						if !strings.Contains(strings.ToLower(albumName), lw) && !strings.Contains(strings.ToLower(displayArtist), lw) {
+							match = false
+							break
 						}
-					} else {
-						seen[key] = candidate
-						order = append(order, key)
 					}
+					// Debug: log when searching for 'unknown' so we can inspect why albums are matching
+					if strings.Contains(strings.ToLower(query), "unknown") {
+						log.Printf("DEBUG search: query='%s' searchWords=%v album='%s' displayArtist='%s' match=%t", query, searchWords, albumName, displayArtist, match)
+					}
+					if !match {
+						continue
+					}
+					candidate := SubsonicAlbum{
+						ID:        albumID,
+						Name:      albumName,
+						Artist:    displayArtist,
+						ArtistID:  GenerateArtistID(displayArtist),
+						Genre:     genre,
+						CoverArt:  albumID,
+						SongCount: songCount,
+					}
+					candidates = append(candidates, candidate)
 				}
 			}
-			for _, k := range order {
-				result.Albums = append(result.Albums, seen[k])
+			// Deduplicate candidates by album name (preserve first occurrence), preferring album_artist-backed entries
+			for _, candidate := range candidates {
+				key := normalizeKey(candidate.Name)
+				if existing, ok := seenAlbums[key]; ok {
+					var candIsAlbumArtist int
+					db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE album = ? AND album_artist = ? AND cancelled = 0)", candidate.Name, candidate.Artist).Scan(&candIsAlbumArtist)
+					var existIsAlbumArtist int
+					db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE album = ? AND album_artist = ? AND cancelled = 0)", existing.Name, existing.Artist).Scan(&existIsAlbumArtist)
+					if candIsAlbumArtist == 1 && existIsAlbumArtist == 0 {
+						seenAlbums[key] = candidate
+					}
+				} else {
+					seenAlbums[key] = candidate
+					orderAlbums = append(orderAlbums, key)
+				}
+			}
+			// Apply pagination
+			start := albumOffset
+			if start < 0 {
+				start = 0
+			}
+			end := start + albumCount
+			if end > len(orderAlbums) {
+				end = len(orderAlbums)
+			}
+			for _, k := range orderAlbums[start:end] {
+				result.Albums = append(result.Albums, seenAlbums[k])
 			}
 		}
 	}
