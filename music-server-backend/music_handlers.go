@@ -14,7 +14,7 @@ import (
 // --- Music Library Handlers (JSON API) ---
 
 func getArtists(c *gin.Context) {
-	artistNames, err := fetchEffectiveArtists(db)
+	artistNames, err := fetchArtists(db)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query artists"})
 		return

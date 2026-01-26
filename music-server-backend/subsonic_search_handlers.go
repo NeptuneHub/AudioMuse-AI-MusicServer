@@ -51,22 +51,22 @@ func subsonicSearch2(c *gin.Context) {
 	searchWords := strings.Fields(query)
 
 	// --- Count total results (not paginated) ---
-	// Count total artists (search both artist and album_artist; count deduplicated effective artist after normalization)
+	// Count total artists (search artist field only)
 	if artistCount > 0 {
 		seenArtists := make(map[string]bool)
 		var rows *sql.Rows
 		var err error
 		if isShortQuery || query == "" || query == "*" {
-			rows, err = db.Query("SELECT DISTINCT CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END AS artist FROM songs WHERE ((album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')) OR artist != '') AND cancelled = 0")
+			rows, err = db.Query("SELECT DISTINCT artist FROM songs WHERE artist != '' AND cancelled = 0")
 		} else {
 			var conditions []string
 			var args []interface{}
 			for _, word := range searchWords {
-				conditions = append(conditions, "(artist LIKE ? OR album_artist LIKE ?)")
+				conditions = append(conditions, "artist LIKE ?")
 				like := "%" + word + "%"
-				args = append(args, like, like)
+				args = append(args, like)
 			}
-			q := "SELECT DISTINCT CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END AS artist FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND ((album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')) OR artist != '') AND cancelled = 0"
+			q := "SELECT DISTINCT artist FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND artist != '' AND cancelled = 0"
 			rows, err = db.Query(q, args...)
 		}
 		if err == nil {
@@ -170,8 +170,7 @@ func subsonicSearch2(c *gin.Context) {
 		if isShortQuery || query == "" || query == "*" {
 			artistQuery = `
 				SELECT
-					CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')
-					THEN album_artist ELSE artist END AS artist,
+					artist AS artist,
 					COUNT(*) as song_count,
 					COUNT(DISTINCT CASE
 						WHEN album != '' AND album_path != '' THEN album_path || '|||' || album
@@ -179,23 +178,22 @@ func subsonicSearch2(c *gin.Context) {
 						ELSE NULL
 					END) as album_count
 				FROM songs
-				WHERE ((album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')) OR artist != '') AND cancelled = 0
-				GROUP BY CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END
+				WHERE artist != '' AND cancelled = 0
+				GROUP BY artist
 				ORDER BY artist COLLATE NOCASE
 				LIMIT ? OFFSET ?`
 			artistArgs = []interface{}{artistCount, artistOffset}
 		} else {
 			var artistConditions []string
 			for _, word := range searchWords {
-				artistConditions = append(artistConditions, "(CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END) LIKE ?")
+				artistConditions = append(artistConditions, "artist LIKE ?")
 				like := "%" + word + "%"
 				artistArgs = append(artistArgs, like)
 			}
 			artistArgs = append(artistArgs, artistCount, artistOffset)
 			artistQuery = `
 				SELECT
-					CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')
-					THEN album_artist ELSE artist END AS artist,
+					artist AS artist,
 					COUNT(*) as song_count,
 					COUNT(DISTINCT CASE
 						WHEN album != '' AND album_path != '' THEN album_path || '|||' || album
@@ -203,10 +201,10 @@ func subsonicSearch2(c *gin.Context) {
 						ELSE NULL
 					END) as album_count
 				FROM songs
-				WHERE ` + strings.Join(artistConditions, " AND ") + ` AND ((album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')) OR artist != '') AND cancelled = 0
-				GROUP BY CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END
+				WHERE ` + strings.Join(artistConditions, " AND ") + ` AND artist != '' AND cancelled = 0
+				GROUP BY artist
 				ORDER BY artist COLLATE NOCASE
-				LIMIT ? OFFSET ?`
+LIMIT ? OFFSET ?`
 		}
 
 		artistRows, err := db.Query(artistQuery, artistArgs...)
