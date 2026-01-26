@@ -77,3 +77,73 @@ func fetchArtists(db *sql.DB) ([]string, error) {
 	}
 	return artists, nil
 }
+
+// getAlbumDisplayArtist returns a display string for an album's artist(s).
+// Priority: distinct non-empty album_artist values (sorted) concatenated with "; ",
+// otherwise distinct non-empty artist values concatenated with "; ". Returns "Unknown Artist" if none found.
+func getAlbumDisplayArtist(db *sql.DB, albumName, albumPath string) (string, error) {
+	// Simplified logic per request:
+	// 1) album_artist for songs matching album + album_path
+	rows, err := db.Query("SELECT DISTINCT TRIM(album_artist) FROM songs WHERE album = ? AND album_path = ? AND album_artist != '' AND cancelled = 0 ORDER BY album_artist COLLATE NOCASE", albumName, albumPath)
+	if err == nil {
+		defer rows.Close()
+		parts := []string{}
+		seen := make(map[string]bool)
+		for rows.Next() {
+			var a string
+			if err := rows.Scan(&a); err != nil {
+				continue
+			}
+			a = strings.TrimSpace(a)
+			if a == "" {
+				continue
+			}
+			// Ignore placeholder/unknown values that may have been written previously
+			nk := normalizeKey(a)
+			if nk == "unknown artist" || nk == "unknown" {
+				continue
+			}
+			if seen[nk] {
+				continue
+			}
+			seen[nk] = true
+			parts = append(parts, a)
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "; "), nil
+		}
+	}
+
+	// 2) track artists for songs matching album + album_path
+	rows2, err2 := db.Query("SELECT DISTINCT TRIM(artist) FROM songs WHERE album = ? AND album_path = ? AND artist != '' AND cancelled = 0 ORDER BY artist COLLATE NOCASE", albumName, albumPath)
+	if err2 == nil {
+		defer rows2.Close()
+		parts := []string{}
+		seen := make(map[string]bool)
+		for rows2.Next() {
+			var a string
+			if err := rows2.Scan(&a); err != nil {
+				continue
+			}
+			a = strings.TrimSpace(a)
+			if a == "" {
+				continue
+			}
+			// Ignore placeholder/unknown values when considering track artists
+			nk := normalizeKey(a)
+			if nk == "unknown artist" || nk == "unknown" {
+				continue
+			}
+			if seen[nk] {
+				continue
+			}
+			seen[nk] = true
+			parts = append(parts, a)
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "; "), nil
+		}
+	}
+
+	return "Unknown Artist", nil
+}

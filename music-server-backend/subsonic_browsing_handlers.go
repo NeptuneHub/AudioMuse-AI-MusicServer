@@ -179,7 +179,7 @@ func subsonicGetMusicDirectory(c *gin.Context) {
 func getArtistDirectory(c *gin.Context, artistName string) {
 	// Group by album_path + album for deterministic filesystem-based grouping
 	query := `
-		SELECT album, MIN(id) as album_id, COUNT(*) as song_count, COALESCE(genre, '') as genre
+		SELECT album, MIN(id) as album_id, COUNT(*) as song_count, COALESCE(genre, ''), MIN(album_path) as album_path
 		FROM songs
 		WHERE artist = ? AND cancelled = 0
 		GROUP BY CASE
@@ -203,22 +203,27 @@ func getArtistDirectory(c *gin.Context, artistName string) {
 		var albumID string
 		var songCount int
 		var genre string
+			var albumPath string
 
-		if err := rows.Scan(&albumName, &albumID, &songCount, &genre); err != nil {
-			log.Printf("Error scanning album: %v", err)
-			continue
-		}
+			if err := rows.Scan(&albumName, &albumID, &songCount, &genre, &albumPath); err != nil {
+				log.Printf("Error scanning album: %v", err)
+				continue
+			}
 
-		child := SubsonicDirectoryChild{
-			ID:       albumID,
-			Title:    albumName,
-			Album:    albumName,
-			Artist:   artistName,
-			IsDir:    true,
-			CoverArt: albumID,
-			Genre:    genre,
-		}
-		children = append(children, child)
+			// Compute display artist for this album (may concatenate multiple album_artist or track artists)
+			displayArtist, _ := getAlbumDisplayArtist(db, albumName, strings.TrimSpace(albumPath))
+
+			child := SubsonicDirectoryChild{
+				ID:       albumID,
+				Title:    albumName,
+				Album:    albumName,
+				Artist:   displayArtist,
+				IsDir:    true,
+				CoverArt: albumID,
+				Genre:    genre,
+			}
+
+			children = append(children, child)
 	}
 
 	dir := &SubsonicMusicDirectory{
@@ -244,6 +249,8 @@ func getAlbumDirectory(c *gin.Context, user User, albumID string, albumName, art
 
 	// Extract the album's directory to prevent mixing duplicate albums from different paths
 	albumDir := filepath.Dir(albumPath)
+	// Compute display album artist for this album (prefer album_artist values, else artists)
+	displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumDir)
 
 	query := `
 		SELECT s.id, s.title, s.artist, s.album, s.duration, s.play_count, s.last_played, COALESCE(s.genre, ''),
@@ -298,7 +305,7 @@ func getAlbumDirectory(c *gin.Context, user User, albumID string, albumName, art
 
 	dir := &SubsonicMusicDirectory{
 		ID:       albumID,
-		Parent:   artistName,
+		Parent:   displayArtist,
 		Name:     albumName,
 		Children: children,
 	}

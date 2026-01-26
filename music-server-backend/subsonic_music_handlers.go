@@ -1095,7 +1095,7 @@ func subsonicGetAlbumList2(c *gin.Context) {
 
 	// Query albums grouped by album_path + album (folder + title)
 	query := fmt.Sprintf(`
-		SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, '') as genre, MIN(id) as album_id
+		SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as album_id, MIN(NULLIF(album_path, '')) as album_path
 		FROM songs 
 		%s
 		GROUP BY 
@@ -1120,10 +1120,14 @@ func subsonicGetAlbumList2(c *gin.Context) {
 	seen := make(map[string]bool)
 	for rows.Next() {
 		var album SubsonicAlbum
-		if err := rows.Scan(&album.Name, &album.Artist, &album.Genre, &album.ID); err != nil {
+		var albumPath string
+		if err := rows.Scan(&album.Name, &album.Artist, &album.Genre, &album.ID, &albumPath); err != nil {
 			log.Printf("Error scanning album row: %v", err)
 			continue
 		}
+		// Compute display artist by scanning album's songs
+		displayArtist, _ := getAlbumDisplayArtist(db, album.Name, strings.TrimSpace(albumPath))
+		album.Artist = displayArtist
 		// Normalize legacy 'Unknown' album label
 		if album.Name == "Unknown" {
 			album.Name = "Unknown Album"
@@ -1166,6 +1170,9 @@ func subsonicGetAlbum(c *gin.Context) {
 	albumDir := filepath.Dir(albumPath)
 	log.Printf("getAlbum: Fetching songs for album='%s', artist='%s', albumId=%s, albumDir='%s'", albumName, artistName, albumSongId, albumDir)
 
+	// Compute display album artist using album_path + album name (prefer album_artist, else artists)
+	displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumDir)
+
 	// Query songs that match the album title and are in the same directory
 	// This ensures we return songs from the SAME physical album location regardless of individual track artist
 	query := `
@@ -1202,8 +1209,9 @@ func subsonicGetAlbum(c *gin.Context) {
 		s.Starred = starred == 1
 		s.ArtistID = GenerateArtistID(s.Artist)        // Track artist ID
 		s.AlbumID = albumSongId                        // Album ID
-		s.AlbumArtist = artistName                     // Album artist name
-		s.AlbumArtistID = GenerateArtistID(artistName) // Album artist ID
+		// Use computed displayArtist (may be concatenated list) for album artist
+		s.AlbumArtist = displayArtist
+		s.AlbumArtistID = GenerateArtistID(displayArtist) // Album artist ID
 		if lastPlayed.Valid {
 			s.LastPlayed = lastPlayed.String
 		}

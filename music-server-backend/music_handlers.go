@@ -40,7 +40,7 @@ func getAlbums(c *gin.Context) {
 	query := `SELECT 
 		album, 
 		COALESCE(NULLIF(album_artist, ''), artist) as effective_artist, 
-		MIN(id) 
+		MIN(id), MIN(NULLIF(album_path, '')) as album_path
 	FROM songs 
 	WHERE album != '' AND cancelled = 0`
 	args := []interface{}{}
@@ -68,10 +68,14 @@ func getAlbums(c *gin.Context) {
 	for rows.Next() {
 		var album Album
 		var minID string
-		if err := rows.Scan(&album.Name, &album.Artist, &minID); err != nil {
+		var albumPath string
+		if err := rows.Scan(&album.Name, &album.Artist, &minID, &albumPath); err != nil {
 			log.Printf("Error scanning album row: %v", err)
 			continue
 		}
+		// Compute display artist for this album
+		displayArtist, _ := getAlbumDisplayArtist(db, album.Name, strings.TrimSpace(albumPath))
+		album.Artist = displayArtist
 		// Normalize legacy 'Unknown' album label
 		if album.Name == "Unknown" {
 			album.Name = "Unknown Album"
