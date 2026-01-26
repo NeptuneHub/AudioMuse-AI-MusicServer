@@ -144,6 +144,12 @@ func scanSingleLibrary(pathId int) {
 		log.Printf("Warning: post-scan backup failed: %v", err)
 	}
 
+	// Ensure album_artist is populated from artist when missing (user-requested behavior)
+	_, err = db.Exec("UPDATE songs SET album_artist = artist WHERE album_artist IS NULL OR TRIM(album_artist) = ''")
+	if err != nil {
+		log.Printf("Warning: populating empty album_artist from artist failed: %v", err)
+	}
+
 	// Run a light normalization to collapse legacy Unknown values and trim whitespace
 	_, err = db.Exec("UPDATE songs SET artist = 'Unknown Artist' WHERE artist IS NULL OR TRIM(artist) = '' OR LOWER(TRIM(artist)) = 'unknown'")
 	if err != nil {
@@ -228,6 +234,12 @@ func scanAllLibraries() {
 	dbPath := getEnv("DATABASE_PATH", "/config/music.db")
 	if err := performBackup(db, dbPath); err != nil {
 		log.Printf("Warning: post-scan backup for all libraries failed: %v", err)
+	}
+
+	// Ensure album_artist is populated from artist when missing (user-requested behavior)
+	_, err = db.Exec("UPDATE songs SET album_artist = artist WHERE album_artist IS NULL OR TRIM(album_artist) = ''")
+	if err != nil {
+		log.Printf("Warning: populating empty album_artist from artist failed after full rescan: %v", err)
 	}
 	// Normalize legacy Unknown values across the DB after a full rescan
 	_, err = db.Exec("UPDATE songs SET artist = 'Unknown Artist' WHERE artist IS NULL OR TRIM(artist) = '' OR LOWER(TRIM(artist)) = 'unknown'")
