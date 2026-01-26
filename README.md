@@ -34,7 +34,7 @@ For detailed container usage instructions, deployment options, and release infor
 
 The containers include both the backend API server and frontend web interface, with automatic nightly builds and easy version management.
 
-After deploying AudioMsue-AI-Music server it could be reached BOTH from this url:
+After deploying AudioMsue-AI-MusicServer it could be reached BOTH from this url:
 
 * http://localhost:8080/
 
@@ -54,6 +54,7 @@ After both of this point done, you can start the Sonic Analysis directly from th
 * Sonic Fingerprint
 * Music Map
 * Song Alchemy
+* Text Search
 
 **IMPORTANT:** This is a Open Subsonic API compliant server, so you need to configure AudioMuse-AI with the **navidrome** deployment, setting url, user and password correctly.
 
