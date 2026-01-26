@@ -84,13 +84,13 @@ func subsonicSearch2(c *gin.Context) {
 		result.ArtistCount = len(seenArtists)
 	}
 
-	// Count total albums (deduplicate by normalized album name)
+	// Count total albums (deduplicate by album + album_path)
 	if albumCount > 0 {
 		seenAlbums := make(map[string]bool)
 		var rows *sql.Rows
 		var err error
 		if isShortQuery {
-			rows, err = db.Query("SELECT album FROM songs WHERE album != '' AND cancelled = 0")
+			rows, err = db.Query("SELECT album, album_path FROM songs WHERE album != '' AND cancelled = 0")
 		} else {
 			var conditions []string
 			var args []interface{}
@@ -99,26 +99,27 @@ func subsonicSearch2(c *gin.Context) {
 				likeWord := "%" + word + "%"
 				args = append(args, likeWord, likeWord, likeWord)
 			}
-			q := "SELECT album FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND cancelled = 0"
+			q := "SELECT album, album_path FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND cancelled = 0"
 			rows, err = db.Query(q, args...)
 		}
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
-				var albumName string
-				if err := rows.Scan(&albumName); err != nil {
+				var albumName, albumPath string
+				if err := rows.Scan(&albumName, &albumPath); err != nil {
 					continue
 				}
 				albumName = strings.TrimSpace(albumName)
-				if albumName == "" {
+				albumPath = strings.TrimSpace(albumPath)
+				if albumName == "" && albumPath == "" {
 					continue
 				}
-				key := normalizeKey(albumName)
+				key := normalizeKey(albumPath + "|||" + albumName)
 				seenAlbums[key] = true
 			}
 		}
 		result.AlbumCount = len(seenAlbums)
-	}
+	} 
 
 	// Count total songs
 	if songCount > 0 {
@@ -144,19 +145,19 @@ func subsonicSearch2(c *gin.Context) {
 		var artistArgs []interface{}
 
 		if isShortQuery || query == "" || query == "*" {
-			// Return all effective artists (album_artist fallback) with pagination when query is short, empty, or wildcard
-			artistQuery = "SELECT COALESCE(NULLIF(album_artist, ''), artist) as artist, COUNT(*) FROM songs WHERE COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0 GROUP BY COALESCE(NULLIF(album_artist, ''), artist) ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
+			// Return all artists with pagination when query is short, empty, or wildcard
+			artistQuery = "SELECT artist, COUNT(*) FROM songs WHERE artist != '' AND cancelled = 0 GROUP BY artist ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
 			artistArgs = append(artistArgs, artistCount, artistOffset)
 		} else {
-			// Search artists with query across both artist and album_artist fields
+			// Search artists with query across artist field
 			var artistConditions []string
 			for _, word := range searchWords {
-				artistConditions = append(artistConditions, "(artist LIKE ? OR album_artist LIKE ?)")
+				artistConditions = append(artistConditions, "artist LIKE ?")
 				like := "%" + word + "%"
-				artistArgs = append(artistArgs, like, like)
+				artistArgs = append(artistArgs, like)
 			}
 			artistArgs = append(artistArgs, artistCount, artistOffset)
-			artistQuery = "SELECT COALESCE(NULLIF(album_artist, ''), artist) as artist, COUNT(*) FROM songs WHERE " + strings.Join(artistConditions, " AND ") + " AND COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0 GROUP BY COALESCE(NULLIF(album_artist, ''), artist) ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
+			artistQuery = "SELECT artist, COUNT(*) FROM songs WHERE " + strings.Join(artistConditions, " AND ") + " AND artist != '' AND cancelled = 0 GROUP BY artist ORDER BY artist COLLATE NOCASE LIMIT ? OFFSET ?"
 		}
 
 		artistRows, err := db.Query(artistQuery, artistArgs...)
@@ -174,20 +175,21 @@ func subsonicSearch2(c *gin.Context) {
 						continue
 					}
 					seenArtists[key] = true
-					// Compute deduplicated album count for this artist
+					// Compute deduplicated album count for this artist by album + album_path
 					seenAlbums := make(map[string]bool)
-					rows, rErr := db.Query("SELECT album FROM songs WHERE COALESCE(NULLIF(album_artist, ''), artist) = ? AND album != '' AND cancelled = 0", artistName)
+					rows, rErr := db.Query("SELECT album, album_path FROM songs WHERE artist = ? AND album != '' AND cancelled = 0", artistName)
 					if rErr == nil {
 						for rows.Next() {
-							var albumName string
-							if err := rows.Scan(&albumName); err != nil {
+							var albumName, albumPath string
+							if err := rows.Scan(&albumName, &albumPath); err != nil {
 								continue
 							}
 							albumName = strings.TrimSpace(albumName)
-							if albumName == "" {
+							albumPath = strings.TrimSpace(albumPath)
+							if albumName == "" && albumPath == "" {
 								continue
 							}
-							seenAlbums[normalizeKey(albumName)] = true
+							seenAlbums[normalizeKey(albumPath+"|||"+albumName)] = true
 						}
 						rows.Close()
 					}
@@ -203,7 +205,7 @@ func subsonicSearch2(c *gin.Context) {
 				}
 			}
 		}
-	}
+	} 
 
 	// --- Enhanced Album Search Logic ---
 	if albumCount > 0 {
@@ -212,7 +214,7 @@ func subsonicSearch2(c *gin.Context) {
 		
 		if isShortQuery {
 			// Show all albums when query is short
-			albumQuery = "SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as albumId FROM songs WHERE album != '' AND cancelled = 0 GROUP BY CASE WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album ELSE album_path END ORDER BY album LIMIT ? OFFSET ?"
+			albumQuery = "SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as albumId FROM songs WHERE album != '' AND cancelled = 0 GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END ORDER BY album LIMIT ? OFFSET ?"
 			albumArgs = append(albumArgs, albumCount, albumOffset)
 		} else {
 			// Filter by search terms (match album name, artist, or album artist)
@@ -223,7 +225,7 @@ func subsonicSearch2(c *gin.Context) {
 				albumArgs = append(albumArgs, likeWord, likeWord, likeWord)
 			}
 			albumArgs = append(albumArgs, albumCount, albumOffset)
-			albumQuery = "SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as albumId FROM songs WHERE " + strings.Join(albumConditions, " AND ") + " AND cancelled = 0 GROUP BY CASE WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album ELSE album_path END ORDER BY album LIMIT ? OFFSET ?"
+			albumQuery = "SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as albumId FROM songs WHERE " + strings.Join(albumConditions, " AND ") + " AND cancelled = 0 GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END ORDER BY album LIMIT ? OFFSET ?"
 		}
 		albumRows, err := db.Query(albumQuery, albumArgs...)
 		if err != nil {
@@ -370,22 +372,22 @@ func subsonicSearch3(c *gin.Context) {
 	searchWords := strings.Fields(query)
 
 	// --- Count total results (not paginated) ---
-	// Count total artists (search both artist and album_artist; count deduplicated effective artist after normalization)
+	// Count total artists (use the artist tag only)
 	if artistCount > 0 {
 		seenArtists := make(map[string]bool)
 		var rows *sql.Rows
 		var err error
 		if isShortQuery || query == "" || query == "*" {
-			rows, err = db.Query("SELECT COALESCE(NULLIF(album_artist, ''), artist) AS artist FROM songs WHERE COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0")
+			rows, err = db.Query("SELECT artist FROM songs WHERE artist != '' AND cancelled = 0")
 		} else {
 			var conditions []string
 			var args []interface{}
 			for _, word := range searchWords {
-				conditions = append(conditions, "(artist LIKE ? OR album_artist LIKE ?)")
+				conditions = append(conditions, "artist LIKE ?")
 				like := "%" + word + "%"
-				args = append(args, like, like)
+				args = append(args, like)
 			}
-			q := "SELECT COALESCE(NULLIF(album_artist, ''), artist) AS artist FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0"
+			q := "SELECT artist FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND artist != '' AND cancelled = 0"
 			rows, err = db.Query(q, args...)
 		}
 		if err == nil {
@@ -487,18 +489,19 @@ func subsonicSearch3(c *gin.Context) {
 				if err := artistRows.Scan(&artistName, &songCount); err == nil {
 					// Compute deduplicated album count for this artist
 					seenAlbums := make(map[string]bool)
-					rows, rErr := db.Query("SELECT album FROM songs WHERE artist = ? AND album != '' AND cancelled = 0", artistName)
+					rows, rErr := db.Query("SELECT album, album_path FROM songs WHERE artist = ? AND album != '' AND cancelled = 0", artistName)
 					if rErr == nil {
 						for rows.Next() {
-							var albumName string
-							if err := rows.Scan(&albumName); err != nil {
+							var albumName, albumPath string
+							if err := rows.Scan(&albumName, &albumPath); err != nil {
 								continue
 							}
 							albumName = strings.TrimSpace(albumName)
-							if albumName == "" {
+							albumPath = strings.TrimSpace(albumPath)
+							if albumName == "" && albumPath == "" {
 								continue
 							}
-							seenAlbums[normalizeKey(albumName)] = true
+							seenAlbums[normalizeKey(albumPath+"|||"+albumName)] = true
 						}
 						rows.Close()
 					}
@@ -523,7 +526,7 @@ func subsonicSearch3(c *gin.Context) {
 		
 		if isShortQuery {
 			// Show all albums when query is short
-			albumQuery = "SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as albumId FROM songs WHERE album != '' AND cancelled = 0 GROUP BY CASE WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album ELSE album_path END ORDER BY album COLLATE NOCASE LIMIT ? OFFSET ?"
+			albumQuery = "SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as albumId FROM songs WHERE album != '' AND cancelled = 0 GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END ORDER BY album COLLATE NOCASE LIMIT ? OFFSET ?"
 			albumArgs = append(albumArgs, albumCount, albumOffset)
 		} else {
 			// Filter by search terms (match album name, artist, or album artist)
@@ -534,7 +537,7 @@ func subsonicSearch3(c *gin.Context) {
 				albumArgs = append(albumArgs, likeWord, likeWord, likeWord)
 			}
 			albumArgs = append(albumArgs, albumCount, albumOffset)
-			albumQuery = "SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as albumId FROM songs WHERE " + strings.Join(albumConditions, " AND ") + " AND cancelled = 0 GROUP BY CASE WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album ELSE album_path END ORDER BY album COLLATE NOCASE LIMIT ? OFFSET ?"
+			albumQuery = "SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, ''), MIN(id) as albumId FROM songs WHERE " + strings.Join(albumConditions, " AND ") + " AND cancelled = 0 GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END ORDER BY album COLLATE NOCASE LIMIT ? OFFSET ?"
 		}
 
 		albumRows, err := db.Query(albumQuery, albumArgs...)

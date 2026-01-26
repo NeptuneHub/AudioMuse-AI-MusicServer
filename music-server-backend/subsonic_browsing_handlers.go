@@ -46,13 +46,12 @@ func subsonicGetIndexes(c *gin.Context) {
 		}
 	}
 
-	// Query all artists with album counts using priority grouping
+	// Query all artists with album counts based on album + album_path grouping
 	query := `
 		SELECT
 			s.artist,
 			COUNT(DISTINCT CASE
-				WHEN s.album_artist IS NOT NULL AND s.album_artist != '' THEN s.album_artist || '|||' || s.album
-				WHEN s.artist IS NOT NULL AND s.artist != '' THEN s.artist || '|||' || s.album
+				WHEN s.album != '' THEN s.album_path || '|||' || s.album
 				ELSE s.album_path
 			END)
 		FROM songs s
@@ -178,20 +177,19 @@ func subsonicGetMusicDirectory(c *gin.Context) {
 
 // getArtistDirectory returns all albums by an artist
 func getArtistDirectory(c *gin.Context, artistName string) {
-	// Group with priority: 1) album_artist+album, 2) artist+album, 3) path fallback
+	// Group by album_path + album for deterministic filesystem-based grouping
 	query := `
 		SELECT album, MIN(id) as album_id, COUNT(*) as song_count, COALESCE(genre, '') as genre
 		FROM songs
-		WHERE (album_artist = ? OR artist = ?) AND cancelled = 0
+		WHERE artist = ? AND cancelled = 0
 		GROUP BY CASE
-			WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
-			WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
-			ELSE album_path
+			WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
+			ELSE album
 		END
 		ORDER BY album COLLATE NOCASE
 	`
 
-	rows, err := db.Query(query, artistName, artistName)
+	rows, err := db.Query(query, artistName)
 	if err != nil {
 		log.Printf("Error querying albums for artist %s: %v", artistName, err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
@@ -252,12 +250,12 @@ func getAlbumDirectory(c *gin.Context, user User, albumID string, albumName, art
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
-		WHERE s.album = ? AND s.artist = ? AND s.path LIKE ? AND s.cancelled = 0
+		WHERE s.album = ? AND s.path LIKE ? AND s.cancelled = 0
 		ORDER BY s.title COLLATE NOCASE
 	`
 
 	pathPattern := albumDir + string(filepath.Separator) + "%"
-	rows, err := db.Query(query, user.ID, albumName, artistName, pathPattern)
+	rows, err := db.Query(query, user.ID, albumName, pathPattern)
 	if err != nil {
 		log.Printf("Error querying songs for album %s: %v", albumName, err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))

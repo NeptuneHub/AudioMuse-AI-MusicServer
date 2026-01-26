@@ -901,19 +901,13 @@ func subsonicScrobble(c *gin.Context) {
 func subsonicGetArtists(c *gin.Context) {
 	_ = c.MustGet("user") // Auth is handled by middleware
 
-	// List effective artists using album_artist fallback and dedupe exact matches
+	// List artists (do not use album_artist fallback) and dedupe by artist name
 	query := `
-		SELECT COALESCE(NULLIF(album_artist, ''), artist) AS effective_artist,
-			COUNT(DISTINCT CASE
-				WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
-				WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
-				ELSE album_path
-			END) AS album_count,
-			COUNT(*) as song_count
+		SELECT artist AS name, COUNT(*) as song_count
 		FROM songs s
-		WHERE COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0
-		GROUP BY effective_artist
-		ORDER BY effective_artist COLLATE NOCASE
+		WHERE artist != '' AND cancelled = 0
+		GROUP BY artist
+		ORDER BY artist COLLATE NOCASE
 	`
 	rows, err := db.Query(query)
 	if err != nil {
@@ -926,28 +920,30 @@ func subsonicGetArtists(c *gin.Context) {
 	seenArtists := make(map[string]bool)
 	for rows.Next() {
 		var name string
-		var albumCount, songCount int
-		if err := rows.Scan(&name, &albumCount, &songCount); err != nil {
+		var songCount int
+		if err := rows.Scan(&name, &songCount); err != nil {
 			continue
 		}
-		// Compute deduplicated album count for this effective artist
+		// Compute deduplicated album count for this artist using album + album_path
 		seenAlbums := make(map[string]bool)
-		rowsAlbums, rErr := db.Query("SELECT album FROM songs WHERE COALESCE(NULLIF(album_artist, ''), artist) = ? AND album != '' AND cancelled = 0", name)
+		rowsAlbums, rErr := db.Query("SELECT album, album_path FROM songs WHERE artist = ? AND album != '' AND cancelled = 0", name)
 		if rErr == nil {
 			for rowsAlbums.Next() {
-				var albumName string
-				if err := rowsAlbums.Scan(&albumName); err != nil {
+				var albumName, albumPath string
+				if err := rowsAlbums.Scan(&albumName, &albumPath); err != nil {
 					continue
 				}
 				albumName = strings.TrimSpace(albumName)
-				if albumName == "" {
+				albumPath = strings.TrimSpace(albumPath)
+				if albumName == "" && albumPath == "" {
 					continue
 				}
-				seenAlbums[normalizeKey(albumName)] = true
+				keyVal := albumPath + "|||" + albumName
+				seenAlbums[normalizeKey(keyVal)] = true
 			}
 			rowsAlbums.Close()
 		}
-		albumCount = len(seenAlbums)
+		albumCount := len(seenAlbums)
 
 		// Deduplicate exact string matches by normalized name (same approach as search)
 		key := normalizeKey(name)
@@ -1097,16 +1093,15 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		return
 	}
 
-	// Query albums with priority grouping: 1) album_artist+album, 2) artist+album, 3) path fallback
+	// Query albums grouped by album_path + album (folder + title)
 	query := fmt.Sprintf(`
 		SELECT album, COALESCE(NULLIF(album_artist, ''), artist) as artist, COALESCE(genre, '') as genre, MIN(id) as album_id
 		FROM songs 
 		%s
 		GROUP BY 
 			CASE
-				WHEN album_artist IS NOT NULL AND album_artist != '' THEN album_artist || '|||' || album
-				WHEN artist IS NOT NULL AND artist != '' THEN artist || '|||' || album
-				ELSE album_path
+				WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
+				ELSE album
 			END
 		%s 
 		LIMIT ? OFFSET ?
@@ -1171,20 +1166,20 @@ func subsonicGetAlbum(c *gin.Context) {
 	albumDir := filepath.Dir(albumPath)
 	log.Printf("getAlbum: Fetching songs for album='%s', artist='%s', albumId=%s, albumDir='%s'", albumName, artistName, albumSongId, albumDir)
 
-	// Query songs that match album/artist AND are in the same directory
-	// This prevents duplicate albums from different library paths from mixing together
+	// Query songs that match the album title and are in the same directory
+	// This ensures we return songs from the SAME physical album location regardless of individual track artist
 	query := `
 		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''), s.duration,
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
-		WHERE s.album = ? AND s.artist = ? AND s.path LIKE ? AND s.cancelled = 0
+		WHERE s.album = ? AND s.path LIKE ? AND s.cancelled = 0
 		ORDER BY s.title
 	`
 
 	// Use LIKE with the album directory to match all songs in the same folder
 	pathPattern := albumDir + string(filepath.Separator) + "%"
-	rows, err := db.Query(query, user.ID, albumName, artistName, pathPattern)
+	rows, err := db.Query(query, user.ID, albumName, pathPattern)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Error querying for songs in album."))
 		return
