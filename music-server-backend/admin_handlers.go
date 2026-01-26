@@ -183,7 +183,22 @@ func scanSingleLibrary(pathId int) {
 	_, err = db.Exec("UPDATE songs SET artist = TRIM(artist), album = TRIM(album), album_artist = TRIM(album_artist)")
 	if err != nil {
 		log.Printf("Warning: whitespace normalization failed: %v", err)
-	} 
+	}
+
+	// Create indexes for optimal query performance (IF NOT EXISTS = idempotent, safe to run every scan)
+	log.Printf("Ensuring database indexes exist for optimal performance...")
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_album_artist_cancelled ON songs(album_artist, cancelled)",
+		"CREATE INDEX IF NOT EXISTS idx_artist_cancelled ON songs(artist, cancelled)",
+		"CREATE INDEX IF NOT EXISTS idx_album_path_album ON songs(album_path, album, cancelled)",
+		"CREATE INDEX IF NOT EXISTS idx_cancelled ON songs(cancelled)",
+	}
+	for _, indexSQL := range indexes {
+		if _, err := db.Exec(indexSQL); err != nil {
+			log.Printf("Warning: index creation failed: %v (SQL: %s)", err, indexSQL)
+		}
+	}
+	log.Printf("Database indexes verified/created successfully")
 
 	if isScanCancelled.Load() {
 		log.Printf("Scan was cancelled for path %s. Songs added before stop: %d.", path, songsAdded)
@@ -274,7 +289,22 @@ func scanAllLibraries() {
 	_, err = db.Exec("UPDATE songs SET artist = TRIM(artist), album = TRIM(album), album_artist = TRIM(album_artist)")
 	if err != nil {
 		log.Printf("Warning: whitespace normalization failed after full rescan: %v", err)
-	} 
+	}
+
+	// Create indexes for optimal query performance (IF NOT EXISTS = idempotent, safe to run every scan)
+	log.Printf("Ensuring database indexes exist for optimal performance...")
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_album_artist_cancelled ON songs(album_artist, cancelled)",
+		"CREATE INDEX IF NOT EXISTS idx_artist_cancelled ON songs(artist, cancelled)",
+		"CREATE INDEX IF NOT EXISTS idx_album_path_album ON songs(album_path, album, cancelled)",
+		"CREATE INDEX IF NOT EXISTS idx_cancelled ON songs(cancelled)",
+	}
+	for _, indexSQL := range indexes {
+		if _, err := db.Exec(indexSQL); err != nil {
+			log.Printf("Warning: index creation failed: %v (SQL: %s)", err, indexSQL)
+		}
+	}
+	log.Printf("Database indexes verified/created successfully")
 }
 
 func processPath(scanPath string) int64 {
