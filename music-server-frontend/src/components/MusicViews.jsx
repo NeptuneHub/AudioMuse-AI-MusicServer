@@ -809,8 +809,9 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             }
                             
                             setAllSongs(songList);
-                            setSongs(songList.slice(0, PAGE_SIZE));
-                            setHasMore(songList.length > PAGE_SIZE);
+                            // Show all starred songs at once (no pagination) so displayed items match the total
+                            setSongs(songList);
+                            setHasMore(false);
                             // Ensure total count reflects unique starred songs (deduplicated list)
                             setTotalCount(songList.length);
                         } catch (err) {
