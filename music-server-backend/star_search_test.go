@@ -2,10 +2,14 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
+	"net/http/httptest"
 	"testing"
 	_ "github.com/mattn/go-sqlite3"
 	"time"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 // setupFullTestDB creates an in-memory DB and the basic tables needed for these tests
@@ -150,8 +154,12 @@ func TestSearchAndCountSongs(t *testing.T) {
 }
 
 func TestSearchAndCountAlbumsAndArtists(t *testing.T) {
-	db := setupFullTestDB(t)
-	defer db.Close()
+	// Use a test DB and set package-level `db` to it so handlers use the test DB
+	testDB := setupFullTestDB(t)
+	defer testDB.Close()
+	prev := db
+	db = testDB
+	defer func() { db = prev }()
 
 	// Albums with album_artist values
 	_, _ = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, album_path) VALUES (?, ?, ?, ?, ?, ?)`, "b1", "s1", "ArtistA", "AlbumOne", "AlbumArtist", "p1")
@@ -182,4 +190,193 @@ func TestSearchAndCountAlbumsAndArtists(t *testing.T) {
 	c2, err := CountArtists(db, "AlbumArtist", true)
 	if err != nil { t.Fatalf("CountArtists failed: %v", err) }
 	if c2 == 0 { t.Fatalf("expected CountArtists to include album_artist, got 0") }
+
+	// -------------------------------
+	// Additional difficult cases
+	// 1) Compilation album (same album, different artists, no album_artist)
+	if _, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, album_path, path, duration, play_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, "c1", "Track One", "CompArtistA", "Compilation Vol1", "", "comp/p1", "/tmp/c1.mp3", 0, 0); err != nil { t.Fatalf("failed to insert c1: %v", err) }
+	if _, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, album_path, path, duration, play_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, "c2", "Track Two", "CompArtistB", "Compilation Vol1", "", "comp/p1", "/tmp/c2.mp3", 0, 0); err != nil { t.Fatalf("failed to insert c2: %v", err) }
+
+	// Ensure QueryAlbums can find the compilation album
+	qa, qerr := QueryAlbums(db, AlbumQueryOptions{SearchTerm: "CompArtistA", GroupByPath: true, IncludeArtist: true})
+	if qerr != nil { t.Fatalf("QueryAlbums debug failed: %v", qerr) }
+	if len(qa) == 0 {
+
+		// raw debug: check raw songs rows
+		rows, _ := db.Query(`SELECT id, artist, album, album_artist, album_path, cancelled FROM songs`)
+		defer rows.Close()
+		any := false
+		for rows.Next() {
+			var id, artist, album, albumArtist, albumPath sql.NullString
+			var cancelled sql.NullInt64
+			rows.Scan(&id, &artist, &album, &albumArtist, &albumPath, &cancelled)
+			t.Logf("song row: id=%v artist=%v album=%v albumArtist=%v albumPath=%v cancelled=%v", id.String, artist.String, album.String, albumArtist.String, albumPath.String, cancelled.Int64)
+			any = true
+		}
+		if !any {
+			t.Fatalf("no song rows found at all in songs table (debug)")
+		}
+
+		// raw SQL used by handler logic
+		var albumConditions []string
+		albumConditions = append(albumConditions, "album != ''", "cancelled = 0")
+		var albumArgs []interface{}
+		word := "CompArtistA"
+		albumConditions = append(albumConditions, "(album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)")
+		likeWord := "%" + word + "%"
+		albumArgs = append(albumArgs, likeWord, likeWord, likeWord)
+		raw := `SELECT album, MIN(NULLIF(album_path, '')) as albumPath, COALESCE(genre, '') as genre, MIN(id) as albumId, COUNT(*) as song_count
+			FROM songs
+			WHERE ` + strings.Join(albumConditions, " AND ") + `
+			GROUP BY CASE
+				WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
+				ELSE album
+			END
+			ORDER BY album COLLATE NOCASE`
+		rows2, err := db.Query(raw, albumArgs...)
+		if err != nil {
+			t.Fatalf("raw album query failed: %v", err)
+		}
+		defer rows2.Close()
+		for rows2.Next() {
+			var albumName, albumPath, genre, albumID sql.NullString
+			var songCount int
+			rows2.Scan(&albumName, &albumPath, &genre, &albumID, &songCount)
+			t.Logf("raw album row: album=%v albumPath=%v genre=%v albumID=%v songCount=%d", albumName.String, albumPath.String, genre.String, albumID.String, songCount)
+		}
+
+		// otherwise fail with message but include qa
+		t.Fatalf("QueryAlbums returned 0 results for CompArtistA (debug): qa=%v", qa)
+	}
+
+	// Call the search handler (subsonicSearch2) searching by artist 'CompArtistA' and ensure album appears
+	
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	cCtx, _ := gin.CreateTestContext(w)
+	r := httptest.NewRequest("GET", "/?query=CompArtistA&albumCount=10&f=json", nil)
+	cCtx.Request = r
+	cCtx.Set("user", User{ID: 1, Username: "tester"})
+
+	subsonicSearch2(cCtx)
+	var resp map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &resp)
+	if err != nil { t.Fatalf("failed to parse JSON response: %v; body: %s", err, w.Body.String()) }
+	searchResult := resp["subsonic-response"].(map[string]interface{})["searchResult2"].(map[string]interface{})
+	var albumsRes []interface{}
+	if a, ok := searchResult["album"]; ok {
+		// normalize single object into array if needed
+		switch v := a.(type) {
+		case []interface{}:
+			albumsRes = v
+		case map[string]interface{}:
+			albumsRes = []interface{}{v}
+		}
+	}
+	foundComp := false
+	for _, a := range albumsRes {
+		aMap := a.(map[string]interface{})
+		if aMap["name"] == "Compilation Vol1" {
+			foundComp = true
+			// display artist should include CompArtistA and CompArtistB
+			if !strings.Contains(aMap["artist"].(string), "CompArtistA") {
+				t.Fatalf("expected display artist to include CompArtistA, got %v", aMap["artist"])
+			}
+		}
+	}
+	if !foundComp { t.Fatalf("compilation album not found in search results; body: %s", w.Body.String()) }
+
+	// 2) Song with Unknown artist/album
+	_, _ = db.Exec(`INSERT INTO songs (id, title, artist, album, path, duration, play_count) VALUES (?, ?, ?, ?, ?, ?, ?)`, "u1", "Mystery", "Unknown Artist", "Unknown Album", "/tmp/u1.mp3", 0, 0)
+
+	// Search for 'Unknown' should return song
+	w2 := httptest.NewRecorder()
+	cCtx2, _ := gin.CreateTestContext(w2)
+	r2 := httptest.NewRequest("GET", "/?query=Unknown&songCount=20&f=json", nil)
+	cCtx2.Request = r2
+	cCtx2.Set("user", User{ID: 1, Username: "tester"})
+
+	subsonicSearch2(cCtx2)
+	var resp2 map[string]interface{}
+	err = json.Unmarshal(w2.Body.Bytes(), &resp2)
+	if err != nil { t.Fatalf("failed to parse JSON response 2: %v; body: %s", err, w2.Body.String()) }
+	searchResult2 := resp2["subsonic-response"].(map[string]interface{})["searchResult2"].(map[string]interface{})
+	var songsRes []interface{}
+	if s, ok := searchResult2["song"]; ok {
+		switch v := s.(type) {
+		case []interface{}:
+			songsRes = v
+		case map[string]interface{}:
+			songsRes = []interface{}{v}
+		}
+	}
+	foundUnknown := false
+	for _, s := range songsRes {
+		sMap := s.(map[string]interface{})
+		if sMap["id"] == "u1" { foundUnknown = true; break }
+	}
+	if !foundUnknown { t.Fatalf("expected 'Unknown' song to be returned by search") }
+
+	// 3) Album preference: ensure album backed by album_artist preferred
+	_, _ = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, album_path, path, duration, play_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, "p1", "Solo", "SoloArtist", "Best Album", "", "", "/tmp/p_solo.mp3", 0, 0)
+	_, _ = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, album_path, path, duration, play_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, "p2", "VA Track", "Various Artist", "Best Album", "VA Artist", "", "/tmp/p_va.mp3", 0, 0)
+
+	w3 := httptest.NewRecorder()
+	cCtx3, _ := gin.CreateTestContext(w3)
+	r3 := httptest.NewRequest("GET", "/?query=Best%20Album&albumCount=10&f=json", nil)
+	cCtx3.Request = r3
+	cCtx3.Set("user", User{ID: 1, Username: "tester"})
+
+	// Debug: run the album query that the handler would execute for 'Best Album'
+	{
+		raw := `SELECT album, MIN(NULLIF(album_path, '')) as albumPath, COALESCE(genre, '') as genre, MIN(id) as albumId, COUNT(*) as song_count
+		FROM songs
+		WHERE album != '' AND cancelled = 0 AND (album LIKE ? OR artist LIKE ? OR album_artist LIKE ?) AND (album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)
+		GROUP BY CASE
+			WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
+			ELSE album
+		END
+		ORDER BY album`
+		rows, _ := db.Query(raw, "%Best%", "%Best%", "%Best%", "%Album%", "%Album%", "%Album%")
+		defer rows.Close()
+		count := 0
+		for rows.Next() {
+			var albumName, albumPath, genre, aid sql.NullString
+			var sc int
+			rows.Scan(&albumName, &albumPath, &genre, &aid, &sc)
+			t.Logf("raw album row (Best): album=%v path=%v sc=%d", albumName.String, albumPath.String, sc)
+			count++
+		}
+		t.Logf("raw album rows found (Best): %d", count)
+	}
+
+	subsonicSearch2(cCtx3)
+	var resp3 map[string]interface{}
+	err = json.Unmarshal(w3.Body.Bytes(), &resp3)
+	if err != nil { t.Fatalf("failed to parse JSON response 3: %v; body: %s", err, w3.Body.String()) }
+	// Debug: log full response
+	t.Logf("search3 full body: %s", w3.Body.String())
+	searchResult3 := resp3["subsonic-response"].(map[string]interface{})["searchResult2"].(map[string]interface{})
+	var albums3 []interface{}
+	if a, ok := searchResult3["album"]; ok {
+		// Debug: log response body
+		t.Logf("search3 body: %s", w3.Body.String())
+		switch v := a.(type) {
+		case []interface{}:
+			albums3 = v
+		case map[string]interface{}:
+			albums3 = []interface{}{v}
+		}
+	}
+	prefFound := false
+	for _, a := range albums3 {
+		aMap := a.(map[string]interface{})
+		if aMap["name"] == "Best Album" {
+			prefFound = true
+			if !strings.Contains(aMap["artist"].(string), "VA Artist") {
+				t.Fatalf("expected album artist to prefer 'VA Artist', got %v", aMap["artist"])
+			}
+		}
+	}
+	if !prefFound { t.Fatalf("expected 'Best Album' in results") }
 }

@@ -14,9 +14,17 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.21'
+        # Use Go 1.25 to match module's go directive (go 1.25.5)
+        go-version: '1.25.5'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libsqlite3-dev build-essential
 
     - name: Run backend tests
       working-directory: ./music-server-backend
+      env:
+        CGO_ENABLED: '1'
       run: |
         go test ./... -v

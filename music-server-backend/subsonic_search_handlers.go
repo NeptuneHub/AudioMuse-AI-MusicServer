@@ -200,6 +200,40 @@ func subsonicSearch2(c *gin.Context) {
 	// --- Enhanced Album Search Logic ---
 	// OPTIMIZED: Use display artist computation with proper song count
 	if albumCount > 0 {
+		// Attempt QueryAlbums path to avoid nested DB reads
+		var albums []AlbumResult
+		var qerr error
+		if isShortQuery {
+			albums, qerr = QueryAlbums(db, AlbumQueryOptions{GroupByPath: true, IncludeGenre: true, IncludeAlbumID: true, IncludeCounts: true, Limit: albumCount, Offset: albumOffset})
+		} else {
+			albums, qerr = QueryAlbums(db, AlbumQueryOptions{SearchTerm: query, GroupByPath: true, IncludeGenre: true, IncludeAlbumID: true, IncludeCounts: true})
+		}
+		if qerr == nil {
+			seen := make(map[string]SubsonicAlbum)
+			order := []string{}
+			for _, ar := range albums {
+				albumName := strings.TrimSpace(ar.Name)
+				albumPath := strings.TrimSpace(ar.AlbumPath)
+				if albumName == "" && albumPath == "" { continue }
+				displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumPath)
+				match := true
+				for _, word := range searchWords {
+					lw := strings.ToLower(word)
+					if !strings.Contains(strings.ToLower(albumName), lw) && !strings.Contains(strings.ToLower(displayArtist), lw) { match = false; break }
+				}
+				if !match { continue }
+				key := normalizeKey(albumName)
+				candidate := SubsonicAlbum{ID: ar.AlbumID, Name: albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: ar.Genre, CoverArt: ar.AlbumID, SongCount: ar.SongCount}
+				if existing, ok := seen[key]; ok { candIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, albumName, albumPath); existIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, existing.Name, ""); if candIsAlbumArtist && !existIsAlbumArtist { seen[key] = candidate } } else { seen[key] = candidate; order = append(order, key) }
+			}
+			start := albumOffset
+			end := start + albumCount
+			if start < 0 { start = 0 }
+			if start > len(order) { start = len(order) }
+			if end > len(order) { end = len(order) }
+			for _, k := range order[start:end] { result.Albums = append(result.Albums, seen[k]) }
+			goto SKIP_OLD_ALBUM_QUERY
+		}
 		var albumQuery string
 		var albumArgs []interface{}
 
@@ -253,51 +287,68 @@ func subsonicSearch2(c *gin.Context) {
 			// Deduplicate albums preferring entries backed by album_artist when duplicates exist
 			seen := make(map[string]SubsonicAlbum)
 			order := []string{}
+			// Read all album rows into a temp slice first to avoid nested queries while iterating rows
+			type albumRow struct {
+				albumName string
+				albumPath string
+				genre     string
+				albumID   string
+				songCount int
+			}
+			var albumRowsData []albumRow
 			for albumRows.Next() {
 				var albumName, albumPath, genre string
 				var albumID string
 				var songCount int
 				if err := albumRows.Scan(&albumName, &albumPath, &genre, &albumID, &songCount); err == nil {
-					albumName = strings.TrimSpace(albumName)
-					albumPath = strings.TrimSpace(albumPath)
-					if albumName == "" && albumPath == "" {
-						continue
+					albumRowsData = append(albumRowsData, albumRow{strings.TrimSpace(albumName), strings.TrimSpace(albumPath), genre, albumID, songCount})
+				}
+			}
+			for _, ar := range albumRowsData {
+				albumName := ar.albumName
+				albumPath := ar.albumPath
+				genre := ar.genre
+				albumID := ar.albumID
+				songCount := ar.songCount
+				if albumName == "" && albumPath == "" {
+					continue
+				}
+				// Compute display artist for this album
+				displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumPath)
+				if strings.Contains(query, "Best") {
 					}
-					// Compute display artist for this album
-					displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumPath)
-					// Apply search word matching against album name and display artist
-					match := true
-					for _, word := range searchWords {
-						lw := strings.ToLower(word)
-						if !strings.Contains(strings.ToLower(albumName), lw) && !strings.Contains(strings.ToLower(displayArtist), lw) {
-							match = false
-							break
-						}
+				// Apply search word matching against album name and display artist
+				match := true
+				for _, word := range searchWords {
+					lw := strings.ToLower(word)
+					if !strings.Contains(strings.ToLower(albumName), lw) && !strings.Contains(strings.ToLower(displayArtist), lw) {
+						match = false
+						break
 					}
-					if !match {
-						continue
-					}
-					key := normalizeKey(albumName)
-					candidate := SubsonicAlbum{
-						ID:        albumID,
-						Name:      albumName,
-						Artist:    displayArtist,
-						ArtistID:  GenerateArtistID(displayArtist),
-						Genre:     genre,
-						CoverArt:  albumID,
-						SongCount: songCount,
-					}
-					if existing, ok := seen[key]; ok {
-						// If candidate is backed by album_artist and existing is not, replace existing
-						candIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, albumName, albumPath)
-						existIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, existing.Name, "")
-						if candIsAlbumArtist && !existIsAlbumArtist {
-							seen[key] = candidate
-						}
-					} else {
+				}
+				if !match {
+					continue
+				}
+				key := normalizeKey(albumName)
+				candidate := SubsonicAlbum{
+					ID:        albumID,
+					Name:      albumName,
+					Artist:    displayArtist,
+					ArtistID:  GenerateArtistID(displayArtist),
+					Genre:     genre,
+					CoverArt:  albumID,
+					SongCount: songCount,
+				}
+				if existing, ok := seen[key]; ok {
+					// If candidate is backed by album_artist and existing is not, replace existing
+					candIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, albumName, albumPath)
+					existIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, existing.Name, "")
+					if candIsAlbumArtist && !existIsAlbumArtist {
 						seen[key] = candidate
-						order = append(order, key)
 					}
+				} else {
+					seen[key] = candidate
+					order = append(order, key)
 				}
 			}
 			// Apply pagination to the ordered results
@@ -317,6 +368,8 @@ func subsonicSearch2(c *gin.Context) {
 			}
 		}
 	}
+
+SKIP_OLD_ALBUM_QUERY:
 
 	// --- Enhanced Song Search Logic ---
 	if songCount > 0 {
