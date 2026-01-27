@@ -22,9 +22,19 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y pkg-config libsqlite3-dev build-essential
 
+    - name: Debug workspace and Go environment
+      run: |
+        echo "PWD:" && pwd
+        echo "Workspace files:" && ls -la
+        echo "music-server-backend files:" && ls -la music-server-backend || true
+        echo "cat go.mod:" && sed -n '1,80p' music-server-backend/go.mod || true
+        echo "go version:" && go version || true
+
     - name: Run backend tests
-      working-directory: ./music-server-backend
+      working-directory: music-server-backend
       env:
         CGO_ENABLED: '1'
       run: |
+        echo "go env:" && go env
+        go env -w GOPROXY=https://proxy.golang.org,direct
         go test ./... -v
