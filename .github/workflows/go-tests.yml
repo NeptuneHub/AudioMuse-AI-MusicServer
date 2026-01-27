@@ -27,8 +27,17 @@ jobs:
         echo "PWD:" && pwd
         echo "Workspace files:" && ls -la
         echo "music-server-backend files:" && ls -la music-server-backend || true
-        echo "cat go.mod:" && sed -n '1,80p' music-server-backend/go.mod || true
+        echo "cat go.mod (top-level):" && sed -n '1,80p' go.mod || true
+        echo "cat go.mod (music-server-backend):" && sed -n '1,80p' music-server-backend/go.mod || true
         echo "go version:" && go version || true
+
+    - name: Check module file inside working dir
+      working-directory: music-server-backend
+      run: |
+        echo "PWD in step:" && pwd
+        echo "Absolute path:" && readlink -f .
+        echo "List files:" && ls -la
+        echo "Show go.mod:" && sed -n '1,160p' go.mod || true
 
     - name: Run backend tests
       working-directory: music-server-backend
