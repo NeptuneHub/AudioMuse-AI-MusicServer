@@ -142,7 +142,6 @@ func getAlbumDisplayArtist(db *sql.DB, albumName, albumPath string) (string, err
 				THEN TRIM(album_artist)
 				WHEN artist IS NOT NULL
 					AND TRIM(artist) != ''
-					AND LOWER(TRIM(artist)) NOT IN ('unknown', 'unknown artist')
 				THEN TRIM(artist)
 				ELSE NULL
 			END as display_artist

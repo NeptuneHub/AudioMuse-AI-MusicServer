@@ -544,35 +544,67 @@ func QuerySongs(db *sql.DB, opts SongQueryOptions) ([]SongResult, error) {
 	var results []SongResult
 	for rows.Next() {
 		var result SongResult
+		var title sql.NullString
+		var artist sql.NullString
+		var album sql.NullString
+		var path sql.NullString
 		var lastPlayed sql.NullString
 		var genre sql.NullString
+		var starredInt sql.NullInt64
+		var transInt sql.NullInt64
+		var durationInt sql.NullInt64
+		var playCountInt sql.NullInt64
 
 		scanArgs := []interface{}{
-			&result.ID, &result.Title, &result.Artist, &result.Album,
-			&result.Path, &result.Duration, &result.PlayCount, &lastPlayed,
+			&result.ID, &title, &artist, &album,
+			&path, &durationInt, &playCountInt, &lastPlayed,
 		}
-
 		if opts.IncludeGenre {
 			scanArgs = append(scanArgs, &genre)
 		}
 
 		if opts.IncludeStarred {
-			scanArgs = append(scanArgs, &result.Starred)
+			scanArgs = append(scanArgs, &starredInt)
 		}
 
 		if opts.IncludeTranscode {
-			scanArgs = append(scanArgs, &result.TranscodingEnabled)
+			scanArgs = append(scanArgs, &transInt)
 		}
 
 		if err := rows.Scan(scanArgs...); err != nil {
 			continue
 		}
 
+		if title.Valid {
+			result.Title = title.String
+		}
+		if artist.Valid {
+			result.Artist = artist.String
+		}
+		if album.Valid {
+			result.Album = album.String
+		}
+		if path.Valid {
+			result.Path = path.String
+		}
+		if durationInt.Valid {
+			result.Duration = int(durationInt.Int64)
+		}
+		if playCountInt.Valid {
+			result.PlayCount = int(playCountInt.Int64)
+		}
 		if lastPlayed.Valid {
 			result.LastPlayed = lastPlayed.String
 		}
 		if genre.Valid {
 			result.Genre = genre.String
+		}
+
+		if opts.IncludeStarred {
+			result.Starred = (starredInt.Valid && starredInt.Int64 == 1)
+		}
+		if opts.IncludeTranscode {
+			result.TranscodingEnabled = (transInt.Valid && transInt.Int64 == 1)
 		}
 
 		results = append(results, result)

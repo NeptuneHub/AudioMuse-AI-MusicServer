@@ -55,5 +55,7 @@ jobs:
           # Otherwise download modules normally
           go mod download
         fi
+        # List test files before running tests
+        echo "Test files in working dir:" && find . -name "*_test.go" -print | sed 's/^/ - /'
         # Run tests
         go test ./... -v

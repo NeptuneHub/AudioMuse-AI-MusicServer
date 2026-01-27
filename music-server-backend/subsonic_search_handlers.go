@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"log"
 	"strconv"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -254,117 +255,156 @@ func subsonicSearch2(c *gin.Context) {
 				END
 				ORDER BY album LIMIT ? OFFSET ?`
 			albumArgs = append(albumArgs, albumCount, albumOffset)
+
+			// Execute the short-path album query and build results (avoid nested queries in rows.Next())
+			albumRows, err := db.Query(albumQuery, albumArgs...)
+			if err != nil {
+				log.Printf("[ERROR] subsonicSearch2: Album query failed: %v", err)
+			} else {
+				defer albumRows.Close()
+				seen := make(map[string]SubsonicAlbum)
+				order := []string{}
+				for albumRows.Next() {
+					var albumName, albumPath, genre string
+					var albumID string
+					var songCount int
+					if err := albumRows.Scan(&albumName, &albumPath, &genre, &albumID, &songCount); err == nil {
+						albumName = strings.TrimSpace(albumName)
+						albumPath = strings.TrimSpace(albumPath)
+						if albumName == "" && albumPath == "" { continue }
+						displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumPath)
+						key := normalizeKey(albumName)
+						candidate := SubsonicAlbum{ID: albumID, Name: albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: genre, CoverArt: albumID, SongCount: songCount}
+						if existing, ok := seen[key]; ok {
+							candIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, albumName, albumPath)
+							existIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, existing.Name, "")
+							if candIsAlbumArtist && !existIsAlbumArtist {
+								seen[key] = candidate
+							}
+						} else {
+							seen[key] = candidate
+							order = append(order, key)
+						}
+					}
+				}
+				start := albumOffset
+				end := start + albumCount
+				if start < 0 { start = 0 }
+				if start > len(order) { start = len(order) }
+				if end > len(order) { end = len(order) }
+				for _, k := range order[start:end] { result.Albums = append(result.Albums, seen[k]) }
+			}
 		} else {
-			// For search terms, filter by album name, artist, or album_artist
-			var albumConditions []string
-			albumConditions = append(albumConditions, "album != ''", "cancelled = 0")
+			// For search terms: fetch matching songs and build albums from those song groups in Go
+			// This ensures the album listing is derived from the same candidate songs used for counting
+			var songConditions []string
+			var songArgs []interface{}
 			for _, word := range searchWords {
-				// Match on album name, artist, OR album_artist to show albums where the artist appears in ANY song
-				albumConditions = append(albumConditions, "(album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)")
-				likeWord := "%" + word + "%"
-				albumArgs = append(albumArgs, likeWord, likeWord, likeWord)
+				songConditions = append(songConditions, "(album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)")
+				like := "%" + word + "%"
+				songArgs = append(songArgs, like, like, like)
 			}
-			albumQuery = `
-				SELECT
-					album,
-					MIN(NULLIF(album_path, '')) as albumPath,
-					COALESCE(genre, '') as genre,
-					MIN(id) as albumId,
-					COUNT(*) as song_count
+
+			songQuery := `
+				SELECT album, MIN(NULLIF(album_path, '')) as album_path, album_artist, artist, id, COALESCE(genre, '') as genre
 				FROM songs
-				WHERE ` + strings.Join(albumConditions, " AND ") + `
-				GROUP BY CASE
-					WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
-					ELSE album
-				END
-				ORDER BY album`
-		}
-		albumRows, err := db.Query(albumQuery, albumArgs...)
-		if err != nil {
-			log.Printf("[ERROR] subsonicSearch2: Album query failed: %v", err)
-		} else {
-			defer albumRows.Close()
-			// Deduplicate albums preferring entries backed by album_artist when duplicates exist
-			seen := make(map[string]SubsonicAlbum)
-			order := []string{}
-			// Read all album rows into a temp slice first to avoid nested queries while iterating rows
-			type albumRow struct {
-				albumName string
-				albumPath string
-				genre     string
-				albumID   string
-				songCount int
-			}
-			var albumRowsData []albumRow
-			for albumRows.Next() {
-				var albumName, albumPath, genre string
-				var albumID string
-				var songCount int
-				if err := albumRows.Scan(&albumName, &albumPath, &genre, &albumID, &songCount); err == nil {
-					albumRowsData = append(albumRowsData, albumRow{strings.TrimSpace(albumName), strings.TrimSpace(albumPath), genre, albumID, songCount})
+				WHERE (` + strings.Join(songConditions, " AND ") + `) AND cancelled = 0
+				ORDER BY album COLLATE NOCASE, id`
+
+			rows, err := db.Query(songQuery, songArgs...)
+			if err != nil {
+				log.Printf("[ERROR] subsonicSearch2: Song-based album candidate query failed: %v", err)
+			} else {
+				defer rows.Close()
+				type albumGroup struct {
+					albumName string
+					albumPath string
+					genre     string
+					albumID   string
+					songCount int
+					albumArts map[string]bool
+					artists   map[string]bool
 				}
-			}
-			for _, ar := range albumRowsData {
-				albumName := ar.albumName
-				albumPath := ar.albumPath
-				genre := ar.genre
-				albumID := ar.albumID
-				songCount := ar.songCount
-				if albumName == "" && albumPath == "" {
-					continue
-				}
-				// Compute display artist for this album
-				displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumPath)
-				if strings.Contains(query, "Best") {
+
+				groups := make(map[string]*albumGroup)
+				order := []string{}
+
+				for rows.Next() {
+					var albumName, albumPath, albumArtist, artist, id, genre string
+					if err := rows.Scan(&albumName, &albumPath, &albumArtist, &artist, &id, &genre); err != nil {
+						continue
 					}
-				// Apply search word matching against album name and display artist
-				match := true
-				for _, word := range searchWords {
-					lw := strings.ToLower(word)
-					if !strings.Contains(strings.ToLower(albumName), lw) && !strings.Contains(strings.ToLower(displayArtist), lw) {
-						match = false
-						break
+					albumName = strings.TrimSpace(albumName)
+					albumPath = strings.TrimSpace(albumPath)
+					if albumName == "" && albumPath == "" {
+						continue
+					}
+					key := ""
+					if albumPath != "" {
+						key = albumPath + "|||" + albumName
+					} else {
+						key = albumName
+					}
+					g := groups[key]
+					if g == nil {
+						g = &albumGroup{albumName: albumName, albumPath: albumPath, genre: strings.TrimSpace(genre), albumArts: make(map[string]bool), artists: make(map[string]bool)}
+						groups[key] = g
+						order = append(order, key)
+					}
+					if id != "" && g.albumID == "" {
+						g.albumID = id
+					}
+					if genre != "" && g.genre == "" {
+						g.genre = genre
+					}
+					if albumArtist != "" && strings.ToLower(strings.TrimSpace(albumArtist)) != "unknown" {
+						g.albumArts[strings.TrimSpace(albumArtist)] = true
+					}
+					if artist != "" && strings.ToLower(strings.TrimSpace(artist)) != "unknown" {
+						g.artists[strings.TrimSpace(artist)] = true
+					}
+					g.songCount++
+				}
+
+				// Build candidates and deduplicate by normalized album name, preferring album_artist-backed groups
+				seen := make(map[string]SubsonicAlbum)
+				orderKeys := []string{}
+				for _, k := range order {
+					g := groups[k]
+					var artistList []string
+					if len(g.albumArts) > 0 {
+						for a := range g.albumArts { artistList = append(artistList, a) }
+					} else {
+						for a := range g.artists { artistList = append(artistList, a) }
+					}
+					sort.Strings(artistList)
+					displayArtist := "Unknown Artist"
+					if len(artistList) > 0 {
+						displayArtist = strings.Join(artistList, "; ")
+					}
+
+					candidate := SubsonicAlbum{ID: g.albumID, Name: g.albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: g.genre, CoverArt: g.albumID, SongCount: g.songCount}
+
+					nk := normalizeKey(g.albumName)
+					if existing, ok := seen[nk]; ok {
+						if len(g.albumArts) > 0 && (existing.Artist == "Unknown Artist" || existing.Artist == "") {
+							seen[nk] = candidate
+						}
+					} else {
+						seen[nk] = candidate
+						orderKeys = append(orderKeys, nk)
 					}
 				}
-				if !match {
-					continue
+
+				// paginate ordered results
+				start := albumOffset
+				end := start + albumCount
+				if start < 0 { start = 0 }
+				if start > len(orderKeys) { start = len(orderKeys) }
+				if end > len(orderKeys) { end = len(orderKeys) }
+				for _, k := range orderKeys[start:end] {
+					result.Albums = append(result.Albums, seen[k])
 				}
-				key := normalizeKey(albumName)
-				candidate := SubsonicAlbum{
-					ID:        albumID,
-					Name:      albumName,
-					Artist:    displayArtist,
-					ArtistID:  GenerateArtistID(displayArtist),
-					Genre:     genre,
-					CoverArt:  albumID,
-					SongCount: songCount,
-				}
-				if existing, ok := seen[key]; ok {
-					// If candidate is backed by album_artist and existing is not, replace existing
-					candIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, albumName, albumPath)
-					existIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, existing.Name, "")
-					if candIsAlbumArtist && !existIsAlbumArtist {
-						seen[key] = candidate
-					}
-				} else {
-					seen[key] = candidate
-					order = append(order, key)
-				}
-			}
-			// Apply pagination to the ordered results
-			start := albumOffset
-			end := start + albumCount
-			if start < 0 {
-				start = 0
-			}
-			if start > len(order) {
-				start = len(order)
-			}
-			if end > len(order) {
-				end = len(order)
-			}
-			for _, k := range order[start:end] {
-				result.Albums = append(result.Albums, seen[k])
 			}
 		}
 	}
