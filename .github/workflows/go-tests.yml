@@ -31,10 +31,12 @@ jobs:
         echo "go version:" && go version || true
 
     - name: Run backend tests
-      working-directory: music-server-backend
       env:
         CGO_ENABLED: '1'
+        GO111MODULE: 'on'
       run: |
-        echo "go env:" && go env
-        go env -w GOPROXY=https://proxy.golang.org,direct
+        cd music-server-backend
+        echo "go env (in music-server-backend):" && go env
+        # Ensure module downloads and builds correctly
+        go mod download
         go test ./... -v
