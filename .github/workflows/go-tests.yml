@@ -46,6 +46,14 @@ jobs:
         GO111MODULE: 'on'
       run: |
         echo "go env (in music-server-backend):" && go env
-        # Ensure module downloads and builds correctly
-        go mod download
+        # If the module files are missing (gitignored), create them like the Dockerfile does
+        if [ ! -f go.mod ]; then
+          echo "go.mod missing — initializing module and tidying dependencies"
+          go mod init music-server-backend || true
+          go mod tidy
+        else
+          # Otherwise download modules normally
+          go mod download
+        fi
+        # Run tests
         go test ./... -v
