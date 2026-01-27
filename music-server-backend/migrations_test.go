@@ -38,7 +38,7 @@ func TestMigrateDB_IdempotentAndCreatesExpectedTables(t *testing.T) {
 	}
 
 	// Check starred_songs exists and has starred_at
-	rows2, err := db.Query(`PRAGMA table_info(starred_songs)`)
+	rows2, err := db.Query(`PRAGMA table_info(starred_songs)`) 
 	if err != nil { t.Fatalf("pragma starred_songs failed: %v", err) }
 	defer rows2.Close()
 	cols2 := map[string]bool{}
