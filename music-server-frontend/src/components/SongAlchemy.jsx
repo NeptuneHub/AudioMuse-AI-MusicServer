@@ -234,9 +234,10 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
         subtract_distance: subtractDistance,
         preview: true
       };
+      const token = localStorage.getItem('token');
       const resp = await fetch('/api/alchemy', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: token ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } : { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       const data = await resp.json();
@@ -425,9 +426,10 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
         temperature,
         subtract_distance: subtractDistance
       };
+      const token = localStorage.getItem('token');
       const resp = await fetch('/api/alchemy', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: token ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } : { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       const data = await resp.json();

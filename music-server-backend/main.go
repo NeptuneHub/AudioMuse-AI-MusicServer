@@ -237,9 +237,9 @@ func main() {
 	// Admin-protected cleaning endpoint that proxies to AudioMuse-AI
 	r.POST("/api/cleaning/start", AuthMiddleware(), adminOnly(), CleaningStartHandler)
 
-	// Public endpoint used by the frontend to run Alchemy (may be allowed for non-admin flows)
-	r.POST("/api/alchemy", AlchemyHandler)
-	r.GET("/api/alchemy/search_artists", SearchArtistsHandler)
+	// Alchemy endpoints — require authentication (available to any authenticated user)
+	r.POST("/api/alchemy", AuthMiddleware(), AlchemyHandler)
+	r.GET("/api/alchemy/search_artists", AuthMiddleware(), SearchArtistsHandler)
 
 	// Radio endpoints (authenticated)
 	r.POST("/api/radios", AuthMiddleware(), createRadioHandler)
