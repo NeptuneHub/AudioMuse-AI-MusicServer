@@ -217,6 +217,13 @@ func debugSongsHandler(c *gin.Context) {
 
 // getRecentlyAdded returns recently added songs
 func getRecentlyAdded(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+	userID := userIDVal.(int)
+
 	limitStr := c.DefaultQuery("limit", "50")
 	offsetStr := c.DefaultQuery("offset", "0")
 	genre := c.Query("genre")
@@ -230,15 +237,19 @@ func getRecentlyAdded(c *gin.Context) {
 	db.QueryRow("SELECT COUNT(*) FROM songs WHERE cancelled = 0 AND date_added IS NOT NULL AND date_added != ''").Scan(&songsWithDate)
 	log.Printf("DEBUG [getRecentlyAdded]: Total songs=%d, Songs with date_added=%d", totalSongs, songsWithDate)
 
-	query := "SELECT id, title, artist, album, duration, play_count, last_played, date_added, date_updated, starred, genre FROM songs WHERE cancelled = 0 AND date_added IS NOT NULL AND date_added != ''"
-	args := []interface{}{}
+	query := `SELECT s.id, s.title, s.artist, s.album, s.duration, s.play_count, s.last_played, s.date_added, s.date_updated,
+		CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred, s.genre
+		FROM songs s
+		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
+		WHERE s.cancelled = 0 AND s.date_added IS NOT NULL AND s.date_added != ''`
+	args := []interface{}{userID}
 
 	if genre != "" {
-		query += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
+		query += " AND (s.genre = ? OR s.genre LIKE ? OR s.genre LIKE ? OR s.genre LIKE ?)"
 		args = append(args, genre, genre+";%", "%;"+genre+";%", "%;"+genre)
 	}
 
-	query += " ORDER BY date_added DESC LIMIT ? OFFSET ?"
+	query += " ORDER BY s.date_added DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 
 	log.Printf("DEBUG [getRecentlyAdded]: Executing query: %s with args: %v", query, args)
@@ -277,6 +288,13 @@ func getRecentlyAdded(c *gin.Context) {
 
 // getMostPlayed returns most played songs
 func getMostPlayed(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+	userID := userIDVal.(int)
+
 	limitStr := c.DefaultQuery("limit", "50")
 	offsetStr := c.DefaultQuery("offset", "0")
 	genre := c.Query("genre")
@@ -284,15 +302,19 @@ func getMostPlayed(c *gin.Context) {
 	limit, _ := strconv.Atoi(limitStr)
 	offset, _ := strconv.Atoi(offsetStr)
 
-	query := "SELECT id, title, artist, album, duration, play_count, last_played, date_added, date_updated, starred, genre FROM songs WHERE play_count > 0 AND cancelled = 0"
-	args := []interface{}{}
+	query := `SELECT s.id, s.title, s.artist, s.album, s.duration, s.play_count, s.last_played, s.date_added, s.date_updated,
+		CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred, s.genre
+		FROM songs s
+		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
+		WHERE s.play_count > 0 AND s.cancelled = 0`
+	args := []interface{}{userID}
 
 	if genre != "" {
-		query += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
+		query += " AND (s.genre = ? OR s.genre LIKE ? OR s.genre LIKE ? OR s.genre LIKE ?)"
 		args = append(args, genre, genre+";%", "%;"+genre+";%", "%;"+genre)
 	}
 
-	query += " ORDER BY play_count DESC, last_played DESC LIMIT ? OFFSET ?"
+	query += " ORDER BY s.play_count DESC, s.last_played DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 
 	rows, err := db.Query(query, args...)
@@ -340,12 +362,15 @@ func getRecentlyPlayed(c *gin.Context) {
 	limit, _ := strconv.Atoi(limitStr)
 	offset, _ := strconv.Atoi(offsetStr)
 
-	query := `SELECT DISTINCT s.id, s.title, s.artist, s.album, s.duration, s.play_count, s.last_played, 
-		s.date_added, s.date_updated, s.starred, s.genre, MAX(ph.played_at) as recent_play
+	query := `SELECT DISTINCT s.id, s.title, s.artist, s.album, s.duration, s.play_count, s.last_played,
+		s.date_added, s.date_updated,
+		CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred,
+		s.genre, MAX(ph.played_at) as recent_play
 		FROM songs s
 		INNER JOIN play_history ph ON s.id = ph.song_id
+		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
 		WHERE ph.user_id = ? AND s.cancelled = 0`
-	args := []interface{}{userID}
+	args := []interface{}{userID, userID}
 
 	if genre != "" {
 		query += " AND (s.genre = ? OR s.genre LIKE ? OR s.genre LIKE ? OR s.genre LIKE ?)"

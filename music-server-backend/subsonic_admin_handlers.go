@@ -191,15 +191,14 @@ func subsonicGetConfiguration(c *gin.Context) {
 	// Admins get full configuration. Non-admins may read only the audiomuse URL key.
 	if !user.IsAdmin {
 		// Return only the audiomuse_ai_core_url key (if present) so normal users can use AudioMuse features when configured.
-		var value sql.NullString
-		err := db.QueryRow("SELECT value FROM configuration WHERE key = ?", "audiomuse_ai_core_url").Scan(&value)
+		value, err := GetConfig(db, "audiomuse_ai_core_url")
 		if err != nil && err != sql.ErrNoRows {
 			subsonicRespond(c, newSubsonicErrorResponse(0, "DB error fetching configuration."))
 			return
 		}
 		var configs []SubsonicConfiguration
-		if value.Valid {
-			configs = append(configs, SubsonicConfiguration{Name: "audiomuse_ai_core_url", Value: value.String})
+		if err == nil && value != "" {
+			configs = append(configs, SubsonicConfiguration{Name: "audiomuse_ai_core_url", Value: value})
 		}
 		subsonicRespond(c, newSubsonicResponse(&SubsonicConfigurations{Configurations: configs}))
 		return

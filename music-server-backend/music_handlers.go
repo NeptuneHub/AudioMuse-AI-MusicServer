@@ -14,7 +14,7 @@ import (
 // --- Music Library Handlers (JSON API) ---
 
 func getArtists(c *gin.Context) {
-	artistNames, err := fetchArtists(db)
+	results, err := QueryArtists(db, ArtistQueryOptions{})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query artists"})
 		return
@@ -25,10 +25,10 @@ func getArtists(c *gin.Context) {
 	}
 
 	var artists []ArtistWithID
-	for _, artistName := range artistNames {
+	for _, result := range results {
 		artists = append(artists, ArtistWithID{
-			ID:   GenerateArtistID(artistName),
-			Name: artistName,
+			ID:   GenerateArtistID(result.Name),
+			Name: result.Name,
 		})
 	}
 	c.JSON(http.StatusOK, artists)
@@ -36,50 +36,34 @@ func getArtists(c *gin.Context) {
 
 func getAlbums(c *gin.Context) {
 	artistFilter := c.Query("artist")
-	// Group by album_path + album (filesystem grouping). If artistFilter is provided we filter songs by artist before grouping.
-	query := `SELECT 
-		album, 
-		COALESCE(NULLIF(album_artist, ''), artist) as effective_artist, 
-		MIN(id), MIN(NULLIF(album_path, '')) as album_path
-	FROM songs 
-	WHERE album != '' AND cancelled = 0`
-	args := []interface{}{}
 
-	if artistFilter != "" {
-		query += " AND artist = ?"
-		args = append(args, artistFilter)
-	}
-	query += ` GROUP BY 
-		CASE
-			WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
-			ELSE album
-		END
-	ORDER BY effective_artist COLLATE NOCASE, album COLLATE NOCASE`
-
-	rows, err := db.Query(query, args...)
+	results, err := QueryAlbums(db, AlbumQueryOptions{
+		Artist:        artistFilter,
+		GroupByPath:   true,
+		IncludeArtist: true,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query albums"})
 		return
 	}
-	defer rows.Close()
 
 	var albums []Album
 	seen := make(map[string]bool)
-	for rows.Next() {
-		var album Album
-		var minID string
-		var albumPath string
-		if err := rows.Scan(&album.Name, &album.Artist, &minID, &albumPath); err != nil {
-			log.Printf("Error scanning album row: %v", err)
-			continue
-		}
+	for _, result := range results {
 		// Compute display artist for this album
-		displayArtist, _ := getAlbumDisplayArtist(db, album.Name, strings.TrimSpace(albumPath))
-		album.Artist = displayArtist
+		displayArtist, _ := getAlbumDisplayArtist(db, result.Name, strings.TrimSpace(result.AlbumPath))
+
+		album := Album{
+			Name:   result.Name,
+			Artist: displayArtist,
+			Genre:  result.Genre,
+		}
+
 		// Normalize legacy 'Unknown' album label
 		if album.Name == "Unknown" {
 			album.Name = "Unknown Album"
 		}
+
 		key := normalizeKey(album.Artist) + "|||" + normalizeKey(album.Name)
 		if seen[key] {
 			continue
@@ -94,56 +78,38 @@ func getSongs(c *gin.Context) {
 	albumFilter := c.Query("album")
 	artistFilter := c.Query("artist") // Used to disambiguate albums with the same name
 
-	query := "SELECT id, title, artist, album, duration, play_count, last_played, date_added, date_updated, starred, genre FROM songs"
-	conditions := []string{"cancelled = 0"}
-	args := []interface{}{}
-
-	if albumFilter != "" {
-		conditions = append(conditions, "album = ?")
-		args = append(args, albumFilter)
-	}
-	if artistFilter != "" {
-		conditions = append(conditions, "artist = ?")
-		args = append(args, artistFilter)
-	}
-
-	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
-	}
-	query += " ORDER BY artist, album, title"
-
-	rows, err := db.Query(query, args...)
+	results, err := QuerySongs(db, SongQueryOptions{
+		Album:        albumFilter,
+		Artist:       artistFilter,
+		IncludeGenre: true,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query songs"})
 		return
 	}
-	defer rows.Close()
 
 	var songs []Song
-	for rows.Next() {
-		var song Song
-		var starred int
-		var lastPlayed, dateAdded, dateUpdated sql.NullString
-
-		if err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &song.Duration,
-			&song.PlayCount, &lastPlayed, &dateAdded, &dateUpdated, &starred, &song.Genre); err != nil {
-			log.Printf("Error scanning song row: %v", err)
-			continue
-		}
-
-		song.LastPlayed = lastPlayed.String
-		song.DateAdded = dateAdded.String
-		song.DateUpdated = dateUpdated.String
-		song.Starred = starred == 1
-		songs = append(songs, song)
+	for _, result := range results {
+		// Note: We don't have date_added, date_updated in SongResult
+		// If needed, we should extend SongResult or keep a custom query here
+		songs = append(songs, Song{
+			ID:         result.ID,
+			Title:      result.Title,
+			Artist:     result.Artist,
+			Album:      result.Album,
+			Duration:   result.Duration,
+			PlayCount:  result.PlayCount,
+			LastPlayed: result.LastPlayed,
+			Genre:      result.Genre,
+			Starred:    result.Starred,
+		})
 	}
 	c.JSON(http.StatusOK, songs)
 }
 
 func streamSong(c *gin.Context) {
 	songID := c.Param("songID")
-	var path string
-	err := db.QueryRow("SELECT path FROM songs WHERE id = ? AND cancelled = 0", songID).Scan(&path)
+	path, err := QuerySongPath(db, songID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Song not found"})

@@ -426,9 +426,7 @@ func subsonicStream(c *gin.Context) {
 	user := c.MustGet("user").(User)
 
 	songID := c.Query("id")
-	var path string
-	var duration int
-	err := db.QueryRow("SELECT path, duration FROM songs WHERE id = ? AND cancelled = 0", songID).Scan(&path, &duration)
+	path, duration, err := QuerySongPathAndDuration(db, songID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))
@@ -754,10 +752,7 @@ func subsonicGetWaveform(c *gin.Context) {
 	}
 
 	// Get song file path and pre-computed waveform peaks
-	var path string
-	var duration int
-	var waveformPeaks sql.NullString
-	err := db.QueryRow("SELECT path, duration, waveform_peaks FROM songs WHERE id = ? AND cancelled = 0", songID).Scan(&path, &duration, &waveformPeaks)
+	path, duration, waveformPeaks, err := QuerySongWaveform(db, songID)
 	if err != nil {
 		log.Printf("Error fetching song for waveform %s: %v", songID, err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "Song not found"})
@@ -765,9 +760,9 @@ func subsonicGetWaveform(c *gin.Context) {
 	}
 
 	// If pre-computed waveform exists, use it (fast path)
-	if waveformPeaks.Valid && waveformPeaks.String != "" {
+	if waveformPeaks != "" {
 		var peaks []float32
-		if err := json.Unmarshal([]byte(waveformPeaks.String), &peaks); err == nil {
+		if err := json.Unmarshal([]byte(waveformPeaks), &peaks); err == nil {
 			log.Printf("🚀 Using pre-computed waveform for user=%s, song=%s (%d peaks)",
 				user.Username, filepath.Base(path), len(peaks))
 
@@ -874,22 +869,13 @@ func subsonicScrobble(c *gin.Context) {
 
 	now := time.Now().Format(time.RFC3339)
 
-	_, err := db.Exec(`
-		UPDATE songs
-		SET play_count = play_count + 1, last_played = ?
-		WHERE id = ?
-	`, now, songID)
-
+	err := UpdateSongPlayCount(db, songID, now)
 	if err != nil {
 		log.Printf("Error updating play count for user '%s' on song '%s': %v", user.Username, songID, err)
 	}
 
 	// Track play history for this user
-	_, err = db.Exec(`
-		INSERT INTO play_history (user_id, song_id, played_at)
-		VALUES (?, ?, ?)
-	`, user.ID, songID, now)
-
+	err = InsertPlayHistory(db, user.ID, songID, now)
 	if err != nil {
 		log.Printf("Error inserting play history for user '%s' on song '%s': %v", user.Username, songID, err)
 	}
@@ -903,50 +889,30 @@ func subsonicGetArtists(c *gin.Context) {
 
 	// List artists (do not use album_artist fallback) and dedupe by artist name
 	// OPTIMIZED: Single query with album count aggregation (no N+1 queries)
-	query := `
-		SELECT
-			artist AS name,
-			COUNT(*) as song_count,
-			COUNT(DISTINCT CASE
-				WHEN album != '' AND album_path != '' THEN album_path || '|||' || album
-				WHEN album != '' THEN album
-				ELSE NULL
-			END) as album_count
-		FROM songs s
-		WHERE artist != '' AND cancelled = 0
-		GROUP BY artist
-		ORDER BY artist COLLATE NOCASE
-	`
-	rows, err := db.Query(query)
+	results, err := QueryArtists(db, ArtistQueryOptions{
+		IncludeCounts: true,
+	})
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying artists."))
 		return
 	}
-	defer rows.Close()
 
 	artistIndex := make(map[string][]SubsonicArtist)
 	seenArtists := make(map[string]bool)
-	for rows.Next() {
-		var name string
-		var songCount int
-		var albumCount int
-		if err := rows.Scan(&name, &songCount, &albumCount); err != nil {
-			continue
-		}
-
+	for _, result := range results {
 		// Deduplicate exact string matches by normalized name (same approach as search)
-		key := normalizeKey(name)
+		key := normalizeKey(result.Name)
 		if seenArtists[key] {
 			continue
 		}
 		seenArtists[key] = true
 
 		var artist SubsonicArtist
-		artist.Name = name
+		artist.Name = result.Name
 		artist.ID = GenerateArtistID(artist.Name)
 		artist.CoverArt = artist.Name
-		artist.AlbumCount = albumCount
-		artist.SongCount = songCount
+		artist.AlbumCount = result.AlbumCount
+		artist.SongCount = result.SongCount
 
 		var indexChar string
 		for _, r := range artist.Name {
@@ -1010,16 +976,16 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		args = append(args, genreParam)
 	}
 
-	// Determine ORDER BY clause based on list type
+	// Determine ORDER BY clause and HAVING clause based on list type
 	var orderByClause string
+	var havingClause string
 	switch listType {
 	case "starred":
-		// Starred albums - need to join with starred_albums table
+		// Starred albums - Filter by checking if the album's MIN(id) is in starred_albums
 		user := c.MustGet("user").(User)
-		whereClause += " AND album_path IN (SELECT s.album_path FROM starred_albums sa INNER JOIN songs s ON sa.album_id = s.id WHERE sa.user_id = ?)"
+		havingClause = "HAVING MIN(id) IN (SELECT album_id FROM starred_albums WHERE user_id = ?)"
 		args = append(args, user.ID)
-		orderByClause = "ORDER BY (SELECT sa.starred_at FROM starred_albums sa INNER JOIN songs s ON sa.album_id = s.id WHERE s.album_path = songs.album_path AND sa.user_id = ? LIMIT 1) DESC"
-		args = append(args, user.ID)
+		orderByClause = "ORDER BY album COLLATE NOCASE"
 	case "newest":
 		// Recently added albums - sort by the most recent date_added of songs in each album
 		orderByClause = "ORDER BY MAX(date_added) DESC, artist, album"
@@ -1044,10 +1010,21 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		orderByClause = "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE"
 	}
 
-// Count distinct albums using normalization (dedupe by normalized album name)
+	// Count distinct albums using normalization (dedupe by normalized album name)
 	seenAlbumKeys := make(map[string]bool)
-	countQ := fmt.Sprintf("SELECT album, album_path FROM songs %s AND cancelled = 0", whereClause)
-	rowsCount, err := db.Query(countQ, args...)
+	// For starred, we need to count with GROUP BY and HAVING
+	var countQ string
+	if havingClause != "" {
+		countQ = fmt.Sprintf(`SELECT album, MIN(NULLIF(album_path, '')) as album_path FROM songs %s
+			GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END
+			%s`, whereClause, havingClause)
+	} else {
+		countQ = fmt.Sprintf("SELECT album, album_path FROM songs %s", whereClause)
+	}
+	// Need to duplicate args for count query
+	countArgs := make([]interface{}, len(args))
+	copy(countArgs, args)
+	rowsCount, err := db.Query(countQ, countArgs...)
 	if err != nil {
 		log.Printf("Error counting albums for pagination: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying albums."))
@@ -1099,8 +1076,9 @@ func subsonicGetAlbumList2(c *gin.Context) {
 				ELSE album
 			END
 		%s
+		%s
 		LIMIT ? OFFSET ?
-	`, whereClause, orderByClause)
+	`, whereClause, havingClause, orderByClause)
 
 	args = append(args, size, offset)
 	rows, err := db.Query(query, args...)
@@ -1278,26 +1256,26 @@ func subsonicGetRandomSongs(c *gin.Context) {
 		size = 500
 	}
 
-	rows, err := db.Query("SELECT id, title, artist, album, play_count, last_played, duration FROM songs WHERE cancelled = 0 ORDER BY RANDOM() LIMIT ?", size)
+	results, err := QuerySongs(db, SongQueryOptions{
+		Random: true,
+		Limit:  size,
+	})
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error fetching random songs."))
 		return
 	}
-	defer rows.Close()
 
 	var songs []SubsonicSong
-	for rows.Next() {
-		var s SubsonicSong
-		var duration int
-		var lastPlayed sql.NullString
-		if err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &duration); err != nil {
-			log.Printf("Error scanning random song: %v", err)
-			continue
-		}
-		s.CoverArt = s.ID
-		s.Duration = duration
-		if lastPlayed.Valid {
-			s.LastPlayed = lastPlayed.String
+	for _, result := range results {
+		s := SubsonicSong{
+			ID:         result.ID,
+			Title:      result.Title,
+			Artist:     result.Artist,
+			Album:      result.Album,
+			PlayCount:  result.PlayCount,
+			Duration:   result.Duration,
+			CoverArt:   result.ID,
+			LastPlayed: result.LastPlayed,
 		}
 		songs = append(songs, s)
 	}
@@ -1324,9 +1302,8 @@ func subsonicGetCoverArt(c *gin.Context) {
 	}
 
 	// Check if ID exists in songs table (song/album ID)
-	var exists int
-	err = db.QueryRow("SELECT COUNT(*) FROM songs WHERE id = ? AND cancelled = 0", id).Scan(&exists)
-	if err == nil && exists > 0 {
+	exists, err := SongExists(db, id)
+	if err == nil && exists {
 		handleAlbumArt(c, id, size)
 		return
 	}
@@ -1355,8 +1332,7 @@ func subsonicGetCoverArt(c *gin.Context) {
 }
 
 func handleAlbumArt(c *gin.Context, songID string, size int) {
-	var path string
-	err := db.QueryRow("SELECT path FROM songs WHERE id = ? AND cancelled = 0", songID).Scan(&path)
+	path, err := QuerySongPath(db, songID)
 	if err != nil {
 		c.Status(http.StatusNotFound)
 		return
@@ -1537,8 +1513,7 @@ func subsonicStar(c *gin.Context) {
 		artistName := artistID
 
 // First, check if artistID directly matches an artist name in songs (consider album_artist fallback)
-			var exists bool
-			err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE (album_artist = ? OR artist = ?) AND cancelled = 0)", artistName, artistName).Scan(&exists)
+		exists, err := ArtistExists(db, artistName)
 		if err != nil {
 			log.Printf("Artist check error for %s: %v", artistID, err)
 			continue
@@ -1572,8 +1547,7 @@ func subsonicStar(c *gin.Context) {
 			}
 		}
 
-		_, err = db.Exec(`INSERT OR REPLACE INTO starred_artists (user_id, artist_name, starred_at) VALUES (?, ?, ?)`,
-			user.ID, artistName, now)
+		err = StarArtist(db, user.ID, artistName, now)
 		if err != nil {
 			log.Printf("Error starring artist %s for user %s: %v", artistName, user.Username, err)
 		} else {
@@ -1600,7 +1574,7 @@ func subsonicUnstar(c *gin.Context) {
 
 	// Unstar songs
 	for _, songID := range songIDs {
-		_, err := db.Exec(`DELETE FROM starred_songs WHERE user_id = ? AND song_id = ?`, user.ID, songID)
+		err := UnstarSong(db, user.ID, songID)
 		if err != nil {
 			log.Printf("Error unstarring song %s for user %s: %v", songID, user.Username, err)
 		} else {
@@ -1610,7 +1584,7 @@ func subsonicUnstar(c *gin.Context) {
 
 	// Unstar albums
 	for _, albumID := range albumIDs {
-		_, err := db.Exec(`DELETE FROM starred_albums WHERE user_id = ? AND album_id = ?`, user.ID, albumID)
+		err := UnstarAlbum(db, user.ID, albumID)
 		if err != nil {
 			log.Printf("Error unstarring album %s for user %s: %v", albumID, user.Username, err)
 		} else {
@@ -1621,8 +1595,7 @@ func subsonicUnstar(c *gin.Context) {
 	// Unstar artists
 	for _, artistID := range artistIDs {
 		artistName := artistID
-		var exists bool
-		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM songs WHERE (album_artist = ? OR artist = ?) AND cancelled = 0)", artistName, artistName).Scan(&exists)
+		exists, err := ArtistExists(db, artistName)
 		if err != nil {
 			log.Printf("Artist check error for %s: %v", artistID, err)
 			continue
@@ -1652,7 +1625,7 @@ func subsonicUnstar(c *gin.Context) {
 			}
 		}
 
-		_, err = db.Exec(`DELETE FROM starred_artists WHERE user_id = ? AND artist_name = ?`, user.ID, artistName)
+		err = UnstarArtist(db, user.ID, artistName)
 		if err != nil {
 			log.Printf("Error unstarring artist %s for user %s: %v", artistName, user.Username, err)
 		} else {

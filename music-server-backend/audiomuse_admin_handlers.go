@@ -24,8 +24,7 @@ func getAudioMuseURL() (string, error) {
 	}
 
 	// Fallback to database for legacy or non-containerized setups
-	var coreURL string
-	err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL)
+	coreURL, err := GetConfig(db, "audiomuse_ai_core_url")
 	if err != nil {
 		log.Printf("ERROR: Could not retrieve 'audiomuse_ai_core_url' from database: %v", err)
 		return "", fmt.Errorf("AudioMuse-AI Core URL not configured")

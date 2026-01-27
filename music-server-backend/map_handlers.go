@@ -19,8 +19,8 @@ func MapHandler(c *gin.Context) {
 		return
 	}
 
-	var coreURL string
-	if err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL); err != nil || coreURL == "" {
+	coreURL, err := GetConfig(db, "audiomuse_ai_core_url")
+	if err != nil || coreURL == "" {
 		coreURL = getEnv("AUDIO_MUSE_AI_URL", "")
 	}
 	if coreURL == "" {
@@ -100,8 +100,8 @@ func VoyagerSearchTracksHandler(c *gin.Context) {
 		return
 	}
 
-	var coreURL string
-	if err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL); err != nil || coreURL == "" {
+	coreURL, err := GetConfig(db, "audiomuse_ai_core_url")
+	if err != nil || coreURL == "" {
 		coreURL = getEnv("AUDIO_MUSE_AI_URL", "")
 	}
 	if coreURL == "" {

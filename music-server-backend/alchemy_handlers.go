@@ -44,7 +44,7 @@ func AlchemyHandler(c *gin.Context) {
 
 	// Determine AudioMuse-AI URL: prefer configuration in DB, then env var.
 	var aiURL string
-	err := db.QueryRow("SELECT value FROM configuration WHERE key = ?", "audiomuse_ai_core_url").Scan(&aiURL)
+	aiURL, err := GetConfig(db, "audiomuse_ai_core_url")
 	if err == nil {
 		// got aiURL from DB
 	} else if err == sql.ErrNoRows {

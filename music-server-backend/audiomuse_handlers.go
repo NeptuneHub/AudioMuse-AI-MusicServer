@@ -14,54 +14,27 @@ import (
 
 // getSongsByIDs is a helper function to fetch song details from a list of IDs, preserving order.
 func getSongsByIDs(ids []string) ([]SubsonicSong, error) {
-	if len(ids) == 0 {
-		return []SubsonicSong{}, nil
-	}
-
-	// Create placeholders for the IN clause, e.g., (?, ?, ?)
-	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
-	query := fmt.Sprintf(`
-		SELECT id, title, artist, album, path, play_count, last_played, duration
-		FROM songs WHERE id IN (%s)
-	`, placeholders)
-
-	// Convert string IDs to []interface{} for the query
-	args := make([]interface{}, len(ids))
-	for i, v := range ids {
-		args[i] = v
-	}
-
-	rows, err := db.Query(query, args...)
+	results, err := QuerySongsByIDs(db, ids)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	// Map results for easy lookup to preserve order
-	songMap := make(map[string]SubsonicSong)
-	for rows.Next() {
-		var song SubsonicSong
-		var lastPlayed, path, playCount, duration interface{} // Use interface{} to handle NULLs gracefully
-		if err := rows.Scan(&song.ID, &song.Title, &song.Artist, &song.Album, &path, &playCount, &lastPlayed, &duration); err != nil {
-			log.Printf("Error scanning song row in getSongsByIDs: %v", err)
-			continue
-		}
-		// Set duration if it's a valid integer
-		if dur, ok := duration.(int64); ok {
-			song.Duration = int(dur)
-		}
-		songMap[song.ID] = song
+	// Convert to SubsonicSong format
+	var songs []SubsonicSong
+	for _, result := range results {
+		songs = append(songs, SubsonicSong{
+			ID:         result.ID,
+			Title:      result.Title,
+			Artist:     result.Artist,
+			Album:      result.Album,
+			Path:       result.Path,
+			Duration:   result.Duration,
+			PlayCount:  result.PlayCount,
+			LastPlayed: result.LastPlayed,
+		})
 	}
 
-	// Build the final slice in the original order of IDs
-	var orderedSongs []SubsonicSong
-	for _, id := range ids {
-		if song, ok := songMap[id]; ok {
-			orderedSongs = append(orderedSongs, song)
-		}
-	}
-
-	return orderedSongs, nil
+	return songs, nil
 }
 
 func subsonicGetSimilarSongs(c *gin.Context) {
@@ -76,8 +49,7 @@ func subsonicGetSimilarSongs(c *gin.Context) {
 		return
 	}
 
-	var coreURL string
-	err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL)
+	coreURL, err := GetConfig(db, "audiomuse_ai_core_url")
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(50, "AudioMuse-AI Core URL not configured."))
 		return
@@ -143,8 +115,7 @@ func subsonicGetSongPath(c *gin.Context) {
 		return
 	}
 
-	var coreURL string
-	err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL)
+	coreURL, err := GetConfig(db, "audiomuse_ai_core_url")
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(50, "AudioMuse-AI Core URL not configured."))
 		return
@@ -203,8 +174,7 @@ func subsonicGetSonicFingerprint(c *gin.Context) {
 	// Allow authenticated users to request sonic fingerprinting (heavy ops like clustering remain admin-only).
 	_ = c.MustGet("user").(User)
 
-	var coreURL string
-	err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL)
+	coreURL, err := GetConfig(db, "audiomuse_ai_core_url")
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(50, "AudioMuse-AI Core URL not configured."))
 		return

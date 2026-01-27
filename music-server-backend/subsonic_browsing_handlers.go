@@ -151,15 +151,15 @@ func subsonicGetMusicDirectory(c *gin.Context) {
 }
 
 // getArtistDirectory returns all albums by an artist
-// CRITICAL: When browsing an artist, show albums where that artist is the ALBUM ARTIST
-// This prevents showing albums from different artists when you click on an artist
+// IMPORTANT: Show albums where the artist appears in EITHER artist OR album_artist fields
+// This ensures all albums are shown where the artist contributed to ANY song
 func getArtistDirectory(c *gin.Context, artistName string) {
 	// Group by album_path + album for deterministic filesystem-based grouping
-	// IMPORTANT: Filter by album_artist (not artist) to show only albums that belong to this artist
+	// Match on BOTH artist and album_artist to show all albums where this artist appears in ANY song
 	query := `
 		SELECT album, MIN(id) as album_id, COUNT(*) as song_count, COALESCE(genre, ''), MIN(album_path) as album_path
 		FROM songs
-		WHERE album_artist = ? AND cancelled = 0
+		WHERE (artist = ? OR album_artist = ?) AND cancelled = 0
 		GROUP BY CASE
 			WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
 			ELSE album
@@ -167,7 +167,7 @@ func getArtistDirectory(c *gin.Context, artistName string) {
 		ORDER BY album COLLATE NOCASE
 	`
 
-	rows, err := db.Query(query, artistName)
+	rows, err := db.Query(query, artistName, artistName)
 	if err != nil {
 		log.Printf("Error querying albums for artist %s: %v", artistName, err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
@@ -345,12 +345,11 @@ func subsonicGetArtist(c *gin.Context) {
 	log.Printf("Resolved artist ID %s to name: %s", artistID, artistName)
 
 	// Get albums by this artist
-	// CRITICAL: Use album_artist ONLY (not artist) to show only albums that belong to this artist
-	// This prevents mixing albums from different artists
+	// Match on BOTH artist and album_artist fields to show all albums where this artist appears in ANY song
 	query := `
 		SELECT album, MIN(id) as album_id, COUNT(*) as song_count, COALESCE(genre, '') as genre, MIN(album_path) as album_path
 		FROM songs
-		WHERE album_artist = ? AND cancelled = 0
+		WHERE (artist = ? OR album_artist = ?) AND cancelled = 0
 		GROUP BY CASE
 			WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
 			ELSE album
@@ -358,7 +357,7 @@ func subsonicGetArtist(c *gin.Context) {
 		ORDER BY album COLLATE NOCASE
 	`
 
-	rows, err := db.Query(query, artistName)
+	rows, err := db.Query(query, artistName, artistName)
 	if err != nil {
 		log.Printf("Error querying albums for artist %s: %v", artistName, err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))

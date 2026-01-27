@@ -22,18 +22,15 @@ func CleaningStartHandler(c *gin.Context) {
 	body, _ := io.ReadAll(c.Request.Body)
 
 	// Determine AudioMuse-AI URL: prefer configuration in DB, then env var.
-	var aiURL string
-	err := db.QueryRow("SELECT value FROM configuration WHERE key = ?", "audiomuse_ai_core_url").Scan(&aiURL)
-	if err == nil {
-		// got aiURL from DB
-	} else if err == sql.ErrNoRows {
+	aiURL, err := GetConfig(db, "audiomuse_ai_core_url")
+	if err == sql.ErrNoRows {
 		// not set in DB, try env var
 		aiURL = os.Getenv("AUDIO_MUSE_AI_URL")
 		if aiURL == "" {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "AudioMuse-AI endpoint not configured. Set configuration key 'audiomuse_ai_core_url' or AUDIO_MUSE_AI_URL env var."})
 			return
 		}
-	} else {
+	} else if err != nil {
 		// DB error
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read configuration for AudioMuse-AI endpoint"})
 		return

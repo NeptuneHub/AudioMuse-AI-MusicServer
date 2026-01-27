@@ -3,7 +3,6 @@ package main
 
 import (
 	"archive/zip"
-	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -31,49 +30,31 @@ func subsonicGetTopSongs(c *gin.Context) {
 
 	log.Printf("getTopSongs called for artist: %s, count: %d", artistName, count)
 
-	query := `
-		SELECT id, title, artist, album, play_count, last_played, COALESCE(genre, '')
-		FROM songs
-		WHERE artist = ?
-		ORDER BY play_count DESC, title COLLATE NOCASE
-		LIMIT ?
-	`
-
-	rows, err := db.Query(query, artistName, count)
+	results, err := QuerySongs(db, SongQueryOptions{
+		Artist:       artistName,
+		IncludeGenre: true,
+		OrderBy:      "s.play_count DESC, s.title COLLATE NOCASE",
+		Limit:        count,
+	})
 	if err != nil {
 		log.Printf("Error querying top songs for artist %s: %v", artistName, err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
 		return
 	}
-	defer rows.Close()
 
 	var songs []SubsonicSong
-	for rows.Next() {
-		var songID string
-		var title, artist, album, genre string
-		var playCount int
-		var lastPlayed sql.NullString
-
-		if err := rows.Scan(&songID, &title, &artist, &album, &playCount, &lastPlayed, &genre); err != nil {
-			log.Printf("Error scanning top song: %v", err)
-			continue
-		}
-
+	for _, result := range results {
 		song := SubsonicSong{
-			ID:        songID,
-			Title:     title,
-			Artist:    artist,
-			ArtistID:  GenerateArtistID(artist),
-			Album:     album,
-			Genre:     genre,
-			CoverArt:  songID,
-			PlayCount: playCount,
+			ID:         result.ID,
+			Title:      result.Title,
+			Artist:     result.Artist,
+			ArtistID:   GenerateArtistID(result.Artist),
+			Album:      result.Album,
+			Genre:      result.Genre,
+			CoverArt:   result.ID,
+			PlayCount:  result.PlayCount,
+			LastPlayed: result.LastPlayed,
 		}
-
-		if lastPlayed.Valid {
-			song.LastPlayed = lastPlayed.String
-		}
-
 		songs = append(songs, song)
 	}
 
@@ -101,71 +82,29 @@ func subsonicGetSimilarSongs2(c *gin.Context) {
 		count = 500
 	}
 
-	// Get the reference song's artist and genre
-	var refArtist, refGenre string
-	err := db.QueryRow("SELECT artist, COALESCE(genre, '') FROM songs WHERE id = ? AND cancelled = 0", songID).Scan(&refArtist, &refGenre)
-	if err != nil {
-		log.Printf("Reference song not found for getSimilarSongs2: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))
-		return
-	}
+	log.Printf("getSimilarSongs2 called for song ID: %s, count: %d", songID, count)
 
-	log.Printf("getSimilarSongs2 called for song ID: %s (artist: %s, genre: %s), count: %d", songID, refArtist, refGenre, count)
-
-	// Find similar songs by artist or genre, excluding the original song
-	query := `
-		SELECT id, title, artist, album, play_count, last_played, COALESCE(genre, ''), duration
-		FROM songs
-		WHERE id != ?
-		  AND (artist = ? OR (genre = ? AND genre != ''))
-		  AND cancelled = 0
-		ORDER BY 
-			CASE 
-				WHEN artist = ? THEN 0 
-				WHEN genre = ? THEN 1 
-				ELSE 2 
-			END,
-			RANDOM()
-		LIMIT ?
-	`
-
-	rows, err := db.Query(query, songID, refArtist, refGenre, refArtist, refGenre, count)
+	results, err := QuerySimilarSongs(db, songID, count)
 	if err != nil {
 		log.Printf("Error querying similar songs: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found or database error."))
 		return
 	}
-	defer rows.Close()
 
 	var songs []SubsonicSong
-	for rows.Next() {
-		var id string
-		var title, artist, album, genre string
-		var playCount int
-		var duration int
-		var lastPlayed sql.NullString
-
-		if err := rows.Scan(&id, &title, &artist, &album, &playCount, &lastPlayed, &genre, &duration); err != nil {
-			log.Printf("Error scanning similar song: %v", err)
-			continue
-		}
-
+	for _, result := range results {
 		song := SubsonicSong{
-			ID:        id,
-			Title:     title,
-			Artist:    artist,
-			ArtistID:  GenerateArtistID(artist),
-			Album:     album,
-			Genre:     genre,
-			CoverArt:  id,
-			PlayCount: playCount,
-			Duration:  duration,
+			ID:         result.ID,
+			Title:      result.Title,
+			Artist:     result.Artist,
+			ArtistID:   GenerateArtistID(result.Artist),
+			Album:      result.Album,
+			Genre:      result.Genre,
+			CoverArt:   result.ID,
+			PlayCount:  result.PlayCount,
+			Duration:   result.Duration,
+			LastPlayed: result.LastPlayed,
 		}
-
-		if lastPlayed.Valid {
-			song.LastPlayed = lastPlayed.String
-		}
-
 		songs = append(songs, song)
 	}
 
@@ -191,8 +130,7 @@ func subsonicDownload(c *gin.Context) {
 	log.Printf("download called for ID: %s", id)
 
 	// Check if this is a single song or an album reference
-	var path, albumName, artistName string
-	err := db.QueryRow("SELECT path, album, artist FROM songs WHERE id = ? AND cancelled = 0", id).Scan(&path, &albumName, &artistName)
+	albumName, artistName, _, path, err := QueryAlbumDetails(db, id)
 	if err != nil {
 		log.Printf("Song not found for download: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))
@@ -200,8 +138,7 @@ func subsonicDownload(c *gin.Context) {
 	}
 
 	// Check if request wants the whole album by checking for multiple songs
-	var albumSongCount int
-	err = db.QueryRow("SELECT COUNT(*) FROM songs WHERE album = ? AND artist = ? AND cancelled = 0", albumName, artistName).Scan(&albumSongCount)
+	albumSongCount, err := QueryAlbumSongCount(db, albumName, artistName)
 	if err != nil || albumSongCount <= 1 {
 		// Single song download
 		downloadSingleFile(c, path)
@@ -331,19 +268,11 @@ func subsonicGetAlbumInfo(c *gin.Context) {
 	log.Printf("getAlbumInfo called for ID: %s", id)
 
 	// Get album info from a song in the album
-	var albumName, artistName, genre string
-	err := db.QueryRow("SELECT album, artist, COALESCE(genre, '') FROM songs WHERE id = ? AND cancelled = 0", id).Scan(&albumName, &artistName, &genre)
+	albumName, artistName, _, _, err := QueryAlbumDetails(db, id)
 	if err != nil {
 		log.Printf("Album not found for getAlbumInfo: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Album not found."))
 		return
-	}
-
-	// Count songs in album
-	var songCount int
-	err = db.QueryRow("SELECT COUNT(*) FROM songs WHERE album = ? AND artist = ? AND cancelled = 0", albumName, artistName).Scan(&songCount)
-	if err != nil {
-		songCount = 0
 	}
 
 	// Build album info response

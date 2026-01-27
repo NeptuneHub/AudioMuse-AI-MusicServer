@@ -146,7 +146,7 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
 
 export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQueue, onRemoveFromQueue, playQueue = [], currentSong, isAudioPlaying = false, onNavigate, audioMuseUrl, onInstantMix, onAddToPlaylist }) {
     const [songs, setSongs] = useState([]);
-    const [allSongs, setAllSongs] = useState([]); // For client-side pagination
+    const [allSongs, setAllSongs] = useState([]); // All loaded songs from backend
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
@@ -164,9 +164,10 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     const isPlaylistView = !!filter?.playlistId;
     const isRadioView = !!filter?.isRadio;
     const PAGE_SIZE = 10;
-    
+
     // For discovery views, load 200 songs immediately instead of paginating
     const DISCOVERY_LOAD_SIZE = 200;
+    const DISPLAY_BATCH_SIZE = 200; // Show 200 songs at a time in the UI
     
     // Check if playlist is read-only (owned by another user)
     const isPlaylistReadOnly = isPlaylistView && playlistOwner && credentials?.username && playlistOwner !== credentials.username;
@@ -328,6 +329,30 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
 
         const fetcher = async () => {
             try {
+                // Handle "All Songs" view - fetch songs with pagination using search3
+                if (!filter && !searchTerm && discoveryView === 'all' && !selectedGenre && !isStarredFilter) {
+                    const offset = allSongs.length;
+                    // Use search3.view with a wildcard to get all songs with pagination
+                    const data = await subsonicFetch('search3.view', {
+                        query: ' ',  // Space character matches all songs
+                        songCount: DISPLAY_BATCH_SIZE,
+                        songOffset: offset,
+                        artistCount: 0,
+                        albumCount: 0
+                    });
+                    const newSongs = data.searchResult3?.song || [];
+                    const songsArray = Array.isArray(newSongs) ? newSongs : [newSongs].filter(Boolean);
+
+                    const combined = [...allSongs, ...songsArray];
+                    setAllSongs(combined);
+                    setSongs(combined);
+
+                    // Check if we have more songs
+                    setHasMore(songsArray.length === DISPLAY_BATCH_SIZE);
+                    setIsLoading(false);
+                    return;
+                }
+
                 // Handle discovery views - load all at once (up to 200)
                 if (!filter && !searchTerm && discoveryView !== 'all') {
                     let newSongs = [];
@@ -462,17 +487,31 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     }, [filter, searchTerm, allSongs, isLoading, hasMore, selectedGenre, credentials?.username, discoveryView]);
 
     useEffect(() => {
-        if (songs.length === 0 && hasMore && !isStarredFilter && (searchTerm.length >= 3 || filter || selectedGenre || discoveryView !== 'all')) {
-            const timer = setTimeout(() => loadMoreSongs(), 300);
-            return () => clearTimeout(timer);
+        // Load initial songs for various views
+        if (songs.length === 0 && hasMore && !isStarredFilter) {
+            // Load for: search results, filters, genre selection, OR the "All Songs" view
+            if (searchTerm.length >= 3 || filter || selectedGenre || discoveryView === 'all') {
+                const timer = setTimeout(() => loadMoreSongs(), 300);
+                return () => clearTimeout(timer);
+            }
         }
     }, [songs.length, hasMore, loadMoreSongs, searchTerm, filter, selectedGenre, discoveryView, isStarredFilter]);
 
-    const lastSongElementRef = useCallback(() => {
-        // Infinite scroll disabled - all songs load at once now
-        // No-op function kept for compatibility with existing code
-        return null;
-    }, []);
+    // Infinite scroll - load more when user scrolls near the bottom
+    const observerRef = useRef();
+    const lastSongElementRef = useCallback((node) => {
+        if (isLoading) return;
+        if (observerRef.current) observerRef.current.disconnect();
+
+        observerRef.current = new IntersectionObserver(entries => {
+            // Only trigger for "All Songs" view - other views load all at once
+            if (entries[0].isIntersecting && hasMore && discoveryView === 'all' && !filter && !searchTerm && !selectedGenre && !isStarredFilter) {
+                loadMoreSongs();
+            }
+        });
+
+        if (node) observerRef.current.observe(node);
+    }, [isLoading, hasMore, loadMoreSongs, discoveryView, filter, searchTerm, selectedGenre, isStarredFilter]);
 
     const handlePlayAlbum = () => {
         // Always use the full list of songs
@@ -819,7 +858,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                         <thead className="text-xs text-gray-400 uppercase bg-dark-750 border-b border-dark-600">
                             <tr>
                                 <th className="px-4 py-3 w-12"></th>
-                                {discoveryView === 'all' && <th className="px-4 py-3 w-12 text-center">⭐</th>}
+                                <th className="px-4 py-3 w-12 text-center">⭐</th>
                                 <th className="px-4 py-3">Title</th>
                                 <th className="px-4 py-3 hidden sm:table-cell">Artist</th>
                                 <th className="px-4 py-3 hidden md:table-cell">Album</th>
@@ -868,23 +907,21 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                 )}
                                             </button>
                                         </td>
-                                        {discoveryView === 'all' && (
-                                            <td className="px-4 py-4 text-center">
-                                                <button
-                                                    onClick={() => handleStarToggle(song)}
-                                                    className={`p-1.5 rounded-lg border-2 transition-all hover:scale-105 flex items-center justify-center ${
-                                                        song.starred 
-                                                            ? 'border-yellow-500 text-yellow-400 bg-yellow-500/10 shadow-glow' 
-                                                            : 'border-gray-600 text-gray-500 hover:border-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/10'
-                                                    }`}
-                                                    title={song.starred ? 'Remove from favorites' : 'Add to favorites'}
-                                                >
-                                                    <svg className="w-5 h-5" fill={song.starred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                                                    </svg>
-                                                </button>
-                                            </td>
-                                        )}
+                                        <td className="px-4 py-4 text-center">
+                                            <button
+                                                onClick={() => handleStarToggle(song)}
+                                                className={`p-1.5 rounded-lg border-2 transition-all hover:scale-105 flex items-center justify-center ${
+                                                    song.starred
+                                                        ? 'border-yellow-500 text-yellow-400 bg-yellow-500/10 shadow-glow'
+                                                        : 'border-gray-600 text-gray-500 hover:border-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/10'
+                                                }`}
+                                                title={song.starred ? 'Remove from favorites' : 'Add to favorites'}
+                                            >
+                                                <svg className="w-5 h-5" fill={song.starred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                                                </svg>
+                                            </button>
+                                        </td>
                                         <td className={`px-4 py-4 font-medium ${isPlaying ? 'text-accent-400' : 'text-white'}`}>
                                             <div className="flex items-center gap-2">
                                                 {song.title}
@@ -1199,6 +1236,9 @@ export function Albums({ credentials, filter, onNavigate }) {
 
     // Load album counts
     useEffect(() => {
+        // Only update count from getMusicCounts when NOT using starred filter
+        if (isStarredFilter) return;
+
         const loadCounts = async () => {
             try {
                 const counts = await getMusicCounts(selectedGenre);
@@ -1208,7 +1248,7 @@ export function Albums({ credentials, filter, onNavigate }) {
             }
         };
         loadCounts();
-    }, [selectedGenre])
+    }, [selectedGenre, isStarredFilter])
 
 
     const loadMoreAlbums = useCallback(() => {
@@ -1225,6 +1265,15 @@ export function Albums({ credentials, filter, onNavigate }) {
                     const params = { type: 'starred', size: PAGE_SIZE, offset: albums.length };
                     const data = await subsonicFetch('getAlbumList2.view', params);
                     albumList = data.albumList2?.album || [];
+
+                    // Update total count from starred albums on first load
+                    if (albums.length === 0) {
+                        // Get the total count of starred albums
+                        const starredData = await getStarredSongs();
+                        const starredAlbumList = starredData.starred2?.album || [];
+                        const totalStarred = Array.isArray(starredAlbumList) ? starredAlbumList.length : (starredAlbumList ? 1 : 0);
+                        setTotalCount(totalStarred);
+                    }
                 } else if (query) {
                     // Only search if query is >= 3 characters
                     if (query.length < 3) {
