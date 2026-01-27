@@ -147,11 +147,11 @@ func getAlbumDisplayArtist(db *sql.DB, albumName, albumPath string) (string, err
 				ELSE NULL
 			END as display_artist
 		FROM songs
-		WHERE album = ? AND album_path = ? AND cancelled = 0
+		WHERE album = ? AND (album_path = ? OR (album_path IS NULL AND ? = '')) AND cancelled = 0
 		ORDER BY display_artist COLLATE NOCASE
 	`
 
-	rows, err := db.Query(query, albumName, albumPath)
+	rows, err := db.Query(query, albumName, albumPath, albumPath)
 	if err != nil {
 		return "Unknown Artist", err
 	}

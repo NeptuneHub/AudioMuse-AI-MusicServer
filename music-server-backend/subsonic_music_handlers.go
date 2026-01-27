@@ -1641,12 +1641,17 @@ func subsonicGetStarred(c *gin.Context) {
 	user := c.MustGet("user").(User)
 	log.Printf("subsonicGetStarred called by user: %s (ID: %d)", user.Username, user.ID)
 
-	// Get starred songs
+	// Get starred songs (deduplicated by song_id in case of duplicate starred_songs entries)
 	query := `
 		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, COALESCE(s.genre, '') as genre, COALESCE(s.duration, 0) as duration
 		FROM songs s
-		INNER JOIN starred_songs ss ON s.id = ss.song_id
-		WHERE ss.user_id = ? AND s.cancelled = 0
+		INNER JOIN (
+			SELECT song_id, MAX(starred_at) as starred_at
+			FROM starred_songs
+			WHERE user_id = ?
+			GROUP BY song_id
+		) ss ON s.id = ss.song_id
+		WHERE s.cancelled = 0
 		ORDER BY ss.starred_at DESC
 	`
 

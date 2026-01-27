@@ -165,16 +165,8 @@ func subsonicSearch2(c *gin.Context) {
 	if artistCount > 0 {
 		searchTerm := ""
 		if !isShortQuery && query != "" && query != "*" {
-			// Build search term with AND logic for multiple words
-			var conditions []string
-			for _, word := range searchWords {
-				conditions = append(conditions, "%"+word+"%")
-			}
-			// For multi-word queries, we'll need to filter in Go
-			// For now, use first word as primary filter
-			if len(searchWords) > 0 {
-				searchTerm = searchWords[0]
-			}
+			// Pass full query so DB enforces multi-word AND semantics
+			searchTerm = query
 		}
 
 		artists, err := QueryArtists(db, ArtistQueryOptions{
@@ -188,20 +180,6 @@ func subsonicSearch2(c *gin.Context) {
 		} else {
 			seenArtists := make(map[string]bool)
 			for _, artist := range artists {
-				// Apply multi-word filter if needed
-				if !isShortQuery && len(searchWords) > 1 {
-					match := true
-					for _, word := range searchWords {
-						if !strings.Contains(strings.ToLower(artist.Name), strings.ToLower(word)) {
-							match = false
-							break
-						}
-					}
-					if !match {
-						continue
-					}
-				}
-
 				key := normalizeKey(artist.Name)
 				if seenArtists[key] {
 					continue
@@ -345,10 +323,8 @@ func subsonicSearch2(c *gin.Context) {
 		user := c.MustGet("user").(User)
 		searchTerm := ""
 		if !isShortQuery && query != "" {
-			// For multi-word queries, use first word as primary filter
-			if len(searchWords) > 0 {
-				searchTerm = searchWords[0]
-			}
+			// Pass full query so DB enforces multi-word AND semantics
+			searchTerm = query
 		}
 
 		songs, err := QuerySongs(db, SongQueryOptions{
@@ -364,21 +340,6 @@ func subsonicSearch2(c *gin.Context) {
 			log.Printf("[ERROR] subsonicSearch2: Song query failed: %v", err)
 		} else {
 			for _, songFromDb := range songs {
-				// Apply multi-word filter if needed
-				if !isShortQuery && len(searchWords) > 1 {
-					match := true
-					for _, word := range searchWords {
-						lw := strings.ToLower(word)
-						if !strings.Contains(strings.ToLower(songFromDb.Title), lw) &&
-							!strings.Contains(strings.ToLower(songFromDb.Artist), lw) {
-							match = false
-							break
-						}
-					}
-					if !match {
-						continue
-					}
-				}
 
 				song := SubsonicSong{
 					ID:        songFromDb.ID,
@@ -524,10 +485,8 @@ func subsonicSearch3(c *gin.Context) {
 	if artistCount > 0 {
 		searchTerm := ""
 		if !isShortQuery && query != "" && query != "*" {
-			// For multi-word queries, use first word as primary filter
-			if len(searchWords) > 0 {
-				searchTerm = searchWords[0]
-			}
+			// Pass full query so DB enforces multi-word AND semantics
+			searchTerm = query
 		}
 
 		artists, err := QueryArtists(db, ArtistQueryOptions{
@@ -540,20 +499,6 @@ func subsonicSearch3(c *gin.Context) {
 			log.Printf("[ERROR] subsonicSearch3: Artist query failed: %v", err)
 		} else {
 			for _, artist := range artists {
-				// Apply multi-word filter if needed
-				if !isShortQuery && len(searchWords) > 1 {
-					match := true
-					for _, word := range searchWords {
-						if !strings.Contains(strings.ToLower(artist.Name), strings.ToLower(word)) {
-							match = false
-							break
-						}
-					}
-					if !match {
-						continue
-					}
-				}
-
 				artistID := GenerateArtistID(artist.Name)
 				result.Artists = append(result.Artists, SubsonicArtist{
 					ID:         artistID,
@@ -693,10 +638,8 @@ func subsonicSearch3(c *gin.Context) {
 	if songCount > 0 {
 		searchTerm := ""
 		if !isShortQuery && query != "" {
-			// For multi-word queries, use first word as primary filter
-			if len(searchWords) > 0 {
-				searchTerm = searchWords[0]
-			}
+			// Pass full query so DB enforces multi-word AND semantics
+			searchTerm = query
 		}
 
 		songs, err := QuerySongs(db, SongQueryOptions{
@@ -712,21 +655,6 @@ func subsonicSearch3(c *gin.Context) {
 			log.Printf("[ERROR] subsonicSearch3: Song query failed: %v", err)
 		} else {
 			for _, songResult := range songs {
-				// Apply multi-word filter if needed
-				if !isShortQuery && len(searchWords) > 1 {
-					match := true
-					for _, word := range searchWords {
-						lw := strings.ToLower(word)
-						if !strings.Contains(strings.ToLower(songResult.Title), lw) &&
-							!strings.Contains(strings.ToLower(songResult.Artist), lw) {
-							match = false
-							break
-						}
-					}
-					if !match {
-						continue
-					}
-				}
 
 				song := SubsonicSong{
 					ID:        songResult.ID,

@@ -811,6 +811,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             setAllSongs(songList);
                             setSongs(songList.slice(0, PAGE_SIZE));
                             setHasMore(songList.length > PAGE_SIZE);
+                            // Ensure total count reflects unique starred songs (deduplicated list)
+                            setTotalCount(songList.length);
                         } catch (err) {
                             setError('Failed to load starred songs: ' + err.message);
                             setIsStarredFilter(false);

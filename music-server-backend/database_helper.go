@@ -137,16 +137,23 @@ func QueryArtists(db *sql.DB, opts ArtistQueryOptions) ([]ArtistResult, error) {
 		whereClauses = append(whereClauses, "artist != ''")
 	}
 
-	// Search filter
+	// Search filter (support multi-word AND semantics)
 	if opts.SearchTerm != "" {
+		words := strings.Fields(opts.SearchTerm)
+		var termClauses []string
 		if opts.UseEffectiveArtist {
-			whereClauses = append(whereClauses, `(artist LIKE ? OR album_artist LIKE ?)`)
-			searchPattern := "%" + opts.SearchTerm + "%"
-			args = append(args, searchPattern, searchPattern)
+			for _, w := range words {
+				termClauses = append(termClauses, "(artist LIKE ? OR album_artist LIKE ?)")
+				p := "%" + w + "%"
+				args = append(args, p, p)
+			}
 		} else {
-			whereClauses = append(whereClauses, "artist LIKE ?")
-			args = append(args, "%"+opts.SearchTerm+"%")
+			for _, w := range words {
+				termClauses = append(termClauses, "artist LIKE ?")
+				args = append(args, "%"+w+"%")
+			}
 		}
+		whereClauses = append(whereClauses, strings.Join(termClauses, " AND "))
 	}
 
 	query.WriteString(" WHERE " + strings.Join(whereClauses, " AND "))
@@ -269,10 +276,14 @@ func QueryAlbums(db *sql.DB, opts AlbumQueryOptions) ([]AlbumResult, error) {
 	}
 
 	if opts.SearchTerm != "" {
-		whereClauses = append(whereClauses,
-			`(album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)`)
-		searchPattern := "%" + opts.SearchTerm + "%"
-		args = append(args, searchPattern, searchPattern, searchPattern)
+		words := strings.Fields(opts.SearchTerm)
+		var termClauses []string
+		for _, w := range words {
+			termClauses = append(termClauses, "(album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)")
+			p := "%" + w + "%"
+			args = append(args, p, p, p)
+		}
+		whereClauses = append(whereClauses, strings.Join(termClauses, " AND "))
 	}
 
 	query.WriteString(" WHERE " + strings.Join(whereClauses, " AND "))
@@ -477,9 +488,14 @@ func QuerySongs(db *sql.DB, opts SongQueryOptions) ([]SongResult, error) {
 	}
 
 	if opts.SearchTerm != "" {
-		whereClauses = append(whereClauses, "(s.title LIKE ? OR s.artist LIKE ? OR s.album LIKE ?)")
-		searchPattern := "%" + opts.SearchTerm + "%"
-		args = append(args, searchPattern, searchPattern, searchPattern)
+		words := strings.Fields(opts.SearchTerm)
+		var termClauses []string
+		for _, w := range words {
+			termClauses = append(termClauses, "(s.title LIKE ? OR s.artist LIKE ? OR s.album LIKE ?)")
+			p := "%" + w + "%"
+			args = append(args, p, p, p)
+		}
+		whereClauses = append(whereClauses, strings.Join(termClauses, " AND "))
 	}
 
 	if len(opts.IDs) > 0 {
@@ -729,9 +745,9 @@ func CountAlbums(db *sql.DB, searchTerm string) (int, error) {
 			WHEN album_path IS NOT NULL AND album_path != ''
 			THEN album_path || '|||' || album ELSE album END)
 		FROM songs
-		WHERE (album LIKE ? OR artist LIKE ?) AND album != '' AND cancelled = 0`
+		WHERE (album LIKE ? OR artist LIKE ? OR album_artist LIKE ?) AND album != '' AND cancelled = 0`
 		searchPattern := "%" + searchTerm + "%"
-		args = []interface{}{searchPattern, searchPattern}
+		args = []interface{}{searchPattern, searchPattern, searchPattern}
 	} else {
 		query = `SELECT COUNT(DISTINCT CASE
 			WHEN album_path IS NOT NULL AND album_path != ''
