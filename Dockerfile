@@ -16,7 +16,8 @@ RUN go mod tidy
 RUN CGO_ENABLED=1 go build -o music-server .
 
 # STAGE 3: Build React Frontend for Music Server
-FROM node:20-bullseye AS frontend-builder
+# Use bookworm to stay consistent with backend-builder and avoid libc mismatches
+FROM node:20-bookworm AS frontend-builder
 WORKDIR /src
 COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer .
 WORKDIR /src/music-server-frontend
@@ -26,7 +27,8 @@ RUN npm install
 RUN npm run build
 
 # STAGE 4: Final runtime image
-FROM node:20-bullseye
+# runtime must have at least the same libc version as the Go build stage
+FROM node:20-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
