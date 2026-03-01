@@ -7,7 +7,7 @@ WORKDIR /src
 COPY . ./AudioMuse-AI-MusicServer
 
 # STAGE 2: Build Go Backend for Music Server
-FROM golang:1.24-bullseye AS backend-builder
+FROM golang:1.25-bookworm AS backend-builder
 WORKDIR /src
 COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer .
 WORKDIR /src/music-server-backend
