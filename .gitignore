@@ -97,8 +97,6 @@ music-server-backend/music-server
 music-server-backend/hls_cache/
 
 #go
-go.sum
-go.mod
 
 #npm
 music-server-frontend/package-lock.json
