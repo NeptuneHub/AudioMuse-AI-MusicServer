@@ -12,6 +12,7 @@ WORKDIR /src
 COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer .
 WORKDIR /src/music-server-backend
 RUN go mod init music-server-backend || true
+RUN go get github.com/gin-gonic/gin@v1.10.0
 RUN go mod tidy
 RUN CGO_ENABLED=1 go build -o music-server .
 
