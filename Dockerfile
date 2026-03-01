@@ -11,8 +11,8 @@ FROM golang:1.25-bookworm AS backend-builder
 WORKDIR /src
 COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer .
 WORKDIR /src/music-server-backend
-RUN go mod init music-server-backend || true
-RUN go mod tidy
+# dependencies are tracked in go.mod/go.sum, so just download them
+RUN go mod download
 RUN CGO_ENABLED=1 go build -o music-server .
 
 # STAGE 3: Build React Frontend for Music Server
