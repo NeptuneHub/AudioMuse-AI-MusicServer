@@ -34,6 +34,30 @@ func setupTestDB(t *testing.T) *sql.DB {
 		db.Close()
 		t.Fatalf("failed to create songs table: %v", err)
 	}
+	// create FTS virtual table for tests and triggers so inserts update it automatically
+	_, err = db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts USING fts5(title, artist, album, album_artist, content='songs', content_rowid='id');`)
+	if err != nil {
+		// fts5 not available in this SQLite build; tests will still exercise
+		// LIKE-based fallback paths.
+		return db
+	}
+	_, err = db.Exec(`
+		CREATE TRIGGER IF NOT EXISTS songs_ai AFTER INSERT ON songs BEGIN
+			INSERT INTO songs_fts(rowid, title, artist, album, album_artist)
+			VALUES (new.id, new.title, new.artist, new.album, new.album_artist);
+		END;
+	`)
+	// ignore trigger errors
+	_, _ = db.Exec(`
+		CREATE TRIGGER IF NOT EXISTS songs_au AFTER UPDATE ON songs BEGIN
+			UPDATE songs_fts SET title=new.title, artist=new.artist, album=new.album, album_artist=new.album_artist WHERE rowid=old.id;
+		END;
+	`)
+	_, _ = db.Exec(`
+		CREATE TRIGGER IF NOT EXISTS songs_ad AFTER DELETE ON songs BEGIN
+			DELETE FROM songs_fts WHERE rowid=old.id;
+		END;
+	`)
 	return db
 }
 
@@ -88,6 +112,23 @@ func TestMultiWordArtistSearchAND(t *testing.T) {
 
 	if len(artists2) < 2 {
 		t.Fatalf("expected at least 2 matches for 'Beatles', got %d", len(artists2))
+	}
+}
+
+func TestPrefixSearchMatches(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	_, _ = db.Exec(`INSERT INTO songs (id, title, artist) VALUES (?, ?, ?)`, "p1", "x", "The Beatles")
+	_, _ = db.Exec(`INSERT INTO songs (id, title, artist) VALUES (?, ?, ?)`, "p2", "y", "Beatles")
+
+	// searching for 'bea' should match both entries via FTS prefix
+	artists, err := QueryArtists(db, ArtistQueryOptions{SearchTerm: "bea"})
+	if err != nil {
+		t.Fatalf("QueryArtists failed: %v", err)
+	}
+	if len(artists) < 2 {
+		t.Fatalf("expected prefix search to return both Beatles entries, got %d", len(artists))
 	}
 }
 

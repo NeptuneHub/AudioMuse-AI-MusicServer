@@ -54,112 +54,40 @@ func subsonicSearch2(c *gin.Context) {
 	// --- Count total results (not paginated) ---
 	// Count total artists (search artist field only)
 	if artistCount > 0 {
-		seenArtists := make(map[string]bool)
-		var rows *sql.Rows
-		var err error
-		if isShortQuery || query == "" || query == "*" {
-			rows, err = db.Query("SELECT DISTINCT artist FROM songs WHERE artist != '' AND cancelled = 0")
-		} else {
-			var conditions []string
-			var args []interface{}
-			for _, word := range searchWords {
-				conditions = append(conditions, "artist LIKE ?")
-				like := "%" + word + "%"
-				args = append(args, like)
-			}
-			q := "SELECT DISTINCT artist FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND artist != '' AND cancelled = 0"
-			rows, err = db.Query(q, args...)
+		// derive same searchTerm logic as later query block
+		searchTerm := ""
+		if !isShortQuery && query != "" && query != "*" {
+			searchTerm = query
 		}
+		allArtists, err := QueryArtists(db, ArtistQueryOptions{
+			SearchTerm:    searchTerm,
+			IncludeCounts: false,
+		})
 		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var name string
-				if err := rows.Scan(&name); err != nil {
-					continue
-				}
-				name = normalizeArtistName(name)
-				key := normalizeKey(name)
-				seenArtists[key] = true
-			}
+			result.ArtistCount = len(allArtists)
 		}
-		result.ArtistCount = len(seenArtists)
 	}
 
 	// Count total albums (deduplicate by album + album_path)
 	if albumCount > 0 {
-		seenAlbums := make(map[string]bool)
-		var rows *sql.Rows
-		var err error
-		if isShortQuery {
-			rows, err = db.Query("SELECT album, album_path FROM songs WHERE album != '' AND cancelled = 0")
-		} else {
-			// For counting, iterate distinct album groups and apply display-artist filter per-album
-			rows, err = db.Query("SELECT album, MIN(NULLIF(album_path, '')) as album_path FROM songs WHERE album != '' AND cancelled = 0 GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END ORDER BY album")
-			if err == nil {
-				defer rows.Close()
-				for rows.Next() {
-					var albumName, albumPath string
-					if err := rows.Scan(&albumName, &albumPath); err != nil {
-						continue
-					}
-					albumName = strings.TrimSpace(albumName)
-					albumPath = strings.TrimSpace(albumPath)
-					if albumName == "" && albumPath == "" {
-						continue
-					}
-					// Compute display artist and only count album if display artist or album name match all search words
-					displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumPath)
-					match := true
-					for _, word := range searchWords {
-						lw := strings.ToLower(word)
-						if !strings.Contains(strings.ToLower(albumName), lw) && !strings.Contains(strings.ToLower(displayArtist), lw) {
-							match = false
-							break
-						}
-					}
-					if match {
-						key := normalizeKey(albumPath + "|||" + albumName)
-						seenAlbums[key] = true
-					}
-				}
-				// 'rows' already deferred closed above
-			}
+		searchTerm := ""
+		if !isShortQuery && query != "" && query != "*" {
+			searchTerm = query
 		}
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var albumName, albumPath string
-				if err := rows.Scan(&albumName, &albumPath); err != nil {
-					continue
-				}
-				albumName = strings.TrimSpace(albumName)
-				albumPath = strings.TrimSpace(albumPath)
-				if albumName == "" && albumPath == "" {
-					continue
-				}
-				key := normalizeKey(albumPath + "|||" + albumName)
-				seenAlbums[key] = true
-			}
+		if cnt, err := CountAlbums(db, searchTerm); err == nil {
+			result.AlbumCount = cnt
 		}
-		result.AlbumCount = len(seenAlbums)
 	} 
 
 	// Count total songs
 	if songCount > 0 {
-		var countQuery string
-		var countArgs []interface{}
-		if isShortQuery {
-			countQuery = "SELECT COUNT(*) FROM songs WHERE cancelled = 0"
-		} else {
-			var conditions []string
-			for _, word := range searchWords {
-				conditions = append(conditions, "(title LIKE ? OR artist LIKE ?)")
-				likeWord := "%" + word + "%"
-				countArgs = append(countArgs, likeWord, likeWord)
-			}
-			countQuery = "SELECT COUNT(*) FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND cancelled = 0"
+		searchTerm := ""
+		if !isShortQuery && query != "" && query != "*" {
+			searchTerm = query
 		}
-		db.QueryRow(countQuery, countArgs...).Scan(&result.SongCount)
+		if cnt, err := CountSongs(db, searchTerm); err == nil {
+			result.SongCount = cnt
+		}
 	}
 
 	// --- Enhanced Artist Search Logic ---

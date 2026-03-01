@@ -59,6 +59,38 @@ func migrateDB() error {
 	// --- SONGS TABLE ---
 	// ...existing code for songs table and per-column ensureColumnExists...
 
+	// Ensure full-text index exists for fast text searches (albums/artists/songs)
+	// attempt to create the FTS table; if the underlying SQLite does not
+	// support fts5 (common on macOS), simply log and continue.
+	if _, err = db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts \
+		USING fts5(title, artist, album, album_artist, content='songs', content_rowid='id');`); err != nil {
+		log.Printf("migrateDB: warning - could not create songs_fts virtual table (fts5 may be unavailable): %v", err)
+	} else {
+		// Triggers to keep FTS table in sync with songs data
+		if _, err = db.Exec(`
+			CREATE TRIGGER IF NOT EXISTS songs_ai AFTER INSERT ON songs BEGIN
+				INSERT INTO songs_fts(rowid, title, artist, album, album_artist)
+				VALUES (new.id, new.title, new.artist, new.album, new.album_artist);
+			END;
+		`); err != nil {
+			log.Printf("migrateDB: warning - could not create songs_ai trigger: %v", err)
+		}
+		if _, err = db.Exec(`
+			CREATE TRIGGER IF NOT EXISTS songs_au AFTER UPDATE ON songs BEGIN
+				UPDATE songs_fts SET title=new.title, artist=new.artist, album=new.album, album_artist=new.album_artist WHERE rowid=old.id;
+			END;
+		`); err != nil {
+			log.Printf("migrateDB: warning - could not create songs_au trigger: %v", err)
+		}
+		if _, err = db.Exec(`
+			CREATE TRIGGER IF NOT EXISTS songs_ad AFTER DELETE ON songs BEGIN
+				DELETE FROM songs_fts WHERE rowid=old.id;
+			END;
+		`); err != nil {
+			log.Printf("migrateDB: warning - could not create songs_ad trigger: %v", err)
+		}
+	}
+
 	// --- STARRED_SONGS TABLE ---
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS starred_songs (
 		user_id INTEGER NOT NULL,

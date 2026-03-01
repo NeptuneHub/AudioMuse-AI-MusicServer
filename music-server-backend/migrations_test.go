@@ -53,4 +53,16 @@ func TestMigrateDB_IdempotentAndCreatesExpectedTables(t *testing.T) {
 	if !cols2["starred_at"] {
 		t.Fatalf("expected starred_songs to have starred_at column, got cols=%v", cols2)
 	}
+
+	// Confirm FTS virtual table exists if SQLite supports it
+	var cnt int
+	err = db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='songs_fts'`).Scan(&cnt)
+	if err == nil {
+		if cnt == 0 {
+			t.Log("songs_fts table not present; likely FTS5 not supported in this build")
+		}
+	} else {
+		// some versions may return error if fts5 unrecognized; ignore
+		t.Logf("could not query sqlite_master for songs_fts: %v", err)
+	}
 }

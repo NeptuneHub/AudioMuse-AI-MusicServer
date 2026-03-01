@@ -90,6 +90,24 @@ type SongResult struct {
 // ============================================================================
 
 // QueryArtists fetches artists based on provided options
+func buildFTSQuery(term string) string {
+	if term == "" {
+		return ""
+	}
+	words := strings.Fields(term)
+	for i, w := range words {
+		// make each word a prefix query
+		words[i] = w + "*"
+	}
+	return strings.Join(words, " ")
+}
+
+func ftsAvailable(db *sql.DB) bool {
+	var count int
+	_ = db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='songs_fts'`).Scan(&count)
+	return count > 0
+}
+
 func QueryArtists(db *sql.DB, opts ArtistQueryOptions) ([]ArtistResult, error) {
 	var query strings.Builder
 	var args []interface{}
@@ -112,15 +130,15 @@ func QueryArtists(db *sql.DB, opts ArtistQueryOptions) ([]ArtistResult, error) {
 		// Select distinct artist field based on option
 		if opts.UseEffectiveArtist {
 			query.WriteString(`
-				SELECT DISTINCT
-					CASE
-						WHEN album_artist IS NOT NULL AND TRIM(album_artist) != ''
-							AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')
-						THEN album_artist
-						ELSE artist
-					END AS artist
-				FROM songs
-			`)
+			SELECT DISTINCT
+				CASE
+					WHEN album_artist IS NOT NULL AND TRIM(album_artist) != ''
+						AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')
+					THEN album_artist
+					ELSE artist
+				END AS artist
+			FROM songs
+		`)
 		} else {
 			query.WriteString(`SELECT DISTINCT artist FROM songs`)
 		}
@@ -137,23 +155,31 @@ func QueryArtists(db *sql.DB, opts ArtistQueryOptions) ([]ArtistResult, error) {
 		whereClauses = append(whereClauses, "artist != ''")
 	}
 
-	// Search filter (support multi-word AND semantics)
+	// Search filter (support multi-word AND semantics, prefer FTS when possible)
 	if opts.SearchTerm != "" {
-		words := strings.Fields(opts.SearchTerm)
-		var termClauses []string
-		if opts.UseEffectiveArtist {
-			for _, w := range words {
-				termClauses = append(termClauses, "(artist LIKE ? OR album_artist LIKE ?)")
-				p := "%" + w + "%"
-				args = append(args, p, p)
-			}
+		if ftsAvailable(db) {
+			// join FTS table and match
+			ftsQuery := buildFTSQuery(opts.SearchTerm)
+			query.WriteString(" JOIN songs_fts f ON f.rowid = songs.id")
+			whereClauses = append(whereClauses, "f MATCH ?")
+			args = append(args, ftsQuery)
 		} else {
-			for _, w := range words {
-				termClauses = append(termClauses, "artist LIKE ?")
-				args = append(args, "%"+w+"%")
+			words := strings.Fields(opts.SearchTerm)
+			var termClauses []string
+			if opts.UseEffectiveArtist {
+				for _, w := range words {
+					termClauses = append(termClauses, "(artist LIKE ? OR album_artist LIKE ?)")
+					p := "%" + w + "%"
+					args = append(args, p, p)
+				}
+			} else {
+				for _, w := range words {
+					termClauses = append(termClauses, "artist LIKE ?")
+					args = append(args, "%"+w+"%")
+				}
 			}
+			whereClauses = append(whereClauses, strings.Join(termClauses, " AND "))
 		}
-		whereClauses = append(whereClauses, strings.Join(termClauses, " AND "))
 	}
 
 	query.WriteString(" WHERE " + strings.Join(whereClauses, " AND "))
@@ -276,14 +302,21 @@ func QueryAlbums(db *sql.DB, opts AlbumQueryOptions) ([]AlbumResult, error) {
 	}
 
 	if opts.SearchTerm != "" {
-		words := strings.Fields(opts.SearchTerm)
-		var termClauses []string
-		for _, w := range words {
-			termClauses = append(termClauses, "(album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)")
-			p := "%" + w + "%"
-			args = append(args, p, p, p)
+		if ftsAvailable(db) {
+			// join FTS and filter
+			query.WriteString(" JOIN songs_fts f ON f.rowid = songs.id")
+			whereClauses = append(whereClauses, "f MATCH ?")
+			args = append(args, buildFTSQuery(opts.SearchTerm))
+		} else {
+			words := strings.Fields(opts.SearchTerm)
+			var termClauses []string
+			for _, w := range words {
+				termClauses = append(termClauses, "(album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)")
+				p := "%" + w + "%"
+				args = append(args, p, p, p)
+			}
+			whereClauses = append(whereClauses, strings.Join(termClauses, " AND "))
 		}
-		whereClauses = append(whereClauses, strings.Join(termClauses, " AND "))
 	}
 
 	query.WriteString(" WHERE " + strings.Join(whereClauses, " AND "))
@@ -488,14 +521,20 @@ func QuerySongs(db *sql.DB, opts SongQueryOptions) ([]SongResult, error) {
 	}
 
 	if opts.SearchTerm != "" {
-		words := strings.Fields(opts.SearchTerm)
-		var termClauses []string
-		for _, w := range words {
-			termClauses = append(termClauses, "(s.title LIKE ? OR s.artist LIKE ? OR s.album LIKE ?)")
-			p := "%" + w + "%"
-			args = append(args, p, p, p)
+		if ftsAvailable(db) {
+			query.WriteString(" JOIN songs_fts f ON f.rowid = s.id")
+			whereClauses = append(whereClauses, "f MATCH ?")
+			args = append(args, buildFTSQuery(opts.SearchTerm))
+		} else {
+			words := strings.Fields(opts.SearchTerm)
+			var termClauses []string
+			for _, w := range words {
+				termClauses = append(termClauses, "(s.title LIKE ? OR s.artist LIKE ? OR s.album LIKE ?)")
+				p := "%" + w + "%"
+				args = append(args, p, p, p)
+			}
+			whereClauses = append(whereClauses, strings.Join(termClauses, " AND "))
 		}
-		whereClauses = append(whereClauses, strings.Join(termClauses, " AND "))
 	}
 
 	if len(opts.IDs) > 0 {
@@ -719,9 +758,14 @@ func CountSongs(db *sql.DB, searchTerm string) (int, error) {
 	var args []interface{}
 
 	if searchTerm != "" {
-		query = `SELECT COUNT(*) FROM songs WHERE (title LIKE ? OR artist LIKE ? OR album LIKE ?) AND cancelled = 0`
-		searchPattern := "%" + searchTerm + "%"
-		args = []interface{}{searchPattern, searchPattern, searchPattern}
+		if ftsAvailable(db) {
+			query = `SELECT COUNT(*) FROM songs JOIN songs_fts f ON f.rowid = songs.id WHERE f MATCH ? AND cancelled = 0`
+			args = []interface{}{buildFTSQuery(searchTerm)}
+		} else {
+			query = `SELECT COUNT(*) FROM songs WHERE (title LIKE ? OR artist LIKE ? OR album LIKE ?) AND cancelled = 0`
+			searchPattern := "%" + searchTerm + "%"
+			args = []interface{}{searchPattern, searchPattern, searchPattern}
+		}
 	} else {
 		query = `SELECT COUNT(*) FROM songs WHERE cancelled = 0`
 	}
@@ -773,13 +817,22 @@ func CountAlbums(db *sql.DB, searchTerm string) (int, error) {
 	var args []interface{}
 
 	if searchTerm != "" {
-		query = `SELECT COUNT(DISTINCT CASE
-			WHEN album_path IS NOT NULL AND album_path != ''
-			THEN album_path || '|||' || album ELSE album END)
-		FROM songs
-		WHERE (album LIKE ? OR artist LIKE ? OR album_artist LIKE ?) AND album != '' AND cancelled = 0`
-		searchPattern := "%" + searchTerm + "%"
-		args = []interface{}{searchPattern, searchPattern, searchPattern}
+		if ftsAvailable(db) {
+			query = `SELECT COUNT(DISTINCT CASE
+				WHEN album_path IS NOT NULL AND album_path != ''
+				THEN album_path || '|||' || album ELSE album END)
+			FROM songs JOIN songs_fts f ON f.rowid = songs.id
+			WHERE f MATCH ? AND album != '' AND cancelled = 0`
+			args = []interface{}{buildFTSQuery(searchTerm)}
+		} else {
+			query = `SELECT COUNT(DISTINCT CASE
+				WHEN album_path IS NOT NULL AND album_path != ''
+				THEN album_path || '|||' || album ELSE album END)
+			FROM songs
+			WHERE (album LIKE ? OR artist LIKE ? OR album_artist LIKE ?) AND album != '' AND cancelled = 0`
+			searchPattern := "%" + searchTerm + "%"
+			args = []interface{}{searchPattern, searchPattern, searchPattern}
+		}
 	} else {
 		query = `SELECT COUNT(DISTINCT CASE
 			WHEN album_path IS NOT NULL AND album_path != ''
