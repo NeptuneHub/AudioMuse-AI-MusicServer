@@ -49,7 +49,7 @@ func CleaningStartHandler(c *gin.Context) {
 
 	// Respect context cancellation from the incoming request
 	ctx := c.Request.Context()
-	reqOut, err := http.NewRequestWithContext(ctx, "POST", aiURL, bytes.NewReader(body))
+	reqOut, err := newAudioMuseRequest(ctx, "POST", aiURL, bytes.NewReader(body))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build request to AudioMuse-AI"})
 		return

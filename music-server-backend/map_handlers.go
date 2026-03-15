@@ -54,7 +54,7 @@ func MapHandler(c *gin.Context) {
 	log.Printf("🔄 Fetching FRESH map data from AudioMuse-AI: %s", final)
 
 	// Create request with explicit no-cache headers
-	req, err := http.NewRequest("GET", final, nil)
+	req, err := newAudioMuseRequest(c.Request.Context(), "GET", final, nil)
 	if err != nil {
 		log.Printf("❌ Error creating request to AudioMuse-AI /api/map: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
@@ -127,7 +127,14 @@ func VoyagerSearchTracksHandler(c *gin.Context) {
 		final = final + "?" + c.Request.URL.RawQuery
 	}
 
-	resp, err := http.Get(final)
+	req, err := newAudioMuseRequest(c.Request.Context(), "GET", final, nil)
+	if err != nil {
+		log.Printf("Error creating request to AudioMuse-AI voyager search: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("Error calling AudioMuse-AI voyager search: %v", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to contact AudioMuse-AI Core"})

@@ -56,7 +56,14 @@ func subsonicGetSimilarArtists2(c *gin.Context) {
 
 	log.Printf("Calling AudioMuse-AI core: %s", audioMuseURL)
 
-	resp, err := http.Get(audioMuseURL)
+	req, err := newAudioMuseRequest(c.Request.Context(), "GET", audioMuseURL, nil)
+	if err != nil {
+		log.Printf("Error creating request to AudioMuse-AI core: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to fetch similar artists from AI service."))
+		return
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("Error calling AudioMuse-AI core: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to fetch similar artists from AI service."))

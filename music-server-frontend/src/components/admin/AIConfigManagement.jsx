@@ -3,6 +3,7 @@ import { subsonicFetch } from '../../api';
 
 function AIConfigManagement({ onConfigChange }) {
     const [audiomuseUrl, setAudiomuseUrl] = useState('');
+    const [apiToken, setApiToken] = useState('');
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
 
@@ -17,7 +18,9 @@ function AIConfigManagement({ onConfigChange }) {
             const configList = data?.configurations?.configuration || [];
             const allConfigs = Array.isArray(configList) ? configList : [configList].filter(Boolean);
             const urlConfig = allConfigs.find(c => c.name === 'audiomuse_ai_core_url');
+            const tokenConfig = allConfigs.find(c => c.name === 'audiomuse_ai_api_token');
             setAudiomuseUrl(urlConfig?.value || '');
+            setApiToken(tokenConfig?.value || '');
         } catch (err) {
             setError(err.message || 'Failed to fetch configuration');
         }
@@ -32,11 +35,12 @@ function AIConfigManagement({ onConfigChange }) {
         setMessage('');
         try {
             await subsonicApiRequest('setConfiguration.view', { key: 'audiomuse_ai_core_url', value: audiomuseUrl });
-            setMessage('URL saved successfully!');
+            await subsonicApiRequest('setConfiguration.view', { key: 'audiomuse_ai_api_token', value: apiToken });
+            setMessage('Configuration saved successfully!');
             onConfigChange();
             setTimeout(() => setMessage(''), 3000);
         } catch (err) {
-            setError(err.message || 'Failed to save URL.');
+            setError(err.message || 'Failed to save configuration.');
         }
     };
 
@@ -51,6 +55,17 @@ function AIConfigManagement({ onConfigChange }) {
                     value={audiomuseUrl}
                     onChange={(e) => setAudiomuseUrl(e.target.value)}
                     placeholder="http://localhost:8000"
+                    className="w-full p-2 bg-gray-700 rounded border border-gray-600"
+                />
+            </div>
+            <div className="space-y-2 mt-4">
+                <label htmlFor="audiomuse-token" className="block text-sm font-medium text-gray-300">AudioMuse-AI API Token (optional)</label>
+                <input
+                    type="password"
+                    id="audiomuse-token"
+                    value={apiToken}
+                    onChange={(e) => setApiToken(e.target.value)}
+                    placeholder="Leave blank if not required"
                     className="w-full p-2 bg-gray-700 rounded border border-gray-600"
                 />
             </div>

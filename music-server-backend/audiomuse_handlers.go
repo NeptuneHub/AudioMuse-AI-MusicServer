@@ -56,7 +56,14 @@ func subsonicGetSimilarSongs(c *gin.Context) {
 	}
 
 	// Forward the request
-	resp, err := http.Get(fmt.Sprintf("%s/api/similar_tracks?item_id=%s&n=%s", coreURL, songId, count))
+	target := fmt.Sprintf("%s/api/similar_tracks?item_id=%s&n=%s", coreURL, songId, count)
+	req, err := newAudioMuseRequest(c.Request.Context(), "GET", target, nil)
+	if err != nil {
+		log.Printf("Error creating request to AudioMuse-AI Core for similar tracks: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("Error calling AudioMuse-AI Core for similar tracks: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
@@ -121,7 +128,14 @@ func subsonicGetSongPath(c *gin.Context) {
 		return
 	}
 
-	resp, err := http.Get(fmt.Sprintf("%s/api/find_path?start_song_id=%s&end_song_id=%s", coreURL, startId, endId))
+	target := fmt.Sprintf("%s/api/find_path?start_song_id=%s&end_song_id=%s", coreURL, startId, endId)
+	req, err := newAudioMuseRequest(c.Request.Context(), "GET", target, nil)
+	if err != nil {
+		log.Printf("Error creating request to AudioMuse-AI Core for song path: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("Error calling AudioMuse-AI Core for song path: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
@@ -181,7 +195,14 @@ func subsonicGetSonicFingerprint(c *gin.Context) {
 	}
 
 	// Forward the request to python backend, which uses its own configured default user.
-	resp, err := http.Get(fmt.Sprintf("%s/api/sonic_fingerprint/generate", coreURL))
+	target := fmt.Sprintf("%s/api/sonic_fingerprint/generate", coreURL)
+	req, err := newAudioMuseRequest(c.Request.Context(), "GET", target, nil)
+	if err != nil {
+		log.Printf("Error creating request to AudioMuse-AI Core for sonic fingerprint: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("Error calling AudioMuse-AI Core for sonic fingerprint: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
@@ -268,11 +289,16 @@ func clapSearchHandler(c *gin.Context) {
 	}
 	reqJSON, _ := json.Marshal(reqBody)
 
-	resp, err := http.Post(
-		fmt.Sprintf("%s/api/clap/search", coreURL),
-		"application/json",
-		strings.NewReader(string(reqJSON)),
-	)
+	target := fmt.Sprintf("%s/api/clap/search", coreURL)
+	req, err := newAudioMuseRequest(c.Request.Context(), "POST", target, strings.NewReader(string(reqJSON)))
+	if err != nil {
+		log.Printf("Error creating request to AudioMuse-AI Core for CLAP search: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to AudioMuse-AI Core service"})
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("Error calling AudioMuse-AI Core for CLAP search: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to AudioMuse-AI Core service"})
@@ -340,7 +366,15 @@ func clapTopQueriesHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := http.Get(fmt.Sprintf("%s/api/clap/top_queries", coreURL))
+	target := fmt.Sprintf("%s/api/clap/top_queries", coreURL)
+	req, err := newAudioMuseRequest(c.Request.Context(), "GET", target, nil)
+	if err != nil {
+		log.Printf("Error creating request to AudioMuse-AI Core for CLAP top queries: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to AudioMuse-AI Core service"})
+		return
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("Error calling AudioMuse-AI Core for CLAP top queries: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to AudioMuse-AI Core service"})

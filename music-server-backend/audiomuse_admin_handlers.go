@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -33,6 +34,46 @@ func getAudioMuseURL() (string, error) {
 	return coreURL, nil
 }
 
+// getAudioMuseAPIToken retrieves the configured API token for AudioMuse-AI (if any).
+// It prioritizes an environment variable and falls back to the DB configuration.
+func getAudioMuseAPIToken() (string, error) {
+	// Prioritize environment variable for containerized deployments
+	if token, ok := os.LookupEnv("AUDIO_MUSE_AI_TOKEN"); ok && token != "" {
+		log.Printf("DEBUG: Using AudioMuse AI API token from environment variable")
+		return token, nil
+	}
+
+	// Fallback to database for legacy or non-containerized setups
+	token, err := GetConfig(db, "audiomuse_ai_api_token")
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		log.Printf("ERROR: Could not retrieve 'audiomuse_ai_api_token' from database: %v", err)
+		return "", err
+	}
+	return token, nil
+}
+
+// newAudioMuseRequest builds an HTTP request for AudioMuse-AI, attaching an Authorization header
+// if an API token is configured.
+func newAudioMuseRequest(ctx context.Context, method, target string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, target, body)
+	if err != nil {
+		return nil, err
+	}
+
+	token, err := getAudioMuseAPIToken()
+	if err != nil {
+		return nil, err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	return req, nil
+}
+
 // proxyToAudioMuse is a generic helper to forward requests to the Python AI service.
 func proxyToAudioMuse(c *gin.Context, method, path string) {
 	coreURL, err := getAudioMuseURL()
@@ -46,7 +87,7 @@ func proxyToAudioMuse(c *gin.Context, method, path string) {
 
 	log.Printf("INFO: Proxying request to AudioMuse AI Core. Method: %s, Target URL: %s", method, targetURL)
 
-	req, err := http.NewRequest(method, targetURL, c.Request.Body)
+	req, err := newAudioMuseRequest(c.Request.Context(), method, targetURL, c.Request.Body)
 	if err != nil {
 		log.Printf("ERROR: Failed to create proxy request to %s: %v", targetURL, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create proxy request"})
@@ -118,7 +159,7 @@ func runAnalysisJob(ctx context.Context) error {
 
 	log.Printf("INFO: runAnalysisJob: POST %s", target)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", target, bytes.NewReader([]byte("{}")))
+	req, err := newAudioMuseRequest(ctx, "POST", target, bytes.NewReader([]byte("{}")))
 	if err != nil {
 		log.Printf("ERROR: runAnalysisJob new request: %v", err)
 		return err
@@ -152,7 +193,7 @@ func runClusteringJob(ctx context.Context) error {
 
 	log.Printf("INFO: runClusteringJob: POST %s", target)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", target, bytes.NewReader([]byte("{}")))
+	req, err := newAudioMuseRequest(ctx, "POST", target, bytes.NewReader([]byte("{}")))
 	if err != nil {
 		log.Printf("ERROR: runClusteringJob new request: %v", err)
 		return err

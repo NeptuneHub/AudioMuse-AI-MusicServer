@@ -80,7 +80,7 @@ func AlchemyHandler(c *gin.Context) {
 
 	// Respect context cancellation from the incoming request
 	ctx := c.Request.Context()
-	reqOut, err := http.NewRequestWithContext(ctx, "POST", aiURL, bytes.NewReader(payload))
+	reqOut, err := newAudioMuseRequest(ctx, "POST", aiURL, bytes.NewReader(payload))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build request to AudioMuse-AI"})
 		return

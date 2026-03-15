@@ -196,6 +196,12 @@ func migrateDB() error {
 		return err
 	}
 
+	// Ensure audiomuse_ai_api_token key exists (insert empty value if missing)
+	if _, err = db.Exec(`INSERT OR IGNORE INTO configuration (key, value) VALUES ('audiomuse_ai_api_token', '')`); err != nil {
+		log.Printf("migrateDB: failed to ensure audiomuse_ai_api_token config key: %v", err)
+		return err
+	}
+
 	// --- LIBRARY_PATHS TABLE ---
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS library_paths (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
