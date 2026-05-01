@@ -204,20 +204,21 @@ func scanSingleLibrary(pathId int) {
 	_, err = db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts USING fts5(title, artist, album, album_artist, content='songs', content_rowid='id');`)
 	if err != nil {
 		log.Printf("Warning: could not create songs_fts vtable: %v", err)
+	} else {
+		_, _ = db.Exec(`
+			CREATE TRIGGER IF NOT EXISTS songs_ai AFTER INSERT ON songs BEGIN
+				INSERT INTO songs_fts(rowid, title, artist, album, album_artist)
+				VALUES (new.id, new.title, new.artist, new.album, new.album_artist);
+			END;`)
+		_, _ = db.Exec(`
+			CREATE TRIGGER IF NOT EXISTS songs_au AFTER UPDATE ON songs BEGIN
+				UPDATE songs_fts SET title=new.title, artist=new.artist, album=new.album, album_artist=new.album_artist WHERE rowid=old.id;
+			END;`)
+		_, _ = db.Exec(`
+			CREATE TRIGGER IF NOT EXISTS songs_ad AFTER DELETE ON songs BEGIN
+				DELETE FROM songs_fts WHERE rowid=old.id;
+			END;`)
 	}
-	_, _ = db.Exec(`
-		CREATE TRIGGER IF NOT EXISTS songs_ai AFTER INSERT ON songs BEGIN
-			INSERT INTO songs_fts(rowid, title, artist, album, album_artist)
-			VALUES (new.id, new.title, new.artist, new.album, new.album_artist);
-		END;`)
-	_, _ = db.Exec(`
-		CREATE TRIGGER IF NOT EXISTS songs_au AFTER UPDATE ON songs BEGIN
-			UPDATE songs_fts SET title=new.title, artist=new.artist, album=new.album, album_artist=new.album_artist WHERE rowid=old.id;
-		END;`)
-	_, _ = db.Exec(`
-		CREATE TRIGGER IF NOT EXISTS songs_ad AFTER DELETE ON songs BEGIN
-			DELETE FROM songs_fts WHERE rowid=old.id;
-		END;`)
 
 	if isScanCancelled.Load() {
 		log.Printf("Scan was cancelled for path %s. Songs added before stop: %d.", path, songsAdded)
@@ -383,17 +384,17 @@ func processPath(scanPath string) int64 {
 				// Use INSERT ... ON CONFLICT to update existing songs or insert new ones
 				// This ensures date_added is set for old songs missing it, and date_updated is always current
 				// Mark as not cancelled when re-adding
-			albumPath := filepath.Dir(path) // Store directory path for grouping
+				albumPath := filepath.Dir(path) // Store directory path for grouping
 
-			// Normalize unknown/numeric-only artist/album to "Unknown"
-			if artist == "" || isNumericString(artist) {
-				artist = "Unknown Artist"
-			}
-			if album == "" || isNumericString(album) {
-				album = "Unknown Album"
-			}
+				// Normalize unknown/numeric-only artist/album to "Unknown"
+				if artist == "" || isNumericString(artist) {
+					artist = "Unknown Artist"
+				}
+				if album == "" || isNumericString(album) {
+					album = "Unknown Album"
+				}
 
-			res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
 					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
@@ -406,7 +407,7 @@ func processPath(scanPath string) int64 {
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated,
 						cancelled=0`,
-				songID, title, artist, album, chooseAlbumArtist(albumArtist, artist), path, albumPath, genre, duration, currentTime, currentTime)
+					songID, title, artist, album, chooseAlbumArtist(albumArtist, artist), path, albumPath, genre, duration, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -485,17 +486,17 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 				}
 
 				// Use UPSERT to update existing songs or insert new ones
-			albumPath := filepath.Dir(path) // Store directory path for grouping
+				albumPath := filepath.Dir(path) // Store directory path for grouping
 
-			// Normalize unknown/numeric-only artist/album to "Unknown"
-			if artist == "" || isNumericString(artist) {
-				artist = "Unknown Artist"
-			}
-			if album == "" || isNumericString(album) {
-				album = "Unknown Album"
-			}
+				// Normalize unknown/numeric-only artist/album to "Unknown"
+				if artist == "" || isNumericString(artist) {
+					artist = "Unknown Artist"
+				}
+				if album == "" || isNumericString(album) {
+					album = "Unknown Album"
+				}
 
-			res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
+				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
 					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
@@ -558,15 +559,12 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				(*scannedPaths)[path] = true
 
 				// Read metadata with centralized fallbacks
-			title, artist, album, albumArtist, genre := readFileMetadata(path)
-
+				title, artist, album, albumArtist, genre := readFileMetadata(path)
 
 				currentTime := time.Now().Format(time.RFC3339)
 				if genre == "" {
 					genre = "Unknown"
 				}
-
-
 
 				// Fallback to filename parsing if metadata is empty (like Navidrome does)
 				// Priority: 1. Metadata tags, 2. Filename parsing, 3. Folder structure
@@ -587,15 +585,15 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 						log.Printf("💿 No album metadata, parsed: '%s' from folder: %s", album, filepath.Base(filepath.Dir(path)))
 					}
 				}
-			// Normalize unknown/numeric-only artist/album to "Unknown"
-			if artist == "" || isNumericString(artist) {
-				artist = "Unknown Artist"
-			}
-			if album == "" || isNumericString(album) {
-				album = "Unknown Album"
-			}
-			// Ensure album artist is canonicalized to match artist
-			normalizeArtistAndAlbumArtist(&artist, &albumArtist)
+				// Normalize unknown/numeric-only artist/album to "Unknown"
+				if artist == "" || isNumericString(artist) {
+					artist = "Unknown Artist"
+				}
+				if album == "" || isNumericString(album) {
+					album = "Unknown Album"
+				}
+				// Ensure album artist is canonicalized to match artist
+				normalizeArtistAndAlbumArtist(&artist, &albumArtist)
 				// Get duration using ffprobe
 				duration := getDuration(path)
 
@@ -641,19 +639,19 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 
 				// Use UPSERT to update existing songs or insert new ones
 				albumPath := filepath.Dir(path) // Store directory path for grouping
-			// Normalize unknown/numeric-only artist/album to "Unknown"
-			if artist == "" || isNumericString(artist) {
-				artist = "Unknown Artist"
-			}
-			if album == "" || isNumericString(album) {
-				album = "Unknown Album"
-			}
-			if artist == "" || isNumericString(artist) {
-				artist = "Unknown Artist"
-			}
-			if album == "" || isNumericString(album) {
-				album = "Unknown Album"
-			}
+				// Normalize unknown/numeric-only artist/album to "Unknown"
+				if artist == "" || isNumericString(artist) {
+					artist = "Unknown Artist"
+				}
+				if album == "" || isNumericString(album) {
+					album = "Unknown Album"
+				}
+				if artist == "" || isNumericString(artist) {
+					artist = "Unknown Artist"
+				}
+				if album == "" || isNumericString(album) {
+					album = "Unknown Album"
+				}
 				var res sql.Result
 				if shouldComputeWaveform && waveformPeaks != "" {
 					// NEW song: Insert with waveform
@@ -748,7 +746,7 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 				(*scannedPaths)[path] = true
 
 				// Read metadata with centralized fallbacks
-			title, artist, album, albumArtist, genre := readFileMetadata(path)
+				title, artist, album, albumArtist, genre := readFileMetadata(path)
 
 				// Fallback to filename parsing if metadata is empty (like Navidrome does)
 				// Priority: 1. Metadata tags, 2. Filename parsing, 3. Folder structure
@@ -770,41 +768,41 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 					}
 				}
 
-			// Normalize unknown/numeric-only artist/album to "Unknown"
-			if artist == "" || isNumericString(artist) {
-				artist = "Unknown Artist"
-			}
-			if album == "" || isNumericString(album) {
-				album = "Unknown Album"
-			}
+				// Normalize unknown/numeric-only artist/album to "Unknown"
+				if artist == "" || isNumericString(artist) {
+					artist = "Unknown Artist"
+				}
+				if album == "" || isNumericString(album) {
+					album = "Unknown Album"
+				}
 
-			// Ensure genre is set
-			if genre == "" {
-				genre = "Unknown"
-			}
+				// Ensure genre is set
+				if genre == "" {
+					genre = "Unknown"
+				}
 
-			// Timestamps and duration for DB
-			currentTime := time.Now().Format(time.RFC3339)
-			duration := getDuration(path)
+				// Timestamps and duration for DB
+				currentTime := time.Now().Format(time.RFC3339)
+				duration := getDuration(path)
 
-			// Check if song already exists (by path) to reuse UUID
-			var existingID string
-			err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
+				// Check if song already exists (by path) to reuse UUID
+				var existingID string
+				err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
 
-			var songID string
-			var shouldComputeWaveform bool
-			if err == sql.ErrNoRows {
-				// New song - generate UUID and compute waveform
-				songID = GenerateBase62UUID()
-				shouldComputeWaveform = true
-			} else if err != nil {
-				log.Printf("Error checking for existing song: %v", err)
-				return nil
-			} else {
-				// Existing song (rescan) - reuse UUID, DON'T recompute waveform
-				songID = existingID
-				shouldComputeWaveform = false
-			}
+				var songID string
+				var shouldComputeWaveform bool
+				if err == sql.ErrNoRows {
+					// New song - generate UUID and compute waveform
+					songID = GenerateBase62UUID()
+					shouldComputeWaveform = true
+				} else if err != nil {
+					log.Printf("Error checking for existing song: %v", err)
+					return nil
+				} else {
+					// Existing song (rescan) - reuse UUID, DON'T recompute waveform
+					songID = existingID
+					shouldComputeWaveform = false
+				}
 
 				// Pre-compute waveform ONLY for new songs
 				var waveformPeaks string
@@ -1124,4 +1122,3 @@ func rescanAllLibraries(c *gin.Context) {
 }
 
 // backfillAlbumArtists endpoint removed at user's request.
-

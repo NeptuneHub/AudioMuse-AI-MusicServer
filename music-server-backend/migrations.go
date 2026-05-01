@@ -19,7 +19,6 @@ func migrateDB() error {
 	dateAddedBackfilled := 0
 	dateUpdatedBackfilled := 0
 
-
 	// --- USERS TABLE ---
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,7 +61,7 @@ func migrateDB() error {
 	// Ensure full-text index exists for fast text searches (albums/artists/songs)
 	// attempt to create the FTS table; if the underlying SQLite does not
 	// support fts5 (common on macOS), simply log and continue.
-	if _, err = db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts \
+	if _, err = db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts
 		USING fts5(title, artist, album, album_artist, content='songs', content_rowid='id');`); err != nil {
 		log.Printf("migrateDB: warning - could not create songs_fts virtual table (fts5 may be unavailable): %v", err)
 	} else {
@@ -355,7 +354,6 @@ func migrateDB() error {
 	maybeAddColumn(&columnsAdded, db, "songs", "replaygain_track_peak", "REAL")
 	maybeAddColumn(&columnsAdded, db, "songs", "replaygain_album_gain", "REAL")
 	maybeAddColumn(&columnsAdded, db, "songs", "replaygain_album_peak", "REAL")
-
 
 	// Add waveform_peaks column for pre-computed waveforms
 	maybeAddColumn(&columnsAdded, db, "songs", "waveform_peaks", "TEXT")
