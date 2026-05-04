@@ -62,7 +62,7 @@ func migrateDB() error {
 	// attempt to create the FTS table; if the underlying SQLite does not
 	// support fts5 (common on macOS), simply log and continue.
 	if _, err = db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts
-		USING fts5(title, artist, album, album_artist, content='songs', content_rowid='id');`); err != nil {
+		USING fts5(title, artist, album, album_artist, content='songs', content_rowid='rowid');`); err != nil {
 		log.Printf("migrateDB: warning - could not create songs_fts virtual table (fts5 may be unavailable): %v", err)
 		// Drop any pre-existing FTS triggers that reference songs_fts; if those
 		// triggers exist from an older install they will cause every INSERT/UPDATE/
@@ -77,21 +77,21 @@ func migrateDB() error {
 		if _, err = db.Exec(`
 			CREATE TRIGGER IF NOT EXISTS songs_ai AFTER INSERT ON songs BEGIN
 				INSERT INTO songs_fts(rowid, title, artist, album, album_artist)
-				VALUES (new.id, new.title, new.artist, new.album, new.album_artist);
+				VALUES (new.rowid, new.title, new.artist, new.album, new.album_artist);
 			END;
 		`); err != nil {
 			log.Printf("migrateDB: warning - could not create songs_ai trigger: %v", err)
 		}
 		if _, err = db.Exec(`
 			CREATE TRIGGER IF NOT EXISTS songs_au AFTER UPDATE ON songs BEGIN
-				UPDATE songs_fts SET title=new.title, artist=new.artist, album=new.album, album_artist=new.album_artist WHERE rowid=old.id;
+				UPDATE songs_fts SET title=new.title, artist=new.artist, album=new.album, album_artist=new.album_artist WHERE rowid=old.rowid;
 			END;
 		`); err != nil {
 			log.Printf("migrateDB: warning - could not create songs_au trigger: %v", err)
 		}
 		if _, err = db.Exec(`
 			CREATE TRIGGER IF NOT EXISTS songs_ad AFTER DELETE ON songs BEGIN
-				DELETE FROM songs_fts WHERE rowid=old.id;
+				DELETE FROM songs_fts WHERE rowid=old.rowid;
 			END;
 		`); err != nil {
 			log.Printf("migrateDB: warning - could not create songs_ad trigger: %v", err)

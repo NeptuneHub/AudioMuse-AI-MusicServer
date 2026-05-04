@@ -19,6 +19,16 @@ func TestMigrateDB_IdempotentAndCreatesExpectedTables(t *testing.T) {
 	db = conn
 	defer func() { db = prev }()
 
+	// Create songs table first — in production initDB() does this before migrateDB() runs.
+	// Without it, FTS5 triggers that reference songs cannot be created.
+	if _, err = conn.Exec(`CREATE TABLE IF NOT EXISTS songs (
+		id TEXT PRIMARY KEY NOT NULL,
+		title TEXT, artist TEXT, album TEXT, album_artist TEXT DEFAULT '',
+		path TEXT UNIQUE NOT NULL DEFAULT '', cancelled INTEGER NOT NULL DEFAULT 0
+	);`); err != nil {
+		t.Fatalf("failed to create songs table for test: %v", err)
+	}
+
 	// Run migration twice
 	if err := migrateDB(); err != nil {
 		t.Fatalf("first migrate failed: %v", err)

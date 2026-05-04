@@ -22,16 +22,16 @@ type ArtistQueryOptions struct {
 
 // AlbumQueryOptions defines options for album queries
 type AlbumQueryOptions struct {
-	Artist          string // Filter by artist
-	SearchTerm      string // Optional search filter (LIKE)
-	IncludeCounts   bool   // Include song_count
-	GroupByPath     bool   // Group by album_path + album
-	Limit           int    // Limit results (0 = no limit)
-	Offset          int    // Offset for pagination
-	OrderBy         string // Order clause (default: "album COLLATE NOCASE")
-	IncludeAlbumID  bool   // Include MIN(id) as albumId
-	IncludeGenre    bool   // Include genre
-	IncludeArtist   bool   // Include effective artist
+	Artist         string // Filter by artist
+	SearchTerm     string // Optional search filter (LIKE)
+	IncludeCounts  bool   // Include song_count
+	GroupByPath    bool   // Group by album_path + album
+	Limit          int    // Limit results (0 = no limit)
+	Offset         int    // Offset for pagination
+	OrderBy        string // Order clause (default: "album COLLATE NOCASE")
+	IncludeAlbumID bool   // Include MIN(id) as albumId
+	IncludeGenre   bool   // Include genre
+	IncludeArtist  bool   // Include effective artist
 }
 
 // SongQueryOptions defines options for song queries
@@ -72,17 +72,17 @@ type AlbumResult struct {
 
 // SongResult represents a song query result
 type SongResult struct {
-	ID                  string
-	Title               string
-	Artist              string
-	Album               string
-	Path                string
-	Duration            int
-	PlayCount           int
-	LastPlayed          string
-	Genre               string
-	Starred             bool
-	TranscodingEnabled  bool
+	ID                 string
+	Title              string
+	Artist             string
+	Album              string
+	Path               string
+	Duration           int
+	PlayCount          int
+	LastPlayed         string
+	Genre              string
+	Starred            bool
+	TranscodingEnabled bool
 }
 
 // ============================================================================
@@ -116,12 +116,12 @@ func QueryArtists(db *sql.DB, opts ArtistQueryOptions) ([]ArtistResult, error) {
 	if opts.IncludeCounts {
 		query.WriteString(`
 			SELECT
-				artist AS name,
+				songs.artist AS name,
 				COUNT(*) as song_count,
 				COUNT(DISTINCT CASE
-					WHEN album != '' AND album_path != ''
-					THEN album_path || '|||' || album
-					WHEN album != '' THEN album
+					WHEN songs.album != '' AND songs.album_path != ''
+					THEN songs.album_path || '|||' || songs.album
+					WHEN songs.album != '' THEN songs.album
 					ELSE NULL
 				END) as album_count
 			FROM songs
@@ -132,15 +132,15 @@ func QueryArtists(db *sql.DB, opts ArtistQueryOptions) ([]ArtistResult, error) {
 			query.WriteString(`
 			SELECT DISTINCT
 				CASE
-					WHEN album_artist IS NOT NULL AND TRIM(album_artist) != ''
-						AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')
-					THEN album_artist
-					ELSE artist
+					WHEN songs.album_artist IS NOT NULL AND TRIM(songs.album_artist) != ''
+						AND LOWER(TRIM(songs.album_artist)) NOT IN ('unknown','unknown artist')
+					THEN songs.album_artist
+					ELSE songs.artist
 				END AS artist
 			FROM songs
 		`)
 		} else {
-			query.WriteString(`SELECT DISTINCT artist FROM songs`)
+			query.WriteString(`SELECT DISTINCT songs.artist FROM songs`)
 		}
 	}
 
@@ -150,9 +150,9 @@ func QueryArtists(db *sql.DB, opts ArtistQueryOptions) ([]ArtistResult, error) {
 	// Artist not empty condition
 	if opts.UseEffectiveArtist {
 		whereClauses = append(whereClauses,
-			`((album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')) OR artist != '')`)
+			`((songs.album_artist IS NOT NULL AND TRIM(songs.album_artist) != '' AND LOWER(TRIM(songs.album_artist)) NOT IN ('unknown','unknown artist')) OR songs.artist != '')`)
 	} else {
-		whereClauses = append(whereClauses, "artist != ''")
+		whereClauses = append(whereClauses, "songs.artist != ''")
 	}
 
 	// Search filter (support multi-word AND semantics, prefer FTS when possible)
@@ -160,7 +160,7 @@ func QueryArtists(db *sql.DB, opts ArtistQueryOptions) ([]ArtistResult, error) {
 		if ftsAvailable(db) {
 			// join FTS table and match
 			ftsQuery := buildFTSQuery(opts.SearchTerm)
-			query.WriteString(" JOIN songs_fts f ON f.rowid = songs.id")
+			query.WriteString(" JOIN songs_fts f ON f.rowid = songs.rowid")
 			whereClauses = append(whereClauses, "f MATCH ?")
 			args = append(args, ftsQuery)
 		} else {
@@ -186,13 +186,13 @@ func QueryArtists(db *sql.DB, opts ArtistQueryOptions) ([]ArtistResult, error) {
 
 	// GROUP BY for aggregation
 	if opts.IncludeCounts {
-		query.WriteString(" GROUP BY artist")
+		query.WriteString(" GROUP BY songs.artist")
 	}
 
 	// ORDER BY
 	orderBy := opts.OrderBy
 	if orderBy == "" {
-		orderBy = "artist COLLATE NOCASE"
+		orderBy = "songs.artist COLLATE NOCASE"
 	}
 	query.WriteString(" ORDER BY " + orderBy)
 
@@ -264,17 +264,17 @@ func QueryAlbums(db *sql.DB, opts AlbumQueryOptions) ([]AlbumResult, error) {
 	// Build SELECT clause
 	query.WriteString(`SELECT `)
 
-	selectFields := []string{"album"}
+	selectFields := []string{"songs.album AS album"}
 
 	if opts.GroupByPath {
-		selectFields = append(selectFields, "MIN(NULLIF(album_path, '')) as album_path")
+		selectFields = append(selectFields, "MIN(NULLIF(songs.album_path, '')) as album_path")
 	} else {
-		selectFields = append(selectFields, "album_path")
+		selectFields = append(selectFields, "songs.album_path AS album_path")
 	}
 
 	if opts.IncludeArtist {
 		selectFields = append(selectFields,
-			`COALESCE(NULLIF(album_artist, ''), artist) as effective_artist`)
+			`COALESCE(NULLIF(songs.album_artist, ''), songs.artist) as effective_artist`)
 	}
 
 	if opts.IncludeGenre {
@@ -293,18 +293,18 @@ func QueryAlbums(db *sql.DB, opts AlbumQueryOptions) ([]AlbumResult, error) {
 	query.WriteString(" FROM songs")
 
 	// Build WHERE clause
-	whereClauses := []string{"album != ''", "cancelled = 0"}
+	whereClauses := []string{"songs.album != ''", "cancelled = 0"}
 
 	if opts.Artist != "" {
 		whereClauses = append(whereClauses,
-			`(artist = ? OR album_artist = ?)`)
+			`(songs.artist = ? OR songs.album_artist = ?)`)
 		args = append(args, opts.Artist, opts.Artist)
 	}
 
 	if opts.SearchTerm != "" {
 		if ftsAvailable(db) {
 			// join FTS and filter
-			query.WriteString(" JOIN songs_fts f ON f.rowid = songs.id")
+			query.WriteString(" JOIN songs_fts f ON f.rowid = songs.rowid")
 			whereClauses = append(whereClauses, "f MATCH ?")
 			args = append(args, buildFTSQuery(opts.SearchTerm))
 		} else {
@@ -324,9 +324,9 @@ func QueryAlbums(db *sql.DB, opts AlbumQueryOptions) ([]AlbumResult, error) {
 	// GROUP BY for aggregation or path grouping
 	if opts.GroupByPath {
 		query.WriteString(` GROUP BY CASE
-			WHEN album_path IS NOT NULL AND album_path != ''
-			THEN album_path || '|||' || album
-			ELSE album
+			WHEN songs.album_path IS NOT NULL AND songs.album_path != ''
+			THEN songs.album_path || '|||' || songs.album
+			ELSE songs.album
 		END`)
 	}
 
@@ -334,9 +334,9 @@ func QueryAlbums(db *sql.DB, opts AlbumQueryOptions) ([]AlbumResult, error) {
 	orderBy := opts.OrderBy
 	if orderBy == "" {
 		if opts.IncludeArtist {
-			orderBy = "effective_artist COLLATE NOCASE, album COLLATE NOCASE"
+			orderBy = "effective_artist COLLATE NOCASE, songs.album COLLATE NOCASE"
 		} else {
-			orderBy = "album COLLATE NOCASE"
+			orderBy = "songs.album COLLATE NOCASE"
 		}
 	}
 	query.WriteString(" ORDER BY " + orderBy)
@@ -522,7 +522,7 @@ func QuerySongs(db *sql.DB, opts SongQueryOptions) ([]SongResult, error) {
 
 	if opts.SearchTerm != "" {
 		if ftsAvailable(db) {
-			query.WriteString(" JOIN songs_fts f ON f.rowid = s.id")
+			query.WriteString(" JOIN songs_fts f ON f.rowid = s.rowid")
 			whereClauses = append(whereClauses, "f MATCH ?")
 			args = append(args, buildFTSQuery(opts.SearchTerm))
 		} else {
@@ -759,7 +759,7 @@ func CountSongs(db *sql.DB, searchTerm string) (int, error) {
 
 	if searchTerm != "" {
 		if ftsAvailable(db) {
-			query = `SELECT COUNT(*) FROM songs JOIN songs_fts f ON f.rowid = songs.id WHERE f MATCH ? AND cancelled = 0`
+			query = `SELECT COUNT(*) FROM songs JOIN songs_fts f ON f.rowid = songs.rowid WHERE f MATCH ? AND cancelled = 0`
 			args = []interface{}{buildFTSQuery(searchTerm)}
 		} else {
 			query = `SELECT COUNT(*) FROM songs WHERE (title LIKE ? OR artist LIKE ? OR album LIKE ?) AND cancelled = 0`
@@ -819,10 +819,10 @@ func CountAlbums(db *sql.DB, searchTerm string) (int, error) {
 	if searchTerm != "" {
 		if ftsAvailable(db) {
 			query = `SELECT COUNT(DISTINCT CASE
-				WHEN album_path IS NOT NULL AND album_path != ''
-				THEN album_path || '|||' || album ELSE album END)
-			FROM songs JOIN songs_fts f ON f.rowid = songs.id
-			WHERE f MATCH ? AND album != '' AND cancelled = 0`
+				WHEN songs.album_path IS NOT NULL AND songs.album_path != ''
+				THEN songs.album_path || '|||' || songs.album ELSE songs.album END)
+			FROM songs JOIN songs_fts f ON f.rowid = songs.rowid
+			WHERE f MATCH ? AND songs.album != '' AND cancelled = 0`
 			args = []interface{}{buildFTSQuery(searchTerm)}
 		} else {
 			query = `SELECT COUNT(DISTINCT CASE
@@ -914,7 +914,7 @@ func UpsertSong(db *sql.DB, song Song) error {
 			duration = excluded.duration,
 			date_updated = excluded.date_updated
 	`, song.ID, song.Title, song.Artist, song.Album, song.AlbumArtist, song.Path,
-	   "", song.Genre, song.Duration, song.DateAdded, song.DateUpdated, song.Cancelled)
+		"", song.Genre, song.Duration, song.DateAdded, song.DateUpdated, song.Cancelled)
 	return err
 }
 
