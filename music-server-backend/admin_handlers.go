@@ -524,7 +524,7 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 				if rowsAffected > 0 {
 					*totalSongsAdded++
 					// Update scan status in real-time with the cumulative total
-					db.Exec("UPDATE scan status SET songs_added = ?, last_update_time = ? WHERE id = 1",
+					db.Exec("UPDATE scan_status SET songs_added = ?, last_update_time = ? WHERE id = 1",
 						*totalSongsAdded, time.Now().Format(time.RFC3339))
 				}
 			}

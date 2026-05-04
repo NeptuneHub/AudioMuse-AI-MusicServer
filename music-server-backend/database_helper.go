@@ -95,11 +95,16 @@ func buildFTSQuery(term string) string {
 		return ""
 	}
 	words := strings.Fields(term)
-	for i, w := range words {
-		// make each word a prefix query
-		words[i] = w + "*"
+	out := make([]string, 0, len(words))
+	for _, w := range words {
+		// Escape embedded double quotes by doubling them, then wrap the
+		// token in double quotes so FTS5 treats it as a literal string
+		// (avoids syntax errors from punctuation, reserved words like
+		// AND/OR/NOT/NEAR, parentheses, etc.). Append '*' for prefix match.
+		escaped := strings.ReplaceAll(w, `"`, `""`)
+		out = append(out, `"`+escaped+`"*`)
 	}
-	return strings.Join(words, " ")
+	return strings.Join(out, " ")
 }
 
 func ftsAvailable(db *sql.DB) bool {
