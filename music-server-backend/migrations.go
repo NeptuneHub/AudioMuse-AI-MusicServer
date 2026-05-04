@@ -64,6 +64,14 @@ func migrateDB() error {
 	if _, err = db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts
 		USING fts5(title, artist, album, album_artist, content='songs', content_rowid='id');`); err != nil {
 		log.Printf("migrateDB: warning - could not create songs_fts virtual table (fts5 may be unavailable): %v", err)
+		// Drop any pre-existing FTS triggers that reference songs_fts; if those
+		// triggers exist from an older install they will cause every INSERT/UPDATE/
+		// DELETE on the songs table to fail with "no such table: main.songs_fts".
+		for _, trig := range []string{"songs_ai", "songs_au", "songs_ad"} {
+			if _, dropErr := db.Exec(`DROP TRIGGER IF EXISTS ` + trig); dropErr != nil {
+				log.Printf("migrateDB: warning - could not drop stale trigger %s: %v", trig, dropErr)
+			}
+		}
 	} else {
 		// Triggers to keep FTS table in sync with songs data
 		if _, err = db.Exec(`

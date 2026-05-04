@@ -13,7 +13,7 @@ COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer .
 WORKDIR /src/music-server-backend
 # dependencies are tracked in go.mod/go.sum, so just download them
 RUN go mod download
-RUN CGO_ENABLED=1 go build -o music-server .
+RUN CGO_ENABLED=1 go build -tags "fts5" -o music-server .
 
 # STAGE 3: Build React Frontend for Music Server
 # Use bookworm to stay consistent with backend-builder and avoid libc mismatches
