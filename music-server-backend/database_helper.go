@@ -161,7 +161,7 @@ func QueryArtists(db *sql.DB, opts ArtistQueryOptions) ([]ArtistResult, error) {
 			// join FTS table and match
 			ftsQuery := buildFTSQuery(opts.SearchTerm)
 			query.WriteString(" JOIN songs_fts f ON f.rowid = songs.rowid")
-			whereClauses = append(whereClauses, "f MATCH ?")
+			whereClauses = append(whereClauses, "songs_fts MATCH ?")
 			args = append(args, ftsQuery)
 		} else {
 			words := strings.Fields(opts.SearchTerm)
@@ -305,7 +305,7 @@ func QueryAlbums(db *sql.DB, opts AlbumQueryOptions) ([]AlbumResult, error) {
 		if ftsAvailable(db) {
 			// join FTS and filter
 			query.WriteString(" JOIN songs_fts f ON f.rowid = songs.rowid")
-			whereClauses = append(whereClauses, "f MATCH ?")
+			whereClauses = append(whereClauses, "songs_fts MATCH ?")
 			args = append(args, buildFTSQuery(opts.SearchTerm))
 		} else {
 			words := strings.Fields(opts.SearchTerm)
@@ -523,7 +523,7 @@ func QuerySongs(db *sql.DB, opts SongQueryOptions) ([]SongResult, error) {
 	if opts.SearchTerm != "" {
 		if ftsAvailable(db) {
 			query.WriteString(" JOIN songs_fts f ON f.rowid = s.rowid")
-			whereClauses = append(whereClauses, "f MATCH ?")
+			whereClauses = append(whereClauses, "songs_fts MATCH ?")
 			args = append(args, buildFTSQuery(opts.SearchTerm))
 		} else {
 			words := strings.Fields(opts.SearchTerm)
@@ -759,7 +759,7 @@ func CountSongs(db *sql.DB, searchTerm string) (int, error) {
 
 	if searchTerm != "" {
 		if ftsAvailable(db) {
-			query = `SELECT COUNT(*) FROM songs JOIN songs_fts f ON f.rowid = songs.rowid WHERE f MATCH ? AND cancelled = 0`
+			query = `SELECT COUNT(*) FROM songs JOIN songs_fts f ON f.rowid = songs.rowid WHERE songs_fts MATCH ? AND cancelled = 0`
 			args = []interface{}{buildFTSQuery(searchTerm)}
 		} else {
 			query = `SELECT COUNT(*) FROM songs WHERE (title LIKE ? OR artist LIKE ? OR album LIKE ?) AND cancelled = 0`
@@ -822,7 +822,7 @@ func CountAlbums(db *sql.DB, searchTerm string) (int, error) {
 				WHEN songs.album_path IS NOT NULL AND songs.album_path != ''
 				THEN songs.album_path || '|||' || songs.album ELSE songs.album END)
 			FROM songs JOIN songs_fts f ON f.rowid = songs.rowid
-			WHERE f MATCH ? AND songs.album != '' AND cancelled = 0`
+			WHERE songs_fts MATCH ? AND songs.album != '' AND cancelled = 0`
 			args = []interface{}{buildFTSQuery(searchTerm)}
 		} else {
 			query = `SELECT COUNT(DISTINCT CASE
