@@ -200,22 +200,27 @@ func scanSingleLibrary(pathId int) {
 	}
 	log.Printf("Database indexes verified/created successfully")
 
-	// also ensure FTS virtual table and triggers exist; harmless if already present
+	// also ensure FTS virtual table and triggers exist; harmless if already present.
+	// Drop and recreate triggers unconditionally so their body always matches the
+	// current code (older builds had a broken body referencing new.id/old.id).
 	_, err = db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts USING fts5(title, artist, album, album_artist, content='songs', content_rowid='rowid');`)
 	if err != nil {
 		log.Printf("Warning: could not create songs_fts vtable: %v", err)
 	} else {
+		for _, trig := range []string{"songs_ai", "songs_au", "songs_ad"} {
+			_, _ = db.Exec(`DROP TRIGGER IF EXISTS ` + trig)
+		}
 		_, _ = db.Exec(`
-			CREATE TRIGGER IF NOT EXISTS songs_ai AFTER INSERT ON songs BEGIN
+			CREATE TRIGGER songs_ai AFTER INSERT ON songs BEGIN
 				INSERT INTO songs_fts(rowid, title, artist, album, album_artist)
 				VALUES (new.rowid, new.title, new.artist, new.album, new.album_artist);
 			END;`)
 		_, _ = db.Exec(`
-			CREATE TRIGGER IF NOT EXISTS songs_au AFTER UPDATE ON songs BEGIN
+			CREATE TRIGGER songs_au AFTER UPDATE ON songs BEGIN
 				UPDATE songs_fts SET title=new.title, artist=new.artist, album=new.album, album_artist=new.album_artist WHERE rowid=old.rowid;
 			END;`)
 		_, _ = db.Exec(`
-			CREATE TRIGGER IF NOT EXISTS songs_ad AFTER DELETE ON songs BEGIN
+			CREATE TRIGGER songs_ad AFTER DELETE ON songs BEGIN
 				DELETE FROM songs_fts WHERE rowid=old.rowid;
 			END;`)
 	}

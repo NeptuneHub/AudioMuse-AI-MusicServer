@@ -73,9 +73,19 @@ func migrateDB() error {
 			}
 		}
 	} else {
-		// Triggers to keep FTS table in sync with songs data
+		// Triggers to keep FTS table in sync with songs data.
+		// Drop any pre-existing triggers first: older builds created triggers whose
+		// body referenced new.id/old.id (a TEXT UUID), which silently broke every
+		// INSERT/UPDATE/DELETE once FTS5 was actually compiled in. Using
+		// CREATE TRIGGER IF NOT EXISTS would leave those broken triggers in place,
+		// so we drop and recreate unconditionally to guarantee the current body.
+		for _, trig := range []string{"songs_ai", "songs_au", "songs_ad"} {
+			if _, dropErr := db.Exec(`DROP TRIGGER IF EXISTS ` + trig); dropErr != nil {
+				log.Printf("migrateDB: warning - could not drop trigger %s before recreate: %v", trig, dropErr)
+			}
+		}
 		if _, err = db.Exec(`
-			CREATE TRIGGER IF NOT EXISTS songs_ai AFTER INSERT ON songs BEGIN
+			CREATE TRIGGER songs_ai AFTER INSERT ON songs BEGIN
 				INSERT INTO songs_fts(rowid, title, artist, album, album_artist)
 				VALUES (new.rowid, new.title, new.artist, new.album, new.album_artist);
 			END;
@@ -83,18 +93,32 @@ func migrateDB() error {
 			log.Printf("migrateDB: warning - could not create songs_ai trigger: %v", err)
 		}
 		if _, err = db.Exec(`
-			CREATE TRIGGER IF NOT EXISTS songs_au AFTER UPDATE ON songs BEGIN
+			CREATE TRIGGER songs_au AFTER UPDATE ON songs BEGIN
 				UPDATE songs_fts SET title=new.title, artist=new.artist, album=new.album, album_artist=new.album_artist WHERE rowid=old.rowid;
 			END;
 		`); err != nil {
 			log.Printf("migrateDB: warning - could not create songs_au trigger: %v", err)
 		}
 		if _, err = db.Exec(`
-			CREATE TRIGGER IF NOT EXISTS songs_ad AFTER DELETE ON songs BEGIN
+			CREATE TRIGGER songs_ad AFTER DELETE ON songs BEGIN
 				DELETE FROM songs_fts WHERE rowid=old.rowid;
 			END;
 		`); err != nil {
 			log.Printf("migrateDB: warning - could not create songs_ad trigger: %v", err)
+		}
+
+		// If songs already has rows but songs_fts is empty (e.g. user scanned with
+		// an older build that lacked FTS5), rebuild the index from the content
+		// table so existing songs are searchable without requiring a full rescan.
+		var songsCount, ftsCount int
+		_ = db.QueryRow(`SELECT COUNT(*) FROM songs`).Scan(&songsCount)
+		_ = db.QueryRow(`SELECT COUNT(*) FROM songs_fts`).Scan(&ftsCount)
+		if songsCount > 0 && ftsCount == 0 {
+			if _, err = db.Exec(`INSERT INTO songs_fts(songs_fts) VALUES('rebuild')`); err != nil {
+				log.Printf("migrateDB: warning - could not rebuild songs_fts index: %v", err)
+			} else {
+				log.Printf("migrateDB: rebuilt songs_fts index from %d existing songs", songsCount)
+			}
 		}
 	}
 
