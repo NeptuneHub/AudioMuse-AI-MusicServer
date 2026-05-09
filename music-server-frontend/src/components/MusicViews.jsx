@@ -245,6 +245,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         setSongs([]);
         setAllSongs([]);
         setOffset(0);
+        setTotalCount(0); // Reset count when filters change
         setDiscoveryView('all'); // Reset discovery view on filter/genre change
         radioFetchedRef.current = false; // Reset radio fetch tracker
     }, [searchTerm, filter, refreshKey, selectedGenre]);
@@ -438,6 +439,26 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     return;
                 }
 
+                // Priority 1: Genre filter (highest priority, no caching)
+                if (selectedGenre && !filter && !searchTerm && offset === 0) {
+                    const data = await subsonicFetch('getSongsByGenre.view', {
+                        genre: selectedGenre,
+                        size: DISCOVERY_LOAD_SIZE,
+                        offset: 0
+                    });
+                    const newSongs = data.songsByGenre?.song || [];
+                    const songsArray = Array.isArray(newSongs) ? newSongs : [newSongs].filter(Boolean);
+
+                    if (songsArray.length === 0) {
+                        setError(`No songs found for genre: ${selectedGenre}`);
+                    }
+
+                    setSongs(songsArray);
+                    setAllSongs(songsArray);
+                    return;
+                }
+
+                // Priority 2: Load cached data if available
                 let baseList = allSongs;
                 if (baseList.length === 0 && !searchTerm) {
                     let songList = [];
@@ -460,22 +481,6 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
 
                             if (songContainer?.song) songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
                         }
-                    } else if (selectedGenre && !filter) {
-                        const data = await subsonicFetch('getSongsByGenre.view', {
-                            genre: selectedGenre,
-                            size: DISCOVERY_LOAD_SIZE,
-                            offset: 0
-                        });
-                        const newSongs = data.songsByGenre?.song || [];
-                        const songsArray = Array.isArray(newSongs) ? newSongs : [newSongs].filter(Boolean);
-
-                        if (songsArray.length === 0) {
-                            setError(`No songs found for genre: ${selectedGenre}`);
-                        }
-
-                        setSongs(songsArray);
-                        setAllSongs(songsArray);
-                        return;
                     }
 
                     baseList = Array.isArray(songList) ? songList : [songList].filter(Boolean);
