@@ -185,7 +185,8 @@ function TextSongSearch({ onNavigate }) {
                 )}
             </div>
 
-            {/* Example Queries */}
+            {/* Example Queries - CLAP Tab Only */}
+            {activeTab === 'clap' && (
             <div className="bg-dark-700 rounded-xl p-6 shadow-xl border border-dark-600">
                 <h2 className="text-xl font-semibold mb-4 text-gray-200">
                     Example Searches
@@ -216,46 +217,30 @@ function TextSongSearch({ onNavigate }) {
                     </p>
                 )}
             </div>
+            )}
 
-            {/* Info Section */}
+            {/* Info Section - CLAP Tab Only */}
+            {activeTab === 'clap' && (
             <div className="mt-8 bg-dark-700/50 rounded-xl p-6 border border-dark-600">
                 <h3 className="text-lg font-semibold mb-3 text-gray-200">
                     💡 How to use
                 </h3>
                 <ul className="space-y-2 text-gray-400 text-sm">
-                    {activeTab === 'clap' ? (
-                        <>
-                            <li className="flex items-start gap-2">
-                                <span className="text-accent-500 mt-0.5">•</span>
-                                <span>Combine genres, moods, vocal styles, and instruments to find specific songs</span>
-                            </li>
-                            <li className="flex items-start gap-2">
-                                <span className="text-accent-500 mt-0.5">•</span>
-                                <span>Examples: "happy energetic pop", "dark atmospheric metal", "slow jazz piano"</span>
-                            </li>
-                            <li className="flex items-start gap-2">
-                                <span className="text-accent-500 mt-0.5">•</span>
-                                <span>Click any example above to try it out</span>
-                            </li>
-                        </>
-                    ) : (
-                        <>
-                            <li className="flex items-start gap-2">
-                                <span className="text-accent-500 mt-0.5">•</span>
-                                <span>Search by song lyrics or thematic content</span>
-                            </li>
-                            <li className="flex items-start gap-2">
-                                <span className="text-accent-500 mt-0.5">•</span>
-                                <span>Examples: "lyrics about love and heartbreak", "sad and lonely", "party and dancing"</span>
-                            </li>
-                            <li className="flex items-start gap-2">
-                                <span className="text-accent-500 mt-0.5">•</span>
-                                <span>Results show similarity scores to help you find the most relevant songs</span>
-                            </li>
-                        </>
-                    )}
+                    <li className="flex items-start gap-2">
+                        <span className="text-accent-500 mt-0.5">•</span>
+                        <span>Combine genres, moods, vocal styles, and instruments to find specific songs</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                        <span className="text-accent-500 mt-0.5">•</span>
+                        <span>Examples: "happy energetic pop", "dark atmospheric metal", "slow jazz piano"</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                        <span className="text-accent-500 mt-0.5">•</span>
+                        <span>Click any example above to try it out</span>
+                    </li>
                 </ul>
             </div>
+            )}
         </div>
     );
 }
