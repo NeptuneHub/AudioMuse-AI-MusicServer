@@ -1209,14 +1209,14 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                  {isPlaylistView && !isPlaylistReadOnly && (
                                                     <>
                                                         <div className="flex flex-col gap-0">
-                                                            <button onClick={() => handleMoveSong(index, 'up')} disabled={index === 0} className="p-0.5 rounded text-xs border border-gray-600 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50" title="Move up">
+                                                            <button onClick={() => handleMoveSong(index, 'up')} disabled={index === 0} className="w-7 h-7 p-0.5 rounded text-xs border border-gray-600 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50 flex items-center justify-center" title="Move up">
                                                                 <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd"></path></svg>
                                                             </button>
-                                                            <button onClick={() => handleMoveSong(index, 'down')} disabled={index === allSongs.length - 1} className="p-0.5 rounded text-xs border border-gray-600 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50" title="Move down">
+                                                            <button onClick={() => handleMoveSong(index, 'down')} disabled={index === allSongs.length - 1} className="w-7 h-7 p-0.5 rounded text-xs border border-gray-600 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50 flex items-center justify-center" title="Move down">
                                                                 <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"></path></svg>
                                                             </button>
                                                         </div>
-                                                        <button onClick={() => handleDeleteSong(song.id)} title="Remove from playlist" className="p-0.5 rounded text-xs border border-red-500 text-red-400 hover:bg-red-500/10">
+                                                        <button onClick={() => handleDeleteSong(song.id)} title="Remove from playlist" className="w-7 h-7 p-0.5 rounded text-xs border border-red-500 text-red-400 hover:bg-red-500/10 flex items-center justify-center">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                                         </button>
                                                     </>
@@ -1230,7 +1230,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                             }
                                                             onInstantMix(song);
                                                         }}
-                                                        className="p-0.5 rounded text-xs border border-accent-500 text-accent-400 hover:bg-accent-500/10 transition-all flex items-center justify-center"
+                                                        className="w-7 h-7 p-0.5 rounded text-xs border border-accent-500 text-accent-400 hover:bg-accent-500/10 transition-all flex items-center justify-center"
                                                     >
                                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                                                     </button>
@@ -1241,7 +1241,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                 <div className="relative group">
                                                     <button
                                                         onClick={() => handleSimilarArtists(song)}
-                                                        className="p-0.5 rounded text-xs border border-blue-500 text-blue-400 hover:bg-blue-500/10 transition-all flex items-center justify-center"
+                                                        className="w-7 h-7 p-0.5 rounded text-xs border border-blue-500 text-blue-400 hover:bg-blue-500/10 transition-all flex items-center justify-center"
                                                     >
                                                         <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                                                             <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 11a6 6 0 00-11.86 0v2a1 1 0 001 1h9.86a1 1 0 001-1v-2z"></path>
@@ -1253,7 +1253,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                 </div>
                                                 {isInQueue ? (
                                                     <div className="relative group">
-                                                        <button onClick={() => onRemoveFromQueue(song.id)} className="p-0.5 rounded text-xs border border-red-500 text-red-400 hover:bg-red-500/10 transition-all flex items-center justify-center w-full">
+                                                        <button onClick={() => onRemoveFromQueue(song.id)} className="w-7 h-7 p-0.5 rounded text-xs border border-red-500 text-red-400 hover:bg-red-500/10 transition-all flex items-center justify-center">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                                                         </button>
                                                         <div className="hidden group-hover:block absolute bottom-full mb-2 right-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700">
@@ -1262,7 +1262,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                     </div>
                                                 ) : (
                                                     <div className="relative group">
-                                                        <button onClick={() => onAddToQueue(song)} className="p-0.5 rounded text-xs border border-green-500 text-green-400 hover:bg-green-500/10 transition-all flex items-center justify-center w-full">
+                                                        <button onClick={() => onAddToQueue(song)} className="w-7 h-7 p-0.5 rounded text-xs border border-green-500 text-green-400 hover:bg-green-500/10 transition-all flex items-center justify-center">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" /></svg>
                                                         </button>
                                                         <div className="hidden group-hover:block absolute bottom-full mb-2 right-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700">
@@ -1271,7 +1271,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                     </div>
                                                 )}
                                                 <div className="relative group">
-                                                    <button onClick={() => onAddToPlaylist(song)} className="p-0.5 rounded text-xs border border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-all flex items-center justify-center w-full">
+                                                    <button onClick={() => onAddToPlaylist(song)} className="w-7 h-7 p-0.5 rounded text-xs border border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-all flex items-center justify-center">
                                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
                                                     </button>
                                                     <div className="hidden group-hover:block absolute bottom-full mb-2 right-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700">
