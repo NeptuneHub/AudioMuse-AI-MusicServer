@@ -1234,6 +1234,20 @@ export function Albums({ credentials, filter, onNavigate }) {
                         ? data.starred2.album
                         : [data.starred2?.album].filter(Boolean);
                     setTotalCount(albumList.length);
+                } else if (typeof filter === 'object' && filter?.artistId) {
+                    // Load count for artist albums
+                    const data = await subsonicFetch('getMusicDirectory.view', { id: filter.artistId });
+                    const albums = data.directory?.child || [];
+                    setTotalCount(albums.length);
+                } else if (searchTerm && searchTerm.length >= 3) {
+                    // Load count from search response
+                    const data = await subsonicFetch('search2.view', {
+                        query: searchTerm,
+                        albumCount: 1,
+                        albumOffset: 0,
+                    });
+                    const count = data.searchResult2?.albumCount || data.searchResult3?.albumCount || 0;
+                    setTotalCount(count);
                 } else {
                     const counts = await getMusicCounts(selectedGenre);
                     setTotalCount(counts.albums);
@@ -1244,7 +1258,7 @@ export function Albums({ credentials, filter, onNavigate }) {
             }
         };
         loadCounts();
-    }, [offset, isStarredFilter, selectedGenre]);
+    }, [offset, isStarredFilter, selectedGenre, filter, searchTerm]);
 
 
     // Load data whenever offset changes
@@ -1485,6 +1499,16 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
                         ? data.starred2.artist
                         : [data.starred2?.artist].filter(Boolean);
                     setTotalCount(artistList.length);
+                } else if (searchTerm && searchTerm.length >= 3) {
+                    // Load count from search response
+                    const data = await subsonicFetch('search2.view', {
+                        query: searchTerm,
+                        artistCount: 1,
+                        albumCount: 0,
+                        songCount: 0,
+                    });
+                    const count = data.searchResult2?.artistCount || data.searchResult3?.artistCount || 0;
+                    setTotalCount(count);
                 } else {
                     const counts = await getMusicCounts('');
                     setTotalCount(counts.artists);
@@ -1495,7 +1519,7 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
             }
         };
         load();
-    }, [offset, isStarredFilter, filter?.similarArtists]);
+    }, [offset, isStarredFilter, filter?.similarArtists, searchTerm]);
 
     // Load data whenever offset changes
     useEffect(() => {
