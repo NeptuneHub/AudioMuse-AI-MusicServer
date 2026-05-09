@@ -1,6 +1,6 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { API_BASE, subsonicFetch, starSong, unstarSong, starAlbum, unstarAlbum, starArtist, unstarArtist, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed, getRadioSeed } from '../api';
+import React, { useState, useEffect, useRef } from 'react';
+import { subsonicFetch, starSong, unstarSong, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed, getRadioSeed } from '../api';
 
 const formatDate = (isoString) => {
     if (!isoString) return 'Never';
@@ -46,18 +46,18 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
             const playlistData = await subsonicFetch('getPlaylist.view', {
                 id: selectedPlaylist
             });
-            
+
             const existingSongs = playlistData.playlist?.entry || [];
             const songList = Array.isArray(existingSongs) ? existingSongs : (existingSongs ? [existingSongs] : []);
-            
+
             // Check if song is already in the playlist
             const songAlreadyExists = songList.some(s => String(s.id) === String(song.id));
-            
+
             if (songAlreadyExists) {
                 setError('Song already present in the playlist');
                 return;
             }
-            
+
             // Add the song to the playlist
             await subsonicFetch('updatePlaylist.view', {
                 playlistId: selectedPlaylist,
@@ -81,7 +81,7 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
                             <h3 className="text-xl font-bold text-white mb-1">Add to Playlist</h3>
                             <p className="text-sm text-gray-400 truncate max-w-[280px]">"{song.title}"</p>
                         </div>
-                        <button 
+                        <button
                             onClick={onClose}
                             className="text-gray-400 hover:text-white transition-colors p-1"
                         >
@@ -101,7 +101,7 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
                             </p>
                         </div>
                     )}
-                    
+
                     {success && (
                         <div className="bg-green-500/10 border border-green-500/50 rounded-lg p-3 mb-4 animate-fade-in">
                             <p className="text-green-400 text-sm flex items-center gap-2">
@@ -124,14 +124,14 @@ export const AddToPlaylistModal = ({ song, credentials, onClose, onAdded }) => {
                     </select>
 
                     <div className="flex justify-end gap-3">
-                        <button 
-                            onClick={onClose} 
+                        <button
+                            onClick={onClose}
                             className="px-5 py-2.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-white font-semibold transition-all"
                         >
                             Cancel
                         </button>
-                        <button 
-                            onClick={handleAddToPlaylist} 
+                        <button
+                            onClick={handleAddToPlaylist}
                             className="px-5 py-2.5 rounded-lg bg-gradient-accent text-white font-semibold transition-all shadow-lg hover:shadow-glow"
                         >
                             Add to Playlist
@@ -168,7 +168,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     // For discovery views, load 200 songs immediately instead of paginating
     const DISCOVERY_LOAD_SIZE = 200;
     const DISPLAY_BATCH_SIZE = 200; // Show 200 songs at a time in the UI
-    
+
     // Check if playlist is read-only (owned by another user)
     const isPlaylistReadOnly = isPlaylistView && playlistOwner && credentials?.username && playlistOwner !== credentials.username;
 
@@ -181,7 +181,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                 const genreList = data.genres?.genre || [];
                 console.log('Genre list after extraction:', genreList);
                 const allGenres = Array.isArray(genreList) ? genreList : [genreList].filter(Boolean);
-                
+
                 // Split semicolon-separated genres and remove duplicates
                 const individualGenres = [];
                 allGenres.forEach(genre => {
@@ -196,7 +196,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                         });
                     }
                 });
-                
+
                 console.log('Processed individual genres:', individualGenres);
                 setGenres(individualGenres.sort((a, b) => a.name.localeCompare(b.name)));
             } catch (err) {
@@ -214,11 +214,11 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
             } else {
                 await starSong(song.id);
             }
-            
+
             // Update song in state
-            const updateSongStar = (songList) => 
+            const updateSongStar = (songList) =>
                 songList.map(s => s.id === song.id ? {...s, starred: !s.starred} : s);
-            
+
             setSongs(updateSongStar);
             setAllSongs(updateSongStar);
         } catch (err) {
@@ -247,11 +247,11 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         const songsRemaining = playQueue.length - currentIndex;
         if (songsRemaining <= 20) {
             console.log(`🔄 Radio auto-rerun triggered: ${songsRemaining} songs remaining`);
-            
+
             const fetchMoreRadioSongs = async () => {
                 setRadioFetching(true);
                 radioFetchedRef.current = true;
-                
+
                 try {
                     // Get the radio seed configuration
                     const seedData = await getRadioSeed(filter.radioId);
@@ -275,7 +275,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     });
 
                     const data = await response.json();
-                    
+
                     if (!response.ok || data.error) {
                         console.error('Radio auto-rerun failed:', data.error);
                         setRadioFetching(false);
@@ -290,10 +290,10 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     }));
 
                     console.log(`✨ Radio auto-rerun complete: ${newSongs.length} new songs added to queue`);
-                    
+
                     // Add new songs to the queue
                     newSongs.forEach(song => onAddToQueue(song));
-                    
+
                 } catch (err) {
                     console.error('Radio auto-rerun error:', err);
                 } finally {
@@ -508,7 +508,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
             setError(err.message || 'Failed to delete song.');
         }
     };
-    
+
     const handleMoveSong = async (index, direction) => {
         if (!isPlaylistView) return;
         const newSongs = [...allSongs];
@@ -516,7 +516,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         const newIndex = direction === 'up' ? index - 1 : index + 1;
         if (newIndex < 0 || newIndex > newSongs.length) return;
         newSongs.splice(newIndex, 0, movedSong);
-        
+
         setAllSongs(newSongs); // Optimistic update
         const currentVisibleSongs = newSongs.slice(0, songs.length);
         setSongs(currentVisibleSongs);
@@ -542,7 +542,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     </p>
                 </div>
             )}
-            
+
             {/* Read-only playlist notice */}
             {isPlaylistReadOnly && (
                 <div className="bg-yellow-500/10 border border-yellow-500/50 rounded-lg p-4 mb-6 animate-fade-in">
@@ -697,7 +697,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     </div>
                 </div>
             )}
-            
+
             {/* Modern Search Bar */}
             <div className="mb-6 flex flex-col sm:flex-row gap-3">
                 <div className="flex-1 relative">
@@ -739,8 +739,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
             {/* Action Buttons */}
             <div className="mb-6 flex flex-wrap gap-3">
                 {(songs.length > 0 || allSongs.length > 0) && (
-                    <button 
-                        onClick={handlePlayAlbum} 
+                    <button
+                        onClick={handlePlayAlbum}
                         className="inline-flex items-center gap-2 border-2 border-green-500 text-green-400 bg-green-500/10 hover:bg-green-500/20 hover:scale-105 transition-all rounded-lg py-2.5 px-5 font-semibold"
                     >
                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -808,7 +808,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     Starred Songs
                 </button>
             </div>
-            
+
             {/* Empty States */}
             {!isLoading && songs.length === 0 && (searchTerm || filter || isStarredFilter) && (
                 <div className="text-center py-16">
@@ -851,13 +851,13 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 const isCurrentSong = currentSong && currentSong.id === song.id;
                                 const isPlaying = isCurrentSong && isAudioPlaying;
                                 const isInQueue = playQueue.some(s => s.id === song.id);
-                                const rowColor = isCurrentSong 
-                                    ? 'bg-accent-500/10 border-l-4 border-l-accent-500' 
+                                const rowColor = isCurrentSong
+                                    ? 'bg-accent-500/10 border-l-4 border-l-accent-500'
                                     : (index % 2 === 0 ? 'bg-dark-800' : 'bg-dark-750');
                                 return (
                                     <tr ref={index === songs.length - 1 ? lastSongElementRef : null} key={`${song.id}-${index}`} className={`border-b border-dark-600 transition-all hover:bg-dark-700 ${rowColor}`}>
                                         <td className="px-4 py-4">
-                                            <button 
+                                            <button
                                                 onClick={() => {
                                                     if (isCurrentSong) {
                                                         // If current song, toggle play/pause
@@ -869,8 +869,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                 }}
                                                 title={isPlaying ? "Pause song" : "Play this song"}
                                                 className={`p-1.5 rounded-lg border-2 transition-all hover:scale-105 flex items-center justify-center ${
-                                                    isPlaying 
-                                                        ? 'border-accent-500 text-accent-400 bg-accent-500/20 shadow-glow animate-pulse' 
+                                                    isPlaying
+                                                        ? 'border-accent-500 text-accent-400 bg-accent-500/20 shadow-glow animate-pulse'
                                                         : 'border-gray-600 text-gray-400 hover:border-accent-500 hover:text-accent-400 hover:bg-accent-500/10'
                                                 }`}
                                             >
@@ -963,7 +963,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
                                                 </button>
                                             </div>
-                                            
+
                                             {/* Mobile: Compact vertical buttons - matching desktop style */}
                                             <div className="flex sm:hidden flex-col gap-1 items-end">
                                                 <button
@@ -1000,732 +1000,6 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     </table>
                     {isLoading && <p className="text-center text-gray-400 mt-4">Loading songs...</p>}
                 </div>
-            )}
-        </div>
-    );
-}
-
-const AlbumPlaceholder = ({ name }) => {
-	const initial = name ? name.charAt(0).toUpperCase() : '?';
-	return (
-		<div className="w-full h-full bg-gradient-to-br from-dark-700 to-dark-600 flex items-center justify-center">
-			<span className="text-4xl sm:text-5xl font-bold text-gray-500">{initial}</span>
-		</div>
-	);
-};
-
-const ArtistPlaceholder = () => (
-	<div className="w-full h-full bg-gradient-to-br from-dark-700 to-dark-600 flex items-center justify-center rounded-full">
-		<svg className="w-12 h-12 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
-			<path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-		</svg>
-	</div>
-);
-
-const ImageWithFallback = ({ src, placeholder, alt }) => {
-    const [hasError, setHasError] = useState(false);
-    const [isLoaded, setIsLoaded] = useState(false);
-
-    // Build authenticated URL with JWT token - MUST call API!
-    const imageSrc = useMemo(() => {
-        if (!src) return null;
-        
-        // If already a string URL, use it
-        if (typeof src === 'string') {
-            return src;
-        }
-        
-        // Build authenticated URL with JWT token
-        const token = localStorage.getItem('token');
-        if (src.useAuthFetch && token && src.url) {
-            const url = new URL(src.url, window.location.origin);
-            url.searchParams.set('jwt', token);
-            return url.toString();
-        }
-        
-        return src.url || null;
-    }, [src]);
-
-    // Reset state when src changes - ALWAYS load new images!
-    useEffect(() => {
-        setHasError(false);
-        setIsLoaded(false);
-    }, [imageSrc]);
-
-    // Show placeholder if error or no src
-    if (hasError || !imageSrc) {
-        return <div className="w-full h-full">{placeholder}</div>;
-    }
-
-    // Show the actual image - ALWAYS render to trigger API call!
-    return (
-        <div className="w-full h-full relative">
-            {/* Placeholder shown until image loads - NO FLICKER */}
-            {!isLoaded && (
-                <div className="absolute inset-0">{placeholder}</div>
-            )}
-            {/* Image loads and calls API */}
-            <img 
-                src={imageSrc}
-                alt={alt}
-                loading="lazy"
-                onLoad={() => setIsLoaded(true)}
-                onError={() => setHasError(true)}
-                className={`w-full h-full object-cover transition-opacity duration-200 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
-            />
-        </div>
-    );
-};
-
-// Memoized album card to prevent unnecessary re-renders during scroll
-const AlbumCard = React.memo(({ album, isLastElement, lastAlbumElementRef, onNavigate, onStarToggle, isStarred }) => {
-    return (
-        <div 
-            ref={isLastElement ? lastAlbumElementRef : null}
-            key={album.id}
-            className="group bg-dark-750 rounded-xl p-3 sm:p-4 text-center hover:bg-dark-700 card-hover cursor-pointer transition-all"
-            onClick={() => onNavigate({ page: 'songs', title: album.name, filter: { albumId: album.id } })}
-        >
-            <div className="relative w-full bg-dark-700 rounded-lg aspect-square flex items-center justify-center mb-3 overflow-hidden shadow-md">
-                <ImageWithFallback
-                    src={album.coverArt ? (() => {
-                        const params = new URLSearchParams({ id: album.coverArt, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
-                        const url = `${API_BASE}/rest/getCoverArt.view?${params.toString()}`;
-                        return { url, useAuthFetch: true };
-                    })() : ''}
-                    placeholder={<AlbumPlaceholder name={album.name} />}
-                    alt={album.name}
-                />
-                {/* Star button in top-right corner */}
-                {onStarToggle && (
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onStarToggle(album.id, isStarred);
-                        }}
-                        className="absolute top-2 right-2 z-10 p-1 rounded-full bg-dark-800/80 hover:bg-dark-700/90 transition-all flex items-center justify-center"
-                    >
-                        <svg className={`w-4 h-4 ${isStarred ? 'text-yellow-400 fill-current' : 'text-gray-400'}`} fill={isStarred ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 20 20">
-                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
-                        </svg>
-                    </button>
-                )}
-                {/* Play button overlay on hover */}
-                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
-                    <div className="bg-accent-500 rounded-full p-3 shadow-glow transform group-hover:scale-110 transition-transform">
-                        <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
-                        </svg>
-                    </div>
-                </div>
-            </div>
-            <p className="font-semibold text-white truncate text-sm sm:text-base group-hover:text-accent-400 transition-colors">{album.name}</p>
-            <p className="text-xs sm:text-sm text-gray-400 truncate mt-1">{album.artist}</p>
-        </div>
-    );
-});
-
-export function Albums({ credentials, filter, onNavigate }) {
-    const [albums, setAlbums] = useState([]);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const [offset, setOffset] = useState(0);
-    const [genres, setGenres] = useState([]);
-    const [selectedGenre, setSelectedGenre] = useState('');
-    const [totalCount, setTotalCount] = useState(0);
-    const [isStarredFilter, setIsStarredFilter] = useState(false);
-    const [starredAlbums, setStarredAlbums] = useState(new Set());
-    const PAGE_SIZE = 50;
-    
-    // Load genres on component mount
-    useEffect(() => {
-        const loadGenres = async () => {
-            try {
-                const data = await getGenres();
-                const genreList = data.genres?.genre || [];
-                const allGenres = Array.isArray(genreList) ? genreList : [genreList].filter(Boolean);
-                
-                // Split semicolon-separated genres and remove duplicates
-                const individualGenres = [];
-                allGenres.forEach(genre => {
-                    // Backend returns genre name in 'value' field
-                    const genreName = genre.value || genre.name;
-                    if (genreName) {
-                        const splitGenres = genreName.split(';').map(g => g.trim()).filter(g => g);
-                        splitGenres.forEach(g => {
-                            if (!individualGenres.find(existing => existing.name === g)) {
-                                individualGenres.push({ name: g });
-                            }
-                        });
-                    }
-                });
-                
-                setGenres(individualGenres.sort((a, b) => a.name.localeCompare(b.name)));
-            } catch (err) {
-                console.error('Failed to load genres:', err);
-            }
-        };
-        loadGenres();
-    }, []);
-    
-    // Load starred albums
-    useEffect(() => {
-        const loadStarredAlbums = async () => {
-            try {
-                const data = await getStarredSongs();
-                const starred = data.starred2?.album || [];
-                const starredIds = new Set((Array.isArray(starred) ? starred : [starred]).filter(Boolean).map(a => a.id));
-                setStarredAlbums(starredIds);
-            } catch (err) {
-                console.error('Failed to load starred albums:', err);
-            }
-        };
-        loadStarredAlbums();
-    }, []);
-    
-    const handleStarToggle = async (albumId, isStarred) => {
-        try {
-            if (isStarred) {
-                await unstarAlbum(albumId);
-                setStarredAlbums(prev => {
-                    const next = new Set(prev);
-                    next.delete(albumId);
-                    return next;
-                });
-            } else {
-                await starAlbum(albumId);
-                setStarredAlbums(prev => new Set(prev).add(albumId));
-            }
-        } catch (err) {
-            console.error('Failed to toggle star:', err);
-        }
-    };
-    
-    useEffect(() => {
-        setAlbums([]);
-        setOffset(0);
-        setTotalCount(0);
-        // If filter is an object with artistId, don't set searchTerm (use browse instead)
-        if(filter) {
-            if (typeof filter === 'string') {
-                setSearchTerm(filter);
-            } else if (typeof filter === 'object') {
-                // artistId/genreId/etc - don't set searchTerm, will be handled in loadMoreAlbums
-                setSearchTerm('');
-            }
-        }
-    }, [filter]);
-
-    useEffect(() => {
-        setAlbums([]);
-        setOffset(0);
-        setTotalCount(0);
-    }, [searchTerm, selectedGenre, isStarredFilter]);
-
-    // Load album counts (once per filter)
-    useEffect(() => {
-        if (offset !== 0) return; // Only load count on first page
-
-        const loadCounts = async () => {
-            try {
-                if (isStarredFilter) {
-                    const data = await getStarredSongs();
-                    const albumList = Array.isArray(data.starred2?.album)
-                        ? data.starred2.album
-                        : [data.starred2?.album].filter(Boolean);
-                    setTotalCount(albumList.length);
-                } else if (typeof filter === 'object' && filter?.artistId) {
-                    // Load count for artist albums
-                    const data = await subsonicFetch('getMusicDirectory.view', { id: filter.artistId });
-                    const albums = data.directory?.child || [];
-                    setTotalCount(albums.length);
-                } else if (searchTerm && searchTerm.length >= 3) {
-                    // Load count from search response
-                    const data = await subsonicFetch('search2.view', {
-                        query: searchTerm,
-                        albumCount: 1,
-                        albumOffset: 0,
-                    });
-                    const count = data.searchResult2?.albumCount || data.searchResult3?.albumCount || 0;
-                    setTotalCount(count);
-                } else {
-                    const counts = await getMusicCounts(selectedGenre);
-                    setTotalCount(counts.albums);
-                }
-            } catch (err) {
-                console.error('Failed to load album counts:', err);
-                setTotalCount(0);
-            }
-        };
-        loadCounts();
-    }, [offset, isStarredFilter, selectedGenre, filter, searchTerm]);
-
-
-    // Load data whenever offset changes
-    useEffect(() => {
-        const load = async () => {
-            setIsLoading(true);
-            try {
-                let albumList = [];
-
-                if (isStarredFilter) {
-                    const data = await getStarredSongs();
-                    const all = Array.isArray(data.starred2?.album)
-                        ? data.starred2.album
-                        : [data.starred2?.album].filter(Boolean);
-                    albumList = all.slice(offset, offset + PAGE_SIZE);
-                } else if (searchTerm && searchTerm.length >= 3) {
-                    // Search
-                    const data = await subsonicFetch('search2.view', {
-                        query: searchTerm,
-                        albumCount: PAGE_SIZE,
-                        albumOffset: offset,
-                    });
-                    albumList = data.searchResult2?.album || data.searchResult3?.album || [];
-                } else if (typeof filter === 'object' && filter?.artistId) {
-                    // Browse albums for a specific artist
-                    const data = await subsonicFetch('getMusicDirectory.view', { id: filter.artistId });
-                    albumList = (data.directory?.child || []).slice(offset, offset + PAGE_SIZE);
-                } else {
-                    // Browse
-                    const params = {
-                        type: 'alphabeticalByName',
-                        size: PAGE_SIZE,
-                        offset,
-                    };
-                    if (selectedGenre) params.genre = selectedGenre;
-                    const data = await subsonicFetch('getAlbumList2.view', params);
-                    albumList = data.albumList2?.album || [];
-                }
-
-                const items = Array.isArray(albumList) ? albumList : [albumList].filter(Boolean);
-                setAlbums(prev => offset === 0 ? items : [...prev, ...items]);
-            } catch (e) {
-                console.error('Failed to load albums:', e);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
-        load();
-    }, [offset, searchTerm, selectedGenre, isStarredFilter, filter]);
-
-
-    const observer = useRef();
-    const lastAlbumElementRef = useRef();
-
-    useEffect(() => {
-        if (isLoading) return;
-        if (observer.current) observer.current.disconnect();
-
-        observer.current = new IntersectionObserver(([entry]) => {
-            if (entry.isIntersecting && albums.length < totalCount) {
-                setOffset(prev => prev + PAGE_SIZE);
-            }
-        });
-
-        if (lastAlbumElementRef.current) {
-            observer.current.observe(lastAlbumElementRef.current);
-        }
-
-        return () => observer.current?.disconnect();
-    }, [isLoading, albums.length, totalCount]);
-
-    return (
-        <div>
-            {/* Count Header */}
-            {totalCount > 0 && (
-                <div className="mb-4">
-                    <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                        {typeof filter === 'object' && filter?.artistName
-                            ? `Albums by ${filter.artistName}`
-                            : 'Albums'}
-                        <span className="text-accent-400 text-lg">({totalCount})</span>
-                    </h2>
-                </div>
-            )}
-            
-            {/* Modern Search Bar */}
-            <div className="mb-6 flex flex-col sm:flex-row gap-3">
-                <div className="flex-1 relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                        </svg>
-                    </div>
-                    <input
-                        type="text"
-                        placeholder="Search for an album or artist..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        disabled={isStarredFilter}
-                        className="w-full pl-10 pr-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white placeholder-gray-500 transition-all disabled:opacity-50"
-                    />
-                    {searchTerm && (
-                        <button
-                            onClick={() => setSearchTerm('')}
-                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-white"
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-                            </svg>
-                        </button>
-                    )}
-                </div>
-                <select
-                    value={selectedGenre}
-                    onChange={(e) => setSelectedGenre(e.target.value)}
-                    disabled={isStarredFilter}
-                    className="px-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white min-w-[150px] transition-all disabled:opacity-50"
-                >
-                    <option value="">All Genres</option>
-                    {genres.map(genre => (
-                        <option key={genre.name} value={genre.name}>{genre.name}</option>
-                    ))}
-                </select>
-                <button
-                    onClick={() => {
-                        setSearchTerm('');
-                        setSelectedGenre('');
-                        setIsStarredFilter(!isStarredFilter);
-                    }}
-                    className={`inline-flex items-center gap-2 font-semibold py-2.5 px-5 rounded-lg transition-all whitespace-nowrap ${
-                        isStarredFilter
-                            ? 'bg-yellow-500/20 text-yellow-400 border-2 border-yellow-400 shadow-glow'
-                            : 'bg-dark-750 hover:bg-dark-700 text-yellow-400 border border-yellow-400/30 hover:border-yellow-400/50'
-                    }`}
-                >
-                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
-                    </svg>
-                    Starred Albums
-                </button>
-            </div>
-            
-            {/* Album Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
-                {albums.map((album, index) => (
-                    <div
-                        ref={index === albums.length - 1 ? lastAlbumElementRef : null}
-                        key={album.id}
-                    >
-                        <AlbumCard
-                            album={album}
-                            isLastElement={false}
-                            lastAlbumElementRef={null}
-                            onNavigate={onNavigate}
-                            onStarToggle={handleStarToggle}
-                            isStarred={starredAlbums.has(album.id)}
-                        />
-                    </div>
-                ))}
-            </div>
-            
-            {isLoading && (
-                <div className="flex justify-center items-center mt-8">
-                    <svg className="animate-spin h-8 w-8 text-accent-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                </div>
-            )}
-            {!isLoading && albums.length >= totalCount && albums.length > 0 && (
-                <p className="text-center text-gray-500 mt-8">All {totalCount} albums loaded</p>
-            )}
-        </div>
-    );
-}
-
-export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtists, similarTo, filter }) {
-    const [artists, setArtists] = useState([]);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const [offset, setOffset] = useState(0);
-    const [totalCount, setTotalCount] = useState(0);
-    const [isStarredFilter, setIsStarredFilter] = useState(false);
-    const [starredArtists, setStarredArtists] = useState(new Set());
-    const PAGE_SIZE = 50;
-
-    useEffect(() => {
-        setArtists([]);
-        setOffset(0);
-        setTotalCount(0);
-    }, [searchTerm, isStarredFilter, filter?.similarArtists]);
-
-    // Load starred artists
-    useEffect(() => {
-        const loadStarredArtists = async () => {
-            try {
-                const data = await getStarredSongs();
-                const starred = data.starred2?.artist || [];
-                const starredIds = new Set((Array.isArray(starred) ? starred : [starred]).filter(Boolean).map(a => a.id));
-                setStarredArtists(starredIds);
-            } catch (err) {
-                console.error('Failed to load starred artists:', err);
-            }
-        };
-        loadStarredArtists();
-    }, []);
-
-    const handleStarToggle = async (artistId, isStarred) => {
-        try {
-            if (isStarred) {
-                await unstarArtist(artistId);
-                setStarredArtists(prev => {
-                    const next = new Set(prev);
-                    next.delete(artistId);
-                    return next;
-                });
-            } else {
-                await starArtist(artistId);
-                setStarredArtists(prev => new Set(prev).add(artistId));
-            }
-        } catch (err) {
-            console.error('Failed to toggle star:', err);
-        }
-    };
-
-    // Load artist counts (once per filter)
-    useEffect(() => {
-        if (offset !== 0) return; // Only load count on first page
-
-        const load = async () => {
-            try {
-                if (filter?.similarArtists) {
-                    setTotalCount(filter.similarArtists.length);
-                } else if (isStarredFilter) {
-                    const data = await getStarredSongs();
-                    const artistList = Array.isArray(data.starred2?.artist)
-                        ? data.starred2.artist
-                        : [data.starred2?.artist].filter(Boolean);
-                    setTotalCount(artistList.length);
-                } else if (searchTerm && searchTerm.length >= 3) {
-                    // Load count from search response
-                    const data = await subsonicFetch('search2.view', {
-                        query: searchTerm,
-                        artistCount: 1,
-                        albumCount: 0,
-                        songCount: 0,
-                    });
-                    const count = data.searchResult2?.artistCount || data.searchResult3?.artistCount || 0;
-                    setTotalCount(count);
-                } else {
-                    const counts = await getMusicCounts('');
-                    setTotalCount(counts.artists);
-                }
-            } catch (err) {
-                console.error('Failed to load artist counts:', err);
-                setTotalCount(0);
-            }
-        };
-        load();
-    }, [offset, isStarredFilter, filter?.similarArtists, searchTerm]);
-
-    // Load data whenever offset changes
-    useEffect(() => {
-        const load = async () => {
-            setIsLoading(true);
-            try {
-                let artistList = [];
-
-                if (filter?.similarArtists) {
-                    // Handle preloaded similar artists
-                    artistList = filter.similarArtists.slice(offset, offset + PAGE_SIZE);
-                } else if (isStarredFilter) {
-                    // Load starred artists
-                    const data = await getStarredSongs();
-                    const all = Array.isArray(data.starred2?.artist)
-                        ? data.starred2.artist
-                        : [data.starred2?.artist].filter(Boolean);
-                    artistList = all.slice(offset, offset + PAGE_SIZE);
-                } else if (searchTerm && searchTerm.length >= 3) {
-                    // Search
-                    const data = await subsonicFetch('search2.view', {
-                        query: searchTerm,
-                        artistCount: PAGE_SIZE,
-                        artistOffset: offset,
-                        albumCount: 0,
-                        songCount: 0,
-                    });
-                    artistList = data.searchResult2?.artist || data.searchResult3?.artist || [];
-                } else if (searchTerm.length > 0 && searchTerm.length < 3) {
-                    // Search term too short, don't load
-                    setIsLoading(false);
-                    return;
-                } else {
-                    // Browse - load all artists with wildcard
-                    const data = await subsonicFetch('search2.view', {
-                        query: '*',
-                        artistCount: PAGE_SIZE,
-                        artistOffset: offset,
-                        albumCount: 0,
-                        songCount: 0,
-                    });
-                    artistList = data.searchResult2?.artist || data.searchResult3?.artist || [];
-                }
-
-                const items = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
-                setArtists(prev => offset === 0 ? items : [...prev, ...items]);
-            } catch (e) {
-                console.error('Failed to load artists:', e);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
-        load();
-    }, [offset, searchTerm, isStarredFilter, filter?.similarArtists]);
-
-
-    const observer = useRef();
-    const lastArtistElementRef = useRef();
-
-    useEffect(() => {
-        if (isLoading) return;
-        if (observer.current) observer.current.disconnect();
-
-        observer.current = new IntersectionObserver(([entry]) => {
-            if (entry.isIntersecting && artists.length < totalCount) {
-                setOffset(prev => prev + PAGE_SIZE);
-            }
-        });
-
-        if (lastArtistElementRef.current) {
-            observer.current.observe(lastArtistElementRef.current);
-        }
-
-        return () => observer.current?.disconnect();
-    }, [isLoading, artists.length, totalCount]);
-
-    return (
-        <div>
-            {/* Count Header */}
-            <div className="mb-4">
-                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                    Artists
-                    {totalCount > 0 && <span className="text-accent-400 text-lg">({totalCount})</span>}
-                    {similarTo && <span className="text-gray-400 text-lg">- Similar to {similarTo}</span>}
-                </h2>
-            </div>
-            
-            {/* Modern Search Bar */}
-            <div className="mb-6 flex flex-col sm:flex-row gap-3">
-                <div className="flex-1 relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                        </svg>
-                    </div>
-                    <input
-                        type="text"
-                        placeholder="Search for an artist... (min 3 characters)"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        disabled={isStarredFilter}
-                        className="w-full pl-10 pr-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white placeholder-gray-500 transition-all disabled:opacity-50"
-                    />
-                    {searchTerm && (
-                        <button
-                            onClick={() => setSearchTerm('')}
-                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-white"
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-                            </svg>
-                        </button>
-                    )}
-                </div>
-                <button
-                    onClick={() => {
-                        setSearchTerm('');
-                        setIsStarredFilter(!isStarredFilter);
-                    }}
-                    className={`inline-flex items-center gap-2 font-semibold py-2.5 px-5 rounded-lg transition-all whitespace-nowrap ${
-                        isStarredFilter
-                            ? 'bg-yellow-500/20 text-yellow-400 border-2 border-yellow-400 shadow-glow'
-                            : 'bg-dark-750 hover:bg-dark-700 text-yellow-400 border border-yellow-400/30 hover:border-yellow-400/50'
-                    }`}
-                >
-                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
-                    </svg>
-                    Starred Artists
-                </button>
-            </div>
-            
-            {/* Artist Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
-                {artists.map((artist, index) => {
-                    const isStarred = starredArtists.has(artist.id);
-                    return (
-                        <div
-                            ref={index === artists.length - 1 ? lastArtistElementRef : null}
-                            key={artist.id}
-                            onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: { artistId: artist.id, artistName: artist.name } })}
-                            className="group bg-dark-750 rounded-xl p-3 sm:p-4 text-center hover:bg-dark-700 card-hover flex flex-col items-center cursor-pointer relative">
-                            {/* Star button in top-right corner of the card */}
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleStarToggle(artist.id, isStarred);
-                                }}
-                                className="absolute top-2 right-2 z-10 p-1 rounded-full bg-dark-800/80 hover:bg-dark-700/90 transition-all flex items-center justify-center"
-                            >
-                                <svg className={`w-4 h-4 ${isStarred ? 'text-yellow-400 fill-current' : 'text-gray-400'}`} fill={isStarred ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 20 20">
-                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
-                                </svg>
-                            </button>
-                            {/* Instant Mix button in bottom-left corner aligned with star */}
-                            {audioMuseUrl && onSimilarArtists && (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onSimilarArtists(artist);
-                                    }}
-                                    title="Similar Artists"
-                                    className="absolute bottom-2 right-2 z-10 p-1 rounded-full bg-accent-500/80 hover:bg-accent-500/90 transition-all flex items-center justify-center"
-                                >
-                                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                                    </svg>
-                                </button>
-                            )}
-                            <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-accent-500/20 to-purple-500/20 flex items-center justify-center mb-3 overflow-hidden flex-shrink-0 shadow-lg border-2 border-dark-600 group-hover:border-accent-500/50 transition-all">
-                                <ImageWithFallback
-                                    src={artist.coverArt ? (() => {
-                                        const params = new URLSearchParams({ id: artist.coverArt, v: '1.16.1', c: 'AudioMuse-AI', size: '512' });
-                                        const url = `${API_BASE}/rest/getCoverArt.view?${params.toString()}`;
-                                        return { url, useAuthFetch: true };
-                                    })() : ''}
-                                    placeholder={<ArtistPlaceholder />}
-                                    alt={artist.name}
-                                />
-                                {/* Play button overlay on hover */}
-                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100 rounded-full">
-                                    <div className="bg-accent-500 rounded-full p-3 shadow-glow transform group-hover:scale-110 transition-transform">
-                                        <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                            <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
-                                        </svg>
-                                    </div>
-                                </div>
-                            </div>
-                            <p className="font-semibold text-white truncate w-full text-sm sm:text-base group-hover:text-accent-400 transition-colors">{artist.name}</p>
-                            <p className="text-xs sm:text-sm text-gray-400 truncate w-full mt-1">&nbsp;</p>
-                        </div>
-                    );
-                })}
-            </div>
-            
-            {isLoading && (
-                <div className="flex justify-center items-center mt-8">
-                    <svg className="animate-spin h-8 w-8 text-accent-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                </div>
-            )}
-            {!isLoading && artists.length >= totalCount && artists.length > 0 && (
-                <p className="text-center text-gray-500 mt-8">All {totalCount} artists loaded</p>
             )}
         </div>
     );

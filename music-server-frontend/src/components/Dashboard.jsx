@@ -1,6 +1,6 @@
 // Suggested path: music-server-frontend/src/components/Dashboard.jsx
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { Songs, Albums, Artists, AddToPlaylistModal } from './MusicViews.jsx';
+import { Songs, AddToPlaylistModal } from './MusicViews.jsx';
 import RadioPage from './RadioPage.jsx';
 import TextSongSearch from './TextSongSearch.jsx';
 import Map from './Map.jsx';
@@ -9,7 +9,7 @@ import AdminPanel from './AdminPanel.jsx';
 import UserSettings from './UserSettings.jsx';
 import CustomAudioPlayer from './AudioPlayer.jsx';
 import PlayQueueView from './PlayQueueView.jsx';
-import { subsonicFetch, getRadioSeed, getSimilarArtists } from '../api';
+import { subsonicFetch, getRadioSeed } from '../api';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 
@@ -25,8 +25,8 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                     // Check if user has access to admin page if that's where they were
                     const hasAdminPage = parsed.some(nav => nav.page === 'admin');
                     if (hasAdminPage && !isAdmin) {
-                        // User was on admin page but is no longer admin, reset to artists
-                        return [{ page: 'artists', title: 'Artists' }];
+                        // User was on admin page but is no longer admin, reset to songs
+                        return [{ page: 'songs', title: 'Songs' }];
                     }
                     return parsed;
                 }
@@ -34,7 +34,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
         } catch (error) {
             console.warn('Failed to restore navigation from localStorage:', error);
         }
-        return [{ page: 'artists', title: 'Artists' }];
+        return [{ page: 'songs', title: 'Songs' }];
     });
     const [playQueue, setPlayQueue] = useState([]);
     const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -368,30 +368,6 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
         }
     };
 
-    const handleSimilarArtists = async (artist) => {
-        if (!audioMuseUrl) return;
-
-        setMixMessage(`Finding similar artists to "${artist.name}"...`);
-        try {
-            const data = await getSimilarArtists(artist.id, 10);  // Changed from 50 to 10
-            let similarArtists = data.similarArtists2?.artist || [];
-            similarArtists = Array.isArray(similarArtists) ? similarArtists : [similarArtists].filter(Boolean);
-
-            // Navigate to artists view with similar results
-            handleNavigate({
-                page: 'artists',
-                title: 'Artists',
-                similarTo: artist.name,
-                filter: { similarArtists: similarArtists }
-            });
-            setMixMessage('');
-        } catch (error) {
-            console.error("Failed to find similar artists:", error);
-            setMixMessage('Error finding similar artists.');
-            setTimeout(() => setMixMessage(''), 3000);
-        }
-    };
-
     // Toggle play/pause for currently playing song
     const handleTogglePlayPause = useCallback(() => {
         const audio = document.querySelector('audio');
@@ -457,9 +433,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 						
 					{/* Desktop Navigation */}
 					<div className="hidden md:flex items-center space-x-1 lg:space-x-2">
-						<NavLink page="artists" title="Artists">Artists</NavLink>
-						<NavLink page="albums" title="All Albums">Albums</NavLink>
-						<NavLink page="songs" title="Songs">Songs</NavLink>
+																		<NavLink page="songs" title="Songs">Songs</NavLink>
 						<NavLink page="text-search" title="Text Search" disabled={!audioMuseUrl}>Text Search</NavLink>
 						<NavLink page="radio" title="Radio" disabled={!audioMuseUrl}>Radio</NavLink>
 						<NavLink page="map" title="Map" disabled={!audioMuseUrl}>Map</NavLink>
@@ -514,9 +488,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 				{/* Mobile Navigation Menu */}
 				{isMenuOpen && (
 					<div className="md:hidden px-4 pt-2 pb-4 space-y-2 border-t border-dark-600 bg-dark-750 animate-slide-up">
-						<NavLink page="artists" title="Artists">Artists</NavLink>
-						<NavLink page="albums" title="All Albums">Albums</NavLink>
-						<NavLink page="songs" title="Songs">Songs</NavLink>
+																		<NavLink page="songs" title="Songs">Songs</NavLink>
 						<NavLink page="text-search" title="Text Search" disabled={!audioMuseUrl}>Text Search</NavLink>
 						<NavLink page="radio" title="Radio" disabled={!audioMuseUrl}>Radio</NavLink>
 						<NavLink page="map" title="Map" disabled={!audioMuseUrl}>Map</NavLink>
@@ -554,8 +526,6 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
 					</div>
 				)}
                     {currentView.page === 'songs' && <Songs credentials={credentials} filter={currentView.filter} onPlay={handlePlaySong} onTogglePlayPause={handleTogglePlayPause} onAddToQueue={handleAddToQueue} onRemoveFromQueue={handleRemoveSongById} playQueue={playQueue} currentSong={currentSong} isAudioPlaying={isAudioPlaying} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onInstantMix={handleInstantMix} onAddToPlaylist={setSelectedSongForPlaylist} />}
-                    {currentView.page === 'albums' && <Albums credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} />}
-                    {currentView.page === 'artists' && <Artists credentials={credentials} filter={currentView.filter} onNavigate={handleNavigate} audioMuseUrl={audioMuseUrl} onSimilarArtists={handleSimilarArtists} similarTo={currentView.similarTo} />}
                     {currentView.page === 'playlists' && <Playlists credentials={credentials} isAdmin={isAdmin} onNavigate={handleNavigate} />}
                     {currentView.page === 'text-search' && <TextSongSearch onNavigate={handleNavigate} />}
                     {currentView.page === 'radio' && <RadioPage onNavigate={handleNavigate} onAddToQueue={handleAddToQueue} onPlay={handlePlaySong} />}
