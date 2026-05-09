@@ -130,7 +130,7 @@ function TextSongSearch({ onNavigate }) {
                             : 'bg-dark-700 text-gray-400 hover:text-white border border-dark-600'
                     }`}
                 >
-                    CLAP Text Search
+                    DCLAP Text Search
                 </button>
                 <button
                     onClick={() => setActiveTab('semantic')}
