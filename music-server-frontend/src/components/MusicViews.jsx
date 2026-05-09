@@ -1,5 +1,5 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { API_BASE, subsonicFetch, starSong, unstarSong, starAlbum, unstarAlbum, starArtist, unstarArtist, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed, getRadioSeed } from '../api';
 
 const formatDate = (isoString) => {
@@ -150,7 +150,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
-    const [hasMore, setHasMore] = useState(true);
+    const [offset, setOffset] = useState(0);
     const [refreshKey, setRefreshKey] = useState(0);
     const [genres, setGenres] = useState([]);
     const [selectedGenre, setSelectedGenre] = useState('');
@@ -163,7 +163,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
 
     const isPlaylistView = !!filter?.playlistId;
     const isRadioView = !!filter?.isRadio;
-    const PAGE_SIZE = 10;
+    const PAGE_SIZE = 50;
 
     // For discovery views, load 200 songs immediately instead of paginating
     const DISCOVERY_LOAD_SIZE = 200;
@@ -229,7 +229,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     useEffect(() => {
         setSongs([]);
         setAllSongs([]);
-        setHasMore(true);
+        setOffset(0);
         setDiscoveryView('all'); // Reset discovery view on filter/genre change
         radioFetchedRef.current = false; // Reset radio fetch tracker
     }, [searchTerm, filter, refreshKey, selectedGenre]);
@@ -322,19 +322,17 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         }
     }, [selectedGenre, filter]);
 
-    const loadMoreSongs = useCallback(() => {
-        if (isLoading || !hasMore) return;
-        setIsLoading(true);
-        setError('');
+    // Load songs when offset or filters change
+    useEffect(() => {
+        const load = async () => {
+            setIsLoading(true);
+            setError('');
 
-        const fetcher = async () => {
             try {
                 // Handle "All Songs" view - fetch songs with pagination using search3
                 if (!filter && !searchTerm && discoveryView === 'all' && !selectedGenre && !isStarredFilter) {
-                    const offset = allSongs.length;
-                    // Use search3.view with a wildcard to get all songs with pagination
                     const data = await subsonicFetch('search3.view', {
-                        query: ' ',  // Space character matches all songs
+                        query: ' ',
                         songCount: DISPLAY_BATCH_SIZE,
                         songOffset: offset,
                         artistCount: 0,
@@ -343,18 +341,15 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     const newSongs = data.searchResult3?.song || [];
                     const songsArray = Array.isArray(newSongs) ? newSongs : [newSongs].filter(Boolean);
 
-                    const combined = [...allSongs, ...songsArray];
-                    setAllSongs(combined);
-                    setSongs(combined);
-
-                    // Check if we have more songs
-                    setHasMore(songsArray.length === DISPLAY_BATCH_SIZE);
-                    setIsLoading(false);
+                    setSongs(prev => offset === 0 ? songsArray : [...prev, ...songsArray]);
+                    setAllSongs(prev => offset === 0 ? songsArray : [...prev, ...songsArray]);
                     return;
                 }
 
                 // Handle discovery views - load all at once (up to 200)
                 if (!filter && !searchTerm && discoveryView !== 'all') {
+                    if (offset !== 0) return; // Only load once for discovery views
+
                     let newSongs = [];
                     try {
                         if (discoveryView === 'recent') {
@@ -365,12 +360,10 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             newSongs = await getRecentlyPlayed(DISCOVERY_LOAD_SIZE, 0, selectedGenre);
                         }
                         const songsArray = newSongs || [];
-                        setSongs(songsArray);  // Set all songs at once
-                        setAllSongs(songsArray);  // Store in allSongs too for Play All
-                        setHasMore(false);  // No more pagination for discovery views
+                        setSongs(songsArray);
+                        setAllSongs(songsArray);
                     } catch (err) {
                         setError('Failed to load songs: ' + err.message);
-                        setHasMore(false);
                     } finally {
                         setIsLoading(false);
                     }
@@ -378,39 +371,33 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                 }
 
                 if (searchTerm.length >= 3) {
-                    // Load up to 200 songs for search results
+                    if (offset !== 0) return; // Load search results only once
+
                     const data = await subsonicFetch('search2.view', { query: searchTerm, songCount: DISCOVERY_LOAD_SIZE, songOffset: 0 });
                     const songList = data.searchResult2?.song || data.searchResult3?.song || [];
                     let newSongs = Array.isArray(songList) ? songList : [songList].filter(Boolean);
-                    
-                    // Update total count from search response
+
                     const totalFromSearch = data.searchResult2?.songCount || data.searchResult3?.songCount || 0;
                     if (totalFromSearch > 0) {
                         setTotalCount(totalFromSearch);
                     }
-                    
-                    // Client-side genre filtering for search results
+
                     if (selectedGenre) {
                         newSongs = newSongs.filter(song => {
                             if (!song.genre) return false;
-                            // Handle multiple genres separated by semicolons
                             const genres = song.genre.split(';').map(g => g.trim());
-                            
-                            // Check for exact match first, then case-insensitive
-                            return genres.includes(selectedGenre) || 
-                                   genres.some(g => g.toLowerCase() === selectedGenre.toLowerCase());
+                            return genres.includes(selectedGenre) || genres.some(g => g.toLowerCase() === selectedGenre.toLowerCase());
                         });
                     }
-                    
+
                     setSongs(newSongs);
                     setAllSongs(newSongs);
-                    setHasMore(false);  // No pagination
                     return;
-                } else if (searchTerm.length > 0 && searchTerm.length < 3) {
-                    // Don't search yet (0,1,2 chars), just clear results
+                }
+
+                if (searchTerm.length > 0 && searchTerm.length < 3) {
                     setSongs([]);
                     setAllSongs([]);
-                    setHasMore(false);
                     return;
                 }
 
@@ -419,7 +406,6 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     let songList = [];
                     if (filter?.preloadedSongs) songList = filter.preloadedSongs;
                     else if (filter?.type === 'clap-search' && filter?.results) {
-                        // Handle CLAP search results
                         songList = filter.results;
                     } else if (filter?.similarToSongId) {
                         const data = await subsonicFetch('getSimilarSongs.view', { id: filter.similarToSongId, count: PAGE_SIZE });
@@ -430,50 +416,41 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                         if (idParam) {
                             const data = await subsonicFetch(endpoint, { id: idParam });
                             const songContainer = data.album || data.directory;
-                            
-                            // Store playlist owner for access control
+
                             if (filter.playlistId && data.playlist) {
                                 setPlaylistOwner(data.playlist.owner || null);
-                                console.log('Playlist owner:', data.playlist.owner, 'Current user:', credentials?.username);
                             }
-                            
+
                             if (songContainer?.song) songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
                         }
                     } else if (selectedGenre && !filter) {
-                        // Load up to 200 songs by genre
-                        const data = await subsonicFetch('getSongsByGenre.view', { 
-                            genre: selectedGenre, 
-                            size: DISCOVERY_LOAD_SIZE, 
-                            offset: 0 
+                        const data = await subsonicFetch('getSongsByGenre.view', {
+                            genre: selectedGenre,
+                            size: DISCOVERY_LOAD_SIZE,
+                            offset: 0
                         });
                         const newSongs = data.songsByGenre?.song || [];
                         const songsArray = Array.isArray(newSongs) ? newSongs : [newSongs].filter(Boolean);
-                        
+
                         setSongs(songsArray);
                         setAllSongs(songsArray);
-                        setHasMore(false);  // No pagination
                         return;
                     }
-                    
+
                     baseList = Array.isArray(songList) ? songList : [songList].filter(Boolean);
-                    
-                    // Apply genre filtering for other cases (albums, playlists, etc.)
+
                     if (selectedGenre && (filter?.albumId || filter?.playlistId || filter?.preloadedSongs)) {
                         baseList = baseList.filter(song => {
                             if (!song.genre) return false;
                             const genres = song.genre.split(';').map(g => g.trim());
-                            return genres.includes(selectedGenre) || 
-                                   genres.some(g => g.toLowerCase() === selectedGenre.toLowerCase());
+                            return genres.includes(selectedGenre) || genres.some(g => g.toLowerCase() === selectedGenre.toLowerCase());
                         });
                     }
-                    
+
                     setAllSongs(baseList);
                 }
 
-                // Show all songs immediately (no pagination)
                 setSongs(baseList);
-                setHasMore(false);
-
             } catch (e) {
                 console.error("Failed to fetch songs:", e);
                 setError(e.message || "Failed to fetch songs.");
@@ -482,36 +459,35 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
             }
         };
 
-        fetcher();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filter, searchTerm, allSongs, isLoading, hasMore, selectedGenre, credentials?.username, discoveryView]);
+        load();
+    }, [offset, filter, searchTerm, selectedGenre, credentials?.username, discoveryView, allSongs, isStarredFilter]);
+
+
+    // Infinite scroll observer for "All Songs" view
+    const observerRef = useRef();
+    const lastSongElementRef = useRef();
 
     useEffect(() => {
-        // Load initial songs for various views
-        if (songs.length === 0 && hasMore && !isStarredFilter) {
-            // Load for: search results, filters, genre selection, OR the "All Songs" view
-            if (searchTerm.length >= 3 || filter || selectedGenre || discoveryView === 'all') {
-                const timer = setTimeout(() => loadMoreSongs(), 300);
-                return () => clearTimeout(timer);
-            }
+        // Only set up observer for "All Songs" view
+        if (discoveryView !== 'all' || filter || searchTerm || selectedGenre || isStarredFilter || isLoading) {
+            if (observerRef.current) observerRef.current.disconnect();
+            return;
         }
-    }, [songs.length, hasMore, loadMoreSongs, searchTerm, filter, selectedGenre, discoveryView, isStarredFilter]);
 
-    // Infinite scroll - load more when user scrolls near the bottom
-    const observerRef = useRef();
-    const lastSongElementRef = useCallback((node) => {
-        if (isLoading) return;
         if (observerRef.current) observerRef.current.disconnect();
 
-        observerRef.current = new IntersectionObserver(entries => {
-            // Only trigger for "All Songs" view - other views load all at once
-            if (entries[0].isIntersecting && hasMore && discoveryView === 'all' && !filter && !searchTerm && !selectedGenre && !isStarredFilter) {
-                loadMoreSongs();
+        observerRef.current = new IntersectionObserver(([entry]) => {
+            if (entry.isIntersecting && songs.length < totalCount) {
+                setOffset(prev => prev + DISPLAY_BATCH_SIZE);
             }
         });
 
-        if (node) observerRef.current.observe(node);
-    }, [isLoading, hasMore, loadMoreSongs, discoveryView, filter, searchTerm, selectedGenre, isStarredFilter]);
+        if (lastSongElementRef.current) {
+            observerRef.current.observe(lastSongElementRef.current);
+        }
+
+        return () => observerRef.current?.disconnect();
+    }, [isLoading, songs.length, totalCount, discoveryView, filter, searchTerm, selectedGenre, isStarredFilter])
 
     const handlePlayAlbum = () => {
         // Always use the full list of songs
@@ -601,7 +577,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 setDiscoveryView('all');
                                 setSongs([]);
                                 setAllSongs([]);
-                                setHasMore(true);
+                                setOffset(0);
                                 setSearchTerm('');
                                 setIsStarredFilter(false); // Reset starred filter
                             }}
@@ -624,8 +600,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 setDiscoveryView('recent');
                                 setSongs([]);
                                 setAllSongs([]);
+                                setOffset(0);
                                 setIsLoading(true);
-                                setHasMore(false);  // No pagination for discovery views
                                 setIsStarredFilter(false); // Reset starred filter
                                 try {
                                     const newSongs = await getRecentlyAdded(DISCOVERY_LOAD_SIZE, 0, selectedGenre);
@@ -657,8 +633,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 setDiscoveryView('popular');
                                 setSongs([]);
                                 setAllSongs([]);
+                                setOffset(0);
                                 setIsLoading(true);
-                                setHasMore(false);  // No pagination for discovery views
                                 setIsStarredFilter(false); // Reset starred filter
                                 try {
                                     const newSongs = await getMostPlayed(DISCOVERY_LOAD_SIZE, 0, selectedGenre);
@@ -690,8 +666,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 setDiscoveryView('history');
                                 setSongs([]);
                                 setAllSongs([]);
+                                setOffset(0);
                                 setIsLoading(true);
-                                setHasMore(false);  // No pagination for discovery views
                                 setIsStarredFilter(false); // Reset starred filter
                                 try {
                                     const newSongs = await getRecentlyPlayed(DISCOVERY_LOAD_SIZE, 0, selectedGenre);
@@ -773,14 +749,14 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                         Play All ({allSongs.length > 0 ? allSongs.length : songs.length})
                     </button>
                 )}
-                <button 
+                <button
                     onClick={async () => {
                         // Toggle: if already showing starred, reset to all songs
                         if (isStarredFilter) {
                             setIsStarredFilter(false);
                             setSongs([]);
                             setAllSongs([]);
-                            setHasMore(true);
+                            setOffset(0);
                             setRefreshKey(prev => prev + 1);
                             return;
                         }
@@ -793,13 +769,13 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             setError('');
                             setSearchTerm('');
                             setSelectedGenre('');
-                            setHasMore(false);
+                            setOffset(0);
                             setIsStarredFilter(true);
                             setDiscoveryView('all'); // Switch to "All Songs" tab
-                            
+
                             const data = await getStarredSongs();
                             const starredSongs = data.starred2?.song;
-                            
+
                             // Handle empty/missing starred songs properly
                             let songList = [];
                             if (starredSongs) {
@@ -807,11 +783,10 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 // Filter out any invalid entries (null, undefined, or objects without id)
                                 songList = songList.filter(s => s && s.id);
                             }
-                            
+
                             setAllSongs(songList);
                             // Show all starred songs at once (no pagination) so displayed items match the total
                             setSongs(songList);
-                            setHasMore(false);
                             // Ensure total count reflects unique starred songs (deduplicated list)
                             setTotalCount(songList.length);
                         } catch (err) {
