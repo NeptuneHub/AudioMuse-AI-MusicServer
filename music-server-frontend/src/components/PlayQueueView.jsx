@@ -116,7 +116,7 @@ const SaveAsPlaylistModal = ({ isOpen, onClose, queue, onSuccess }) => {
     );
 };
 
-const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, onClose, onSetStart, onSetEnd, onToggleStar, positionStyle }) => {
+const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, onClose, onSetStart, onSetEnd, onToggleStar, onSimilarArtists, positionStyle }) => {
     const menuRef = useRef(null);
 
     useEffect(() => {
@@ -151,9 +151,16 @@ const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, on
                 <button
                     onClick={() => { onInstantMix(song); onClose(); }}
                     disabled={!audioMuseUrl}
-                    className="block w-full text-left px-4 py-2 text-sm border-2 border-yellow-500 text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20 transition-all rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="block w-full text-left px-4 py-2 text-sm border-2 border-yellow-500 text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20 transition-all rounded-lg disabled:opacity-50 disabled:cursor-not-allowed mb-1"
                 >
                     Instant Mix
+                </button>
+                <button
+                    onClick={() => { onSimilarArtists(song); onClose(); }}
+                    disabled={!audioMuseUrl}
+                    className="block w-full text-left px-4 py-2 text-sm border-2 border-blue-500 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 transition-all rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Similar Artists
                 </button>
             </div>
         </div>
@@ -164,7 +171,7 @@ const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, on
 /**
  * A modal component to display and manage the current play queue.
  */
-function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelect, onTogglePlayPause, onAddToPlaylist, onInstantMix, audioMuseUrl, onClearQueue, onReorder, onCreateSongPath, onQueueUpdate }) {
+function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelect, onTogglePlayPause, onAddToPlaylist, onInstantMix, audioMuseUrl, onClearQueue, onReorder, onCreateSongPath, onQueueUpdate, onSimilarArtists }) {
     const [activeMenu, setActiveMenu] = useState({ index: null, style: {} });
     const [startSongId, setStartSongId] = useState(null);
     const [endSongId, setEndSongId] = useState(null);
@@ -404,6 +411,7 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                                                 onSetStart={setStartSongId}
                                                 onSetEnd={setEndSongId}
                                                 onToggleStar={handleToggleStar}
+                                                onSimilarArtists={onSimilarArtists}
                                                 positionStyle={activeMenu.style}
                                             />
                                         )}
