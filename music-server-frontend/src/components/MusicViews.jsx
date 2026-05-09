@@ -948,7 +948,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
             {songs.length > 0 && (
                 <>
                     {/* Mobile Card View */}
-                    <div className="sm:hidden space-y-3 mb-6">
+                    <div className="lg:hidden space-y-3 mb-6">
                         {songs.map((song, index) => {
                             const isCurrentSong = currentSong && currentSong.id === song.id;
                             const isPlaying = isCurrentSong && isAudioPlaying;
@@ -1058,7 +1058,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     </div>
 
                     {/* Desktop Table View */}
-                    <div className="hidden sm:block overflow-x-auto rounded-lg border border-dark-600">
+                    <div className="hidden lg:block overflow-x-auto rounded-lg border border-dark-600">
                         <table className="min-w-full text-sm text-left text-gray-300">
                         <thead className="text-xs text-gray-400 uppercase bg-dark-750 border-b border-dark-600">
                             <tr>
