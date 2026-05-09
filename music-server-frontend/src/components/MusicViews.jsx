@@ -173,20 +173,17 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     // Check if playlist is read-only (owned by another user)
     const isPlaylistReadOnly = isPlaylistView && playlistOwner && credentials?.username && playlistOwner !== credentials.username;
 
-    // Load genres on component mount
+    // Load genres on component mount - only genres with actual songs
     useEffect(() => {
         const loadGenres = async () => {
             try {
                 const data = await getGenres();
-                console.log('Raw genre data from API:', data);
                 const genreList = data.genres?.genre || [];
-                console.log('Genre list after extraction:', genreList);
                 const allGenres = Array.isArray(genreList) ? genreList : [genreList].filter(Boolean);
 
                 // Split semicolon-separated genres and remove duplicates
                 const individualGenres = [];
                 allGenres.forEach(genre => {
-                    // Backend returns genre name in 'value' field
                     const genreName = genre.value || genre.name;
                     if (genreName) {
                         const splitGenres = genreName.split(';').map(g => g.trim()).filter(g => g);
@@ -198,8 +195,25 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     }
                 });
 
-                console.log('Processed individual genres:', individualGenres);
-                setGenres(individualGenres.sort((a, b) => a.name.localeCompare(b.name)));
+                // Validate each genre has at least one song before showing
+                const validGenres = [];
+                for (const genre of individualGenres) {
+                    try {
+                        const songData = await subsonicFetch('getSongsByGenre.view', {
+                            genre: genre.name,
+                            size: 1,
+                            offset: 0
+                        });
+                        const songs = songData.songsByGenre?.song;
+                        if (songs) {
+                            validGenres.push(genre);
+                        }
+                    } catch (err) {
+                        console.warn(`Genre "${genre.name}" has no songs or fetch failed`);
+                    }
+                }
+
+                setGenres(validGenres.sort((a, b) => a.name.localeCompare(b.name)));
             } catch (err) {
                 console.error('Failed to load genres:', err);
             }
@@ -454,6 +468,10 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                         });
                         const newSongs = data.songsByGenre?.song || [];
                         const songsArray = Array.isArray(newSongs) ? newSongs : [newSongs].filter(Boolean);
+
+                        if (songsArray.length === 0) {
+                            setError(`No songs found for genre: ${selectedGenre}`);
+                        }
 
                         setSongs(songsArray);
                         setAllSongs(songsArray);
