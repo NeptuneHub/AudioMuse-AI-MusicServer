@@ -2,14 +2,9 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
-	"io"
 	"net/http"
-	"net/url"
-	"os"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -42,62 +37,26 @@ func AlchemyHandler(c *gin.Context) {
 		println("  Item", i, "- ID:", item.ID, "Op:", item.Op, "Type:", item.Type)
 	}
 
-	// Determine AudioMuse-AI URL: prefer configuration in DB, then env var.
-	var aiURL string
-	aiURL, err := GetConfig(db, "audiomuse_ai_core_url")
-	if err == nil {
-		// got aiURL from DB
-	} else if err == sql.ErrNoRows {
-		// not set in DB, try env var
-		aiURL = os.Getenv("AUDIO_MUSE_AI_URL")
-		if aiURL == "" {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "AudioMuse-AI endpoint not configured. Set configuration key 'audiomuse_ai_core_url' or AUDIO_MUSE_AI_URL env var."})
-			return
-		}
-	} else {
-		// DB error
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read configuration for AudioMuse-AI endpoint"})
-		return
-	}
-
-	// If the configured URL has no path (or only "/"), assume API path and append it.
-	if parsed, perr := url.Parse(aiURL); perr == nil {
-		if parsed.Path == "" || parsed.Path == "/" {
-			parsed.Path = "/api/alchemy"
-			aiURL = parsed.String()
-		}
-	}
-
 	payload, _ := json.Marshal(req)
 
 	// Log what we're sending to AudioMuse-AI
 	println("=== ALCHEMY HANDLER: Sending to AudioMuse-AI ===")
-	println("URL:", aiURL)
 	println("Payload:", string(payload))
 
-	// Use a client with timeout to avoid hanging requests
-	client := &http.Client{Timeout: 20 * time.Second}
-
-	// Respect context cancellation from the incoming request
-	ctx := c.Request.Context()
-	reqOut, err := newAudioMuseRequest(ctx, "POST", aiURL, bytes.NewReader(payload))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build request to AudioMuse-AI"})
+	// Use the centralized AudioMuse-AI client
+	body, statusCode, err := audioMuseClient.Post(c.Request.Context(), "/api/alchemy", bytes.NewReader(payload))
+	if err == ErrAudioMuse401 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
 		return
 	}
-	reqOut.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(reqOut)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to contact AudioMuse-AI API", "details": err.Error()})
 		return
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
 
 	// Log response from AudioMuse-AI
 	println("=== ALCHEMY HANDLER: Received from AudioMuse-AI ===")
-	println("Status Code:", resp.StatusCode)
+	println("Status Code:", statusCode)
 	println("Response Length:", len(body), "bytes")
 	if len(body) < 5000 {
 		println("Response Body:", string(body))
@@ -106,14 +65,8 @@ func AlchemyHandler(c *gin.Context) {
 		println(string(body[:1000]))
 	}
 
-	// CRITICAL: Do NOT proxy 401 errors from AudioMuse-AI back to frontend
-	if resp.StatusCode == 401 {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
-		return
-	}
-
 	// Pass through status code and body from AudioMuse-AI
-	c.Data(resp.StatusCode, "application/json", body)
+	c.Data(statusCode, "application/json", body)
 }
 
 // SearchArtistsHandler searches for artists by name for alchemy autocomplete

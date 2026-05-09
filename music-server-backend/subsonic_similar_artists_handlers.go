@@ -4,8 +4,6 @@ package main
 import (
 	"encoding/json"
 	"encoding/xml"
-	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -42,46 +40,26 @@ func subsonicGetSimilarArtists2(c *gin.Context) {
 
 	log.Printf("getSimilarArtists2: artistID=%s, count=%s", artistID, count)
 
-	// Get configured AudioMuse-AI Core URL
-	coreURL, err := getAudioMuseURL()
-	if err != nil {
-		log.Printf("Error getting AudioMuse-AI Core URL: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "AudioMuse-AI Core URL not configured."))
-		return
+	// Use the centralized AudioMuse-AI client with query parameters
+	params := url.Values{
+		"artist": []string{artistID},
+		"n":      []string{count},
 	}
 
-	// Call AudioMuse-AI core container
-	audioMuseURL := fmt.Sprintf("%s/api/similar_artists?artist=%s&n=%s",
-		strings.TrimSuffix(coreURL, "/"), url.QueryEscape(artistID), url.QueryEscape(count))
-
-	log.Printf("Calling AudioMuse-AI core: %s", audioMuseURL)
-
-	req, err := newAudioMuseRequest(c.Request.Context(), "GET", audioMuseURL, nil)
-	if err != nil {
-		log.Printf("Error creating request to AudioMuse-AI core: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to fetch similar artists from AI service."))
+	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/similar_artists", params)
+	if err == ErrAudioMuse401 {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "AudioMuse-AI authentication failed."))
 		return
 	}
-
-	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("Error calling AudioMuse-AI core: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to fetch similar artists from AI service."))
 		return
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("AudioMuse-AI core returned status %d", resp.StatusCode)
+	if statusCode != http.StatusOK {
+		log.Printf("AudioMuse-AI core returned status %d", statusCode)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "AI service returned an error."))
-		return
-	}
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("Error reading AudioMuse-AI response: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to read AI service response."))
 		return
 	}
 

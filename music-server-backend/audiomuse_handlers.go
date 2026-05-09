@@ -2,12 +2,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"strings"
+	"net/url"
 
 	"github.com/gin-gonic/gin"
 )
@@ -49,36 +49,24 @@ func subsonicGetSimilarSongs(c *gin.Context) {
 		return
 	}
 
-	coreURL, err := GetConfig(db, "audiomuse_ai_core_url")
-	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(50, "AudioMuse-AI Core URL not configured."))
+	// Use the centralized AudioMuse client
+	params := url.Values{
+		"item_id": []string{songId},
+		"n":       []string{count},
+	}
+	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/similar_tracks", params)
+	if err == ErrAudioMuse401 {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "AudioMuse-AI authentication failed."))
 		return
 	}
-
-	// Forward the request
-	target := fmt.Sprintf("%s/api/similar_tracks?item_id=%s&n=%s", coreURL, songId, count)
-	req, err := newAudioMuseRequest(c.Request.Context(), "GET", target, nil)
 	if err != nil {
-		log.Printf("Error creating request to AudioMuse-AI Core for similar tracks: %v", err)
+		log.Printf("Error calling AudioMuse-AI for similar tracks: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
 		return
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("Error calling AudioMuse-AI Core for similar tracks: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
-		return
-	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to read response from AudioMuse-AI Core."))
-		return
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("AudioMuse-AI Core returned non-OK status: %d - %s", resp.StatusCode, string(body))
+	if statusCode != http.StatusOK {
+		log.Printf("AudioMuse-AI returned non-OK status: %d - %s", statusCode, string(body))
 		subsonicRespond(c, newSubsonicErrorResponse(0, fmt.Sprintf("AudioMuse-AI Core error: %s", string(body))))
 		return
 	}
@@ -122,35 +110,23 @@ func subsonicGetSongPath(c *gin.Context) {
 		return
 	}
 
-	coreURL, err := GetConfig(db, "audiomuse_ai_core_url")
-	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(50, "AudioMuse-AI Core URL not configured."))
+	params := url.Values{
+		"start_song_id": []string{startId},
+		"end_song_id":   []string{endId},
+	}
+	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/find_path", params)
+	if err == ErrAudioMuse401 {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "AudioMuse-AI authentication failed."))
 		return
 	}
-
-	target := fmt.Sprintf("%s/api/find_path?start_song_id=%s&end_song_id=%s", coreURL, startId, endId)
-	req, err := newAudioMuseRequest(c.Request.Context(), "GET", target, nil)
 	if err != nil {
-		log.Printf("Error creating request to AudioMuse-AI Core for song path: %v", err)
+		log.Printf("Error calling AudioMuse-AI for song path: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
 		return
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("Error calling AudioMuse-AI Core for song path: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
-		return
-	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to read response from AudioMuse-AI Core."))
-		return
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("AudioMuse-AI Core returned non-OK status for pathfinding: %d - %s", resp.StatusCode, string(body))
+	if statusCode != http.StatusOK {
+		log.Printf("AudioMuse-AI returned non-OK status for pathfinding: %d - %s", statusCode, string(body))
 		subsonicRespond(c, newSubsonicErrorResponse(0, fmt.Sprintf("AudioMuse-AI Core error: %s", string(body))))
 		return
 	}
@@ -188,36 +164,19 @@ func subsonicGetSonicFingerprint(c *gin.Context) {
 	// Allow authenticated users to request sonic fingerprinting (heavy ops like clustering remain admin-only).
 	_ = c.MustGet("user").(User)
 
-	coreURL, err := GetConfig(db, "audiomuse_ai_core_url")
-	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(50, "AudioMuse-AI Core URL not configured."))
+	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/sonic_fingerprint/generate", nil)
+	if err == ErrAudioMuse401 {
+		subsonicRespond(c, newSubsonicErrorResponse(0, "AudioMuse-AI authentication failed."))
 		return
 	}
-
-	// Forward the request to python backend, which uses its own configured default user.
-	target := fmt.Sprintf("%s/api/sonic_fingerprint/generate", coreURL)
-	req, err := newAudioMuseRequest(c.Request.Context(), "GET", target, nil)
 	if err != nil {
-		log.Printf("Error creating request to AudioMuse-AI Core for sonic fingerprint: %v", err)
+		log.Printf("Error calling AudioMuse-AI for sonic fingerprint: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
 		return
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("Error calling AudioMuse-AI Core for sonic fingerprint: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to connect to AudioMuse-AI Core service."))
-		return
-	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to read response from AudioMuse-AI Core."))
-		return
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("AudioMuse-AI Core returned non-OK status: %d - %s", resp.StatusCode, string(body))
+	if statusCode != http.StatusOK {
+		log.Printf("AudioMuse-AI returned non-OK status: %d - %s", statusCode, string(body))
 		subsonicRespond(c, newSubsonicErrorResponse(0, fmt.Sprintf("AudioMuse-AI Core error: %s", string(body))))
 		return
 	}
@@ -275,13 +234,6 @@ func clapSearchHandler(c *gin.Context) {
 		requestBody.Limit = 50
 	}
 
-	var coreURL string
-	err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "AudioMuse-AI Core URL not configured"})
-		return
-	}
-
 	// Prepare the request to the AudioMuse-AI Core
 	reqBody := map[string]interface{}{
 		"query": requestBody.Query,
@@ -289,32 +241,20 @@ func clapSearchHandler(c *gin.Context) {
 	}
 	reqJSON, _ := json.Marshal(reqBody)
 
-	target := fmt.Sprintf("%s/api/clap/search", coreURL)
-	req, err := newAudioMuseRequest(c.Request.Context(), "POST", target, strings.NewReader(string(reqJSON)))
+	respBody, statusCode, err := audioMuseClient.Post(c.Request.Context(), "/api/clap/search", bytes.NewReader(reqJSON))
+	if err == ErrAudioMuse401 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
+		return
+	}
 	if err != nil {
-		log.Printf("Error creating request to AudioMuse-AI Core for CLAP search: %v", err)
+		log.Printf("Error calling AudioMuse-AI for CLAP search: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to AudioMuse-AI Core service"})
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("Error calling AudioMuse-AI Core for CLAP search: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to AudioMuse-AI Core service"})
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from AudioMuse-AI Core"})
-		return
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("AudioMuse-AI Core returned non-OK status for CLAP search: %d - %s", resp.StatusCode, string(body))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AudioMuse-AI Core error: %s", string(body))})
+	if statusCode != http.StatusOK {
+		log.Printf("AudioMuse-AI returned non-OK status for CLAP search: %d - %s", statusCode, string(respBody))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AudioMuse-AI Core error: %s", string(respBody))})
 		return
 	}
 
@@ -329,7 +269,7 @@ func clapSearchHandler(c *gin.Context) {
 		} `json:"results"`
 	}
 
-	if err := json.Unmarshal(body, &clapResponse); err != nil {
+	if err := json.Unmarshal(respBody, &clapResponse); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse CLAP search results"})
 		return
 	}
@@ -359,37 +299,19 @@ func clapTopQueriesHandler(c *gin.Context) {
 	// JWT auth sets username in context
 	_ = c.MustGet("username").(string)
 
-	var coreURL string
-	err := db.QueryRow("SELECT value FROM configuration WHERE key = 'audiomuse_ai_core_url'").Scan(&coreURL)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "AudioMuse-AI Core URL not configured"})
+	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/clap/top_queries", nil)
+	if err == ErrAudioMuse401 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
 		return
 	}
-
-	target := fmt.Sprintf("%s/api/clap/top_queries", coreURL)
-	req, err := newAudioMuseRequest(c.Request.Context(), "GET", target, nil)
 	if err != nil {
-		log.Printf("Error creating request to AudioMuse-AI Core for CLAP top queries: %v", err)
+		log.Printf("Error calling AudioMuse-AI for CLAP top queries: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to AudioMuse-AI Core service"})
 		return
 	}
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("Error calling AudioMuse-AI Core for CLAP top queries: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to AudioMuse-AI Core service"})
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from AudioMuse-AI Core"})
-		return
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("AudioMuse-AI Core returned non-OK status for CLAP top queries: %d - %s", resp.StatusCode, string(body))
+	if statusCode != http.StatusOK {
+		log.Printf("AudioMuse-AI returned non-OK status for CLAP top queries: %d - %s", statusCode, string(body))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AudioMuse-AI Core error: %s", string(body))})
 		return
 	}

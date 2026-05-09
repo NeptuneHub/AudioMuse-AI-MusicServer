@@ -27,6 +27,7 @@ import (
 )
 
 var db *sql.DB
+var audioMuseClient *AudioMuseClient
 var isScanCancelled atomic.Bool // Global flag to signal scan cancellation.
 var scheduler *cron.Cron
 var isAnalysisRunning atomic.Bool
@@ -110,6 +111,7 @@ func main() {
 	}
 
 	initDB()
+	audioMuseClient = NewAudioMuseClient(db)
 	// Run idempotent migrations to cover older DBs that may be missing new tables/keys
 	if err := migrateDB(); err != nil {
 		log.Printf("Database migration warnings/errors: %v", err)

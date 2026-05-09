@@ -2,11 +2,8 @@ package main
 
 import (
 	"errors"
-	"io"
 	"log"
 	"net/http"
-	"net/url"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,77 +16,15 @@ func MapHandler(c *gin.Context) {
 		return
 	}
 
-	coreURL, err := GetConfig(db, "audiomuse_ai_core_url")
-	if err != nil || coreURL == "" {
-		coreURL = getEnv("AUDIO_MUSE_AI_URL", "")
-	}
-	if coreURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "AudioMuse-AI Core URL not configured"})
+	// Use the centralized AudioMuse-AI client to fetch map data
+	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/map", c.Request.URL.Query())
+	if err == ErrAudioMuse401 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
 		return
 	}
-
-	// Preserve query string
-	proxyURL, err := url.Parse(coreURL)
 	if err != nil {
-		log.Printf("Invalid AudioMuse-AI Core URL: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid AudioMuse-AI Core URL"})
-		return
-	}
-	// Ensure path to /api/map is present if coreURL has no path
-	if proxyURL.Path == "" || proxyURL.Path == "/" {
-		proxyURL.Path = "/api/map"
-	} else {
-		// append /api/map if not already present
-		proxyURL.Path = strings.TrimRight(proxyURL.Path, "/") + "/api/map"
-	}
-
-	// Build final URL including query string
-	final := proxyURL.String()
-	if c.Request.URL.RawQuery != "" {
-		final = final + "?" + c.Request.URL.RawQuery
-	}
-
-	// NO CACHE - Always fetch fresh data from AudioMuse-AI
-	// The map is dynamically generated and must reflect the latest state
-	log.Printf("🔄 Fetching FRESH map data from AudioMuse-AI: %s", final)
-
-	// Create request with explicit no-cache headers
-	req, err := newAudioMuseRequest(c.Request.Context(), "GET", final, nil)
-	if err != nil {
-		log.Printf("❌ Error creating request to AudioMuse-AI /api/map: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
-		return
-	}
-
-	// Add aggressive no-cache headers to ensure AudioMuse-AI doesn't cache
-	req.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	req.Header.Set("Pragma", "no-cache")
-	req.Header.Set("Expires", "0")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("❌ Error calling AudioMuse-AI /api/map: %v", err)
+		log.Printf("Error calling AudioMuse-AI /api/map: %v", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to contact AudioMuse-AI Core"})
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("❌ Error reading response from AudioMuse-AI /api/map: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from AudioMuse-AI Core"})
-		return
-	}
-
-	log.Printf("✅ Received map data from AudioMuse-AI: %d bytes (status %d)", len(body), resp.StatusCode)
-
-	// CRITICAL: Do NOT proxy 401 errors from AudioMuse-AI back to frontend
-	// A 401 from AudioMuse-AI (third-party service) does NOT mean the user's session is invalid
-	// Return 503 (Service Unavailable) instead to indicate AudioMuse-AI is not properly configured
-	if resp.StatusCode == 401 {
-		log.Printf("❌ AudioMuse-AI returned 401 - API token likely not configured or invalid")
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in settings."})
 		return
 	}
 
@@ -99,72 +34,28 @@ func MapHandler(c *gin.Context) {
 	c.Header("Expires", "0")
 
 	// Return the response directly without caching
-	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	c.Data(statusCode, "application/json", body)
 }
 
-// Voyager search proxy: proxies search requests for the map UI's autocomplete
+// VoyagerSearchTracksHandler proxies search requests for the map UI's autocomplete
 func VoyagerSearchTracksHandler(c *gin.Context) {
 	if _, err := getUserFromContext(c); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
 
-	coreURL, err := GetConfig(db, "audiomuse_ai_core_url")
-	if err != nil || coreURL == "" {
-		coreURL = getEnv("AUDIO_MUSE_AI_URL", "")
-	}
-	if coreURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "AudioMuse-AI Core URL not configured"})
+	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/voyager/search_tracks", c.Request.URL.Query())
+	if err == ErrAudioMuse401 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
 		return
 	}
-
-	proxyURL, err := url.Parse(coreURL)
-	if err != nil {
-		log.Printf("Invalid AudioMuse-AI Core URL: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid AudioMuse-AI Core URL"})
-		return
-	}
-	// Ensure path to voyager search endpoint
-	if proxyURL.Path == "" || proxyURL.Path == "/" {
-		proxyURL.Path = "/api/voyager/search_tracks"
-	} else {
-		proxyURL.Path = strings.TrimRight(proxyURL.Path, "/") + "/api/voyager/search_tracks"
-	}
-
-	final := proxyURL.String()
-	if c.Request.URL.RawQuery != "" {
-		final = final + "?" + c.Request.URL.RawQuery
-	}
-
-	req, err := newAudioMuseRequest(c.Request.Context(), "GET", final, nil)
-	if err != nil {
-		log.Printf("Error creating request to AudioMuse-AI voyager search: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
-		return
-	}
-
-	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("Error calling AudioMuse-AI voyager search: %v", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to contact AudioMuse-AI Core"})
 		return
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from AudioMuse-AI Core"})
-		return
-	}
-
-	// CRITICAL: Do NOT proxy 401 errors from AudioMuse-AI back to frontend
-	if resp.StatusCode == 401 {
-		log.Printf("❌ AudioMuse-AI voyager search returned 401 - API token likely not configured")
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in settings."})
-		return
-	}
-
-	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	c.Data(statusCode, "application/json", body)
 }
 
 // Create playlist from map selection
