@@ -972,8 +972,9 @@ func subsonicGetAlbumList2(c *gin.Context) {
 	whereClause := "WHERE album != '' AND cancelled = 0"
 	var args []interface{}
 	if genreParam != "" {
-		whereClause += " AND genre = ?"
-		args = append(args, genreParam)
+		// Support multi-genre format (semicolon-separated values)
+		whereClause += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
+		args = append(args, genreParam, genreParam+";%", "%;"+genreParam+";%", "%;"+genreParam)
 	}
 
 	// Determine ORDER BY clause and HAVING clause based on list type
