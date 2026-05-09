@@ -1359,7 +1359,9 @@ export function Albums({ credentials, filter, onNavigate }) {
             {totalCount > 0 && (
                 <div className="mb-4">
                     <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                        Albums
+                        {typeof filter === 'object' && filter?.artistName
+                            ? `Albums by ${filter.artistName}`
+                            : 'Albums'}
                         <span className="text-accent-400 text-lg">({totalCount})</span>
                     </h2>
                 </div>
