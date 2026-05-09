@@ -112,14 +112,9 @@ func getMusicCounts(c *gin.Context) {
 
 	var counts CountsResponse
 
-	// Count artists (deduplicate by normalized artist name)
+	// Count artists (deduplicate by normalized artist name) - artists are independent of genre
 	artistQuery := "SELECT artist FROM songs WHERE artist != '' AND cancelled = 0"
-	args := []interface{}{}
-	if genre != "" {
-		artistQuery += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
-		args = append(args, genre, genre+";%", "%;"+genre+";%", "%;"+genre)
-	}
-	rows, err := db.Query(artistQuery, args...)
+	rows, err := db.Query(artistQuery)
 	if err == nil {
 		defer rows.Close()
 		seen := make(map[string]bool)
@@ -136,12 +131,12 @@ func getMusicCounts(c *gin.Context) {
 
 	// Count albums using normalized deduplication (album name or path fallback)
 	albumQuery := "SELECT album, album_path FROM songs WHERE cancelled = 0"
-	args = []interface{}{}
+	albumArgs := []interface{}{}
 	if genre != "" {
 		albumQuery += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
-		args = append(args, genre, genre+";%", "%;"+genre+";%", "%;"+genre)
+		albumArgs = append(albumArgs, genre, genre+";%", "%;"+genre+";%", "%;"+genre)
 	}
-	rowsA, err := db.Query(albumQuery, args...)
+	rowsA, err := db.Query(albumQuery, albumArgs...)
 	if err == nil {
 		defer rowsA.Close()
 		seenAlbums := make(map[string]bool)
@@ -168,12 +163,12 @@ func getMusicCounts(c *gin.Context) {
 
 	// Count songs
 	songQuery := "SELECT COUNT(*) FROM songs WHERE cancelled = 0"
-	args = []interface{}{}
+	songArgs := []interface{}{}
 	if genre != "" {
 		songQuery += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
-		args = append(args, genre, genre+";%", "%;"+genre+";%", "%;"+genre)
+		songArgs = append(songArgs, genre, genre+";%", "%;"+genre+";%", "%;"+genre)
 	}
-	db.QueryRow(songQuery, args...).Scan(&counts.Songs)
+	db.QueryRow(songQuery, songArgs...).Scan(&counts.Songs)
 
 	c.JSON(http.StatusOK, counts)
 }
