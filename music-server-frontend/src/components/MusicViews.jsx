@@ -156,7 +156,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     const [selectedGenre, setSelectedGenre] = useState('');
     const [playlistOwner, setPlaylistOwner] = useState(null);
     const [discoveryView, setDiscoveryView] = useState('all'); // 'all', 'recent', 'popular', 'history'
-    const [totalCount, setTotalCount] = useState(0);
+    const [baseTotalCount, setBaseTotalCount] = useState(0); // Total count of ALL songs (unfiltered)
+    const [totalCount, setTotalCount] = useState(0); // Count for current view (filtered by search/genre)
     const [isStarredFilter, setIsStarredFilter] = useState(false);
     const [radioFetching, setRadioFetching] = useState(false);
     const radioFetchedRef = useRef(false); // Track if we already fetched more songs
@@ -307,20 +308,42 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         }
     }, [isRadioView, filter?.radioId, currentSong, playQueue, radioFetching, onAddToQueue]);
 
-    // Load counts when genre changes or component mounts
+    // Load base total (ALL songs unfiltered) - only once
     useEffect(() => {
-        const loadCounts = async () => {
+        const loadBaseTotal = async () => {
             try {
-                const counts = await getMusicCounts(selectedGenre);
-                setTotalCount(counts.songs);
+                if (!filter && !isStarredFilter && discoveryView === 'all' && !searchTerm && !selectedGenre) {
+                    const counts = await getMusicCounts('');
+                    setBaseTotalCount(counts.songs);
+                }
             } catch (err) {
-                console.error('Failed to load counts:', err);
+                console.error('Failed to load base total:', err);
             }
         };
-        if (!filter) {
-            loadCounts();
-        }
-    }, [selectedGenre, filter]);
+        loadBaseTotal();
+    }, []);
+
+    // Load view-specific counts when search/genre/filter changes
+    useEffect(() => {
+        const loadViewCounts = async () => {
+            try {
+                // When searching - count comes from search result
+                if (searchTerm.length >= 3) return;
+
+                // When in discovery view with non-all, it loads all at once
+                if (discoveryView !== 'all') return;
+
+                // Otherwise load base counts for current view
+                if (!filter && !isStarredFilter && selectedGenre) {
+                    const counts = await getMusicCounts(selectedGenre);
+                    setTotalCount(counts.songs);
+                }
+            } catch (err) {
+                console.error('Failed to load view counts:', err);
+            }
+        };
+        loadViewCounts();
+    }, [searchTerm, selectedGenre, filter, discoveryView, isStarredFilter]);
 
     // Load songs when offset or filters change
     useEffect(() => {
@@ -478,7 +501,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         if (observerRef.current) observerRef.current.disconnect();
 
         observerRef.current = new IntersectionObserver(([entry]) => {
-            if (entry.isIntersecting && songs.length < totalCount) {
+            if (entry.isIntersecting && songs.length < baseTotalCount) {
                 setOffset(prev => prev + DISPLAY_BATCH_SIZE);
             }
         });
@@ -488,7 +511,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         }
 
         return () => observerRef.current?.disconnect();
-    }, [isLoading, songs.length, totalCount, discoveryView, filter, searchTerm, selectedGenre, isStarredFilter])
+    }, [isLoading, songs.length, baseTotalCount, discoveryView, filter, searchTerm, selectedGenre, isStarredFilter])
 
     const handlePlayAlbum = () => {
         // Always use the full list of songs
@@ -593,7 +616,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
                                 </svg>
-                                <span className={discoveryView === 'all' ? 'inline' : 'hidden sm:inline'}>All Songs {totalCount > 0 && `(${totalCount})`}</span>
+                                <span className={discoveryView === 'all' ? 'inline' : 'hidden sm:inline'}>All Songs {baseTotalCount > 0 && `(${baseTotalCount})`}</span>
                             </span>
                         </button>
                         <button
@@ -747,7 +770,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path>
                         </svg>
-                        Play All ({allSongs.length > 0 ? allSongs.length : songs.length})
+                        Play All ({Math.min(allSongs.length > 0 ? allSongs.length : songs.length, 200)})
                     </button>
                 )}
                 <button
