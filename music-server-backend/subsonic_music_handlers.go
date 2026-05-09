@@ -1011,17 +1011,12 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		orderByClause = "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE"
 	}
 
-	// Count distinct albums using normalization (dedupe by normalized album name)
+	// Count distinct albums using same GROUP BY logic as the actual query
 	seenAlbumKeys := make(map[string]bool)
-	// For starred, we need to count with GROUP BY and HAVING
-	var countQ string
-	if havingClause != "" {
-		countQ = fmt.Sprintf(`SELECT album, MIN(NULLIF(album_path, '')) as album_path FROM songs %s
-			GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END
-			%s`, whereClause, havingClause)
-	} else {
-		countQ = fmt.Sprintf("SELECT album, album_path FROM songs %s", whereClause)
-	}
+	// Always use GROUP BY for consistent deduplication (album_path || '|||' || album)
+	countQ := fmt.Sprintf(`SELECT album, MIN(NULLIF(album_path, '')) as album_path FROM songs %s
+		GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END
+		%s`, whereClause, havingClause)
 	// Need to duplicate args for count query
 	countArgs := make([]interface{}, len(args))
 	copy(countArgs, args)
