@@ -2,7 +2,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -44,7 +43,7 @@ func subsonicStartClusteringAnalysis(c *gin.Context) {
 func runAnalysisJob(ctx context.Context) error {
 	log.Printf("INFO: runAnalysisJob: POST /api/analysis/start")
 
-	body, statusCode, err := audioMuseClient.Post(ctx, "/api/analysis/start", bytes.NewReader([]byte("{}")))
+	body, statusCode, err := audioMuseClient.StartAnalysis(ctx)
 	if err == ErrAudioMuse401 {
 		log.Printf("❌ AudioMuse-AI returned 401 - API token likely not configured or invalid")
 		return fmt.Errorf("audio muse-ai authentication failed")
@@ -65,7 +64,7 @@ func runAnalysisJob(ctx context.Context) error {
 func runClusteringJob(ctx context.Context) error {
 	log.Printf("INFO: runClusteringJob: POST /api/clustering/start")
 
-	body, statusCode, err := audioMuseClient.Post(ctx, "/api/clustering/start", bytes.NewReader([]byte("{}")))
+	body, statusCode, err := audioMuseClient.StartClustering(ctx)
 	if err == ErrAudioMuse401 {
 		log.Printf("❌ AudioMuse-AI returned 401 - API token likely not configured or invalid")
 		return fmt.Errorf("audio muse-ai authentication failed")

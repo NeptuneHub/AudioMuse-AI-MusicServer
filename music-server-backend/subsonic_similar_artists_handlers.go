@@ -6,7 +6,6 @@ import (
 	"encoding/xml"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -40,13 +39,7 @@ func subsonicGetSimilarArtists2(c *gin.Context) {
 
 	log.Printf("getSimilarArtists2: artistID=%s, count=%s", artistID, count)
 
-	// Use the centralized AudioMuse-AI client with query parameters
-	params := url.Values{
-		"artist": []string{artistID},
-		"n":      []string{count},
-	}
-
-	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/similar_artists", params)
+	body, statusCode, err := audioMuseClient.GetSimilarArtists(c.Request.Context(), artistID, count)
 	if err == ErrAudioMuse401 {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "AudioMuse-AI authentication failed."))
 		return

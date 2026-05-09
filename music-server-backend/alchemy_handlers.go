@@ -43,8 +43,7 @@ func AlchemyHandler(c *gin.Context) {
 	println("=== ALCHEMY HANDLER: Sending to AudioMuse-AI ===")
 	println("Payload:", string(payload))
 
-	// Use the centralized AudioMuse-AI client
-	body, statusCode, err := audioMuseClient.Post(c.Request.Context(), "/api/alchemy", bytes.NewReader(payload))
+	body, statusCode, err := audioMuseClient.Alchemy(c.Request.Context(), bytes.NewReader(payload))
 	if err == ErrAudioMuse401 {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
 		return

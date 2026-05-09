@@ -244,3 +244,85 @@ func (cl *AudioMuseClient) ProxyGin(c *gin.Context, method, path string) {
 	// Pass through the response with all original headers
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
 }
+
+// GetSimilarTracks returns similar tracks for a given song.
+func (cl *AudioMuseClient) GetSimilarTracks(ctx context.Context, itemID, n string) ([]byte, int, error) {
+	params := url.Values{
+		"item_id": []string{itemID},
+		"n":       []string{n},
+	}
+	return cl.Get(ctx, "/api/similar_tracks", params)
+}
+
+// GetSongPath finds a path between two songs.
+func (cl *AudioMuseClient) GetSongPath(ctx context.Context, startSongID, endSongID string) ([]byte, int, error) {
+	params := url.Values{
+		"start_song_id": []string{startSongID},
+		"end_song_id":   []string{endSongID},
+	}
+	return cl.Get(ctx, "/api/find_path", params)
+}
+
+// GetSonicFingerprint generates a sonic fingerprint.
+func (cl *AudioMuseClient) GetSonicFingerprint(ctx context.Context) ([]byte, int, error) {
+	return cl.Get(ctx, "/api/sonic_fingerprint/generate", nil)
+}
+
+// ClapSearch performs a CLAP-based text search for songs.
+func (cl *AudioMuseClient) ClapSearch(ctx context.Context, body io.Reader) ([]byte, int, error) {
+	return cl.Post(ctx, "/api/clap/search", body)
+}
+
+// ClapTopQueries retrieves the top CLAP queries.
+func (cl *AudioMuseClient) ClapTopQueries(ctx context.Context) ([]byte, int, error) {
+	return cl.Get(ctx, "/api/clap/top_queries", nil)
+}
+
+// GetMap retrieves the music map data.
+func (cl *AudioMuseClient) GetMap(ctx context.Context, queryParams url.Values) ([]byte, int, error) {
+	return cl.Get(ctx, "/api/map", queryParams)
+}
+
+// GetVoyagerSearchTracks searches tracks for the map UI's autocomplete.
+func (cl *AudioMuseClient) GetVoyagerSearchTracks(ctx context.Context, queryParams url.Values) ([]byte, int, error) {
+	return cl.Get(ctx, "/api/voyager/search_tracks", queryParams)
+}
+
+// Alchemy performs alchemy operations on tracks/artists.
+func (cl *AudioMuseClient) Alchemy(ctx context.Context, body io.Reader) ([]byte, int, error) {
+	return cl.Post(ctx, "/api/alchemy", body)
+}
+
+// CleaningStart initiates a cleaning operation.
+func (cl *AudioMuseClient) CleaningStart(ctx context.Context) ([]byte, int, error) {
+	return cl.Post(ctx, "/api/cleaning/start", nil)
+}
+
+// GetSimilarArtists returns artists similar to a given artist.
+func (cl *AudioMuseClient) GetSimilarArtists(ctx context.Context, artist, n string) ([]byte, int, error) {
+	params := url.Values{
+		"artist": []string{artist},
+		"n":      []string{n},
+	}
+	return cl.Get(ctx, "/api/similar_artists", params)
+}
+
+// StartAnalysis initiates a sonic analysis operation.
+func (cl *AudioMuseClient) StartAnalysis(ctx context.Context) ([]byte, int, error) {
+	return cl.Post(ctx, "/api/analysis/start", nil)
+}
+
+// CancelAnalysis cancels an analysis task.
+func (cl *AudioMuseClient) CancelAnalysis(ctx context.Context, taskID string) ([]byte, int, error) {
+	return cl.Post(ctx, fmt.Sprintf("/api/cancel/%s", taskID), nil)
+}
+
+// GetAnalysisStatus returns the status of the last analysis task.
+func (cl *AudioMuseClient) GetAnalysisStatus(ctx context.Context) ([]byte, int, error) {
+	return cl.Get(ctx, "/api/last_task", nil)
+}
+
+// StartClustering initiates a clustering operation.
+func (cl *AudioMuseClient) StartClustering(ctx context.Context) ([]byte, int, error) {
+	return cl.Post(ctx, "/api/clustering/start", nil)
+}

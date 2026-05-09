@@ -16,8 +16,7 @@ func MapHandler(c *gin.Context) {
 		return
 	}
 
-	// Use the centralized AudioMuse-AI client to fetch map data
-	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/map", c.Request.URL.Query())
+	body, statusCode, err := audioMuseClient.GetMap(c.Request.Context(), c.Request.URL.Query())
 	if err == ErrAudioMuse401 {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
 		return
@@ -44,7 +43,7 @@ func VoyagerSearchTracksHandler(c *gin.Context) {
 		return
 	}
 
-	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/voyager/search_tracks", c.Request.URL.Query())
+	body, statusCode, err := audioMuseClient.GetVoyagerSearchTracks(c.Request.Context(), c.Request.URL.Query())
 	if err == ErrAudioMuse401 {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
 		return

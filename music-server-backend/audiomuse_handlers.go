@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 
 	"github.com/gin-gonic/gin"
 )
@@ -49,12 +48,7 @@ func subsonicGetSimilarSongs(c *gin.Context) {
 		return
 	}
 
-	// Use the centralized AudioMuse client
-	params := url.Values{
-		"item_id": []string{songId},
-		"n":       []string{count},
-	}
-	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/similar_tracks", params)
+	body, statusCode, err := audioMuseClient.GetSimilarTracks(c.Request.Context(), songId, count)
 	if err == ErrAudioMuse401 {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "AudioMuse-AI authentication failed."))
 		return
@@ -110,11 +104,7 @@ func subsonicGetSongPath(c *gin.Context) {
 		return
 	}
 
-	params := url.Values{
-		"start_song_id": []string{startId},
-		"end_song_id":   []string{endId},
-	}
-	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/find_path", params)
+	body, statusCode, err := audioMuseClient.GetSongPath(c.Request.Context(), startId, endId)
 	if err == ErrAudioMuse401 {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "AudioMuse-AI authentication failed."))
 		return
@@ -164,7 +154,7 @@ func subsonicGetSonicFingerprint(c *gin.Context) {
 	// Allow authenticated users to request sonic fingerprinting (heavy ops like clustering remain admin-only).
 	_ = c.MustGet("user").(User)
 
-	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/sonic_fingerprint/generate", nil)
+	body, statusCode, err := audioMuseClient.GetSonicFingerprint(c.Request.Context())
 	if err == ErrAudioMuse401 {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "AudioMuse-AI authentication failed."))
 		return
@@ -241,7 +231,7 @@ func clapSearchHandler(c *gin.Context) {
 	}
 	reqJSON, _ := json.Marshal(reqBody)
 
-	respBody, statusCode, err := audioMuseClient.Post(c.Request.Context(), "/api/clap/search", bytes.NewReader(reqJSON))
+	respBody, statusCode, err := audioMuseClient.ClapSearch(c.Request.Context(), bytes.NewReader(reqJSON))
 	if err == ErrAudioMuse401 {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
 		return
@@ -299,7 +289,7 @@ func clapTopQueriesHandler(c *gin.Context) {
 	// JWT auth sets username in context
 	_ = c.MustGet("username").(string)
 
-	body, statusCode, err := audioMuseClient.Get(c.Request.Context(), "/api/clap/top_queries", nil)
+	body, statusCode, err := audioMuseClient.ClapTopQueries(c.Request.Context())
 	if err == ErrAudioMuse401 {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
 		return
