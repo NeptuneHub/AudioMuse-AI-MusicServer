@@ -1186,8 +1186,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                             </div>
                                         </td>
                                         <td className={`px-2 sm:px-4 py-4 font-medium flex-grow ${isPlaying ? 'text-accent-400' : 'text-white'}`}>
-                                            <div className="flex items-center gap-1 sm:gap-2 min-w-0">
-                                                <span className="truncate text-sm sm:text-base">{song.title}</span>
+                                            <div className="flex items-start gap-1 sm:gap-2 min-w-0">
+                                                <span className="text-sm sm:text-base">{song.title}</span>
                                                 {isPlaying && (
                                                     <span className="flex gap-0.5 flex-shrink-0">
                                                         <span className="w-1 h-2 sm:h-3 bg-accent-400 rounded-full animate-pulse"></span>
@@ -1196,16 +1196,16 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                     </span>
                                                 )}
                                             </div>
-                                            <div className="text-xs sm:text-sm text-gray-400 truncate">{song.artist}</div>
+                                            <div className="text-xs sm:text-sm text-gray-400">{song.artist}</div>
                                         </td>
                                         <td className="px-4 py-4 hidden sm:table-cell">{song.artist}</td>
                                         <td className="px-4 py-4 hidden md:table-cell">{song.album}</td>
                                         <td className="px-4 py-4 hidden lg:table-cell text-gray-400">{song.genre || 'Unknown'}</td>
                                         <td className="px-4 py-3 hidden xl:table-cell text-center">{song.playCount > 0 ? song.playCount : ''}</td>
                                         <td className="px-4 py-3 hidden lg:table-cell">{formatDate(song.lastPlayed)}</td>
-                                        <td className="px-1 sm:px-4 py-4 flex-shrink-0 w-16 sm:w-auto">
-                                            {/* Desktop: Show all buttons */}
-                                            <div className="hidden sm:flex items-center justify-end space-x-1 sm:space-x-2 gap-0.5 flex-wrap">
+                                        <td className="px-1 sm:px-4 py-4 flex-shrink-0">
+                                            {/* Desktop: Show all buttons in 2-column grid */}
+                                            <div className="hidden sm:grid grid-cols-2 gap-1">
                                                  {isPlaylistView && !isPlaylistReadOnly && (
                                                     <>
                                                         <div className="flex flex-col -my-1">
