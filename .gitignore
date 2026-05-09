@@ -109,3 +109,5 @@ music-server-backend/data/music.db-shm
 music-server-backend/data/music.db-wal
 .vscode/
 music-server-backend/data/.DS_Store
+music-server-frontend/.DS_Store
+.DS_Store
