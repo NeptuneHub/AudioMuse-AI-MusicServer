@@ -1229,7 +1229,15 @@ export function Albums({ credentials, filter, onNavigate }) {
     useEffect(() => {
         setAlbums([]);
         setHasMore(true);
-        if(filter) setSearchTerm(filter);
+        // If filter is an object with artistId, don't set searchTerm (use browse instead)
+        if(filter) {
+            if (typeof filter === 'string') {
+                setSearchTerm(filter);
+            } else if (typeof filter === 'object') {
+                // artistId/genreId/etc - don't set searchTerm, will be handled in loadMoreAlbums
+                setSearchTerm('');
+            }
+        }
     }, [filter]);
     
     useEffect(() => {
@@ -1261,7 +1269,6 @@ export function Albums({ credentials, filter, onNavigate }) {
         const fetcher = async () => {
             try {
                 let albumList = [];
-                const query = searchTerm || filter;
 
                 if (isStarredFilter) {
                     // Load starred albums
@@ -1277,27 +1284,40 @@ export function Albums({ credentials, filter, onNavigate }) {
                         const totalStarred = Array.isArray(starredAlbumList) ? starredAlbumList.length : (starredAlbumList ? 1 : 0);
                         setTotalCount(totalStarred);
                     }
-                } else if (query) {
-                    // Only search if query is >= 3 characters
-                    if (query.length < 3) {
-                        setHasMore(false);
-                        return;
-                    }
-                    const data = await subsonicFetch('search2.view', { query, albumCount: PAGE_SIZE, albumOffset: albums.length });
-                    albumList = data.searchResult2?.album || data.searchResult3?.album || [];
-                    
-                    // Update total count from search response (only on first load)
+                } else if (typeof filter === 'object' && filter?.artistId) {
+                    // Browse albums for a specific artist using getMusicDirectory
+                    const data = await subsonicFetch('getMusicDirectory.view', { id: filter.artistId });
+                    albumList = data.directory?.child || [];
+
+                    // Set total count from directory
                     if (albums.length === 0) {
-                        const totalFromSearch = data.searchResult2?.albumCount || data.searchResult3?.albumCount || 0;
-                        if (totalFromSearch > 0) {
-                            setTotalCount(totalFromSearch);
-                        }
+                        setTotalCount(albumList.length);
                     }
                 } else {
-                    const params = { type: 'alphabeticalByName', size: PAGE_SIZE, offset: albums.length };
-                    if (selectedGenre) params.genre = selectedGenre;
-                    const data = await subsonicFetch('getAlbumList2.view', params);
-                    albumList = data.albumList2?.album || [];
+                    const query = searchTerm || (typeof filter === 'string' ? filter : '');
+
+                    if (query) {
+                        // Only search if query is >= 3 characters
+                        if (query.length < 3) {
+                            setHasMore(false);
+                            return;
+                        }
+                        const data = await subsonicFetch('search2.view', { query, albumCount: PAGE_SIZE, albumOffset: albums.length });
+                        albumList = data.searchResult2?.album || data.searchResult3?.album || [];
+
+                        // Update total count from search response (only on first load)
+                        if (albums.length === 0) {
+                            const totalFromSearch = data.searchResult2?.albumCount || data.searchResult3?.albumCount || 0;
+                            if (totalFromSearch > 0) {
+                                setTotalCount(totalFromSearch);
+                            }
+                        }
+                    } else {
+                        const params = { type: 'alphabeticalByName', size: PAGE_SIZE, offset: albums.length };
+                        if (selectedGenre) params.genre = selectedGenre;
+                        const data = await subsonicFetch('getAlbumList2.view', params);
+                        albumList = data.albumList2?.album || [];
+                    }
                 }
                 const newAlbums = Array.isArray(albumList) ? albumList : [albumList].filter(Boolean);
                 setAlbums(prev => [...prev, ...newAlbums]);
@@ -1647,10 +1667,10 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
                 {artists.map((artist, index) => {
                     const isStarred = starredArtists.has(artist.id);
                     return (
-                        <div 
+                        <div
                             ref={index === artists.length - 1 ? lastArtistElementRef : null}
-                            key={`${artist.id}-${index}`} 
-                            onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: artist.name })} 
+                            key={`${artist.id}-${index}`}
+                            onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: { artistId: artist.id, artistName: artist.name } })} 
                             className="group bg-dark-750 rounded-xl p-3 sm:p-4 text-center hover:bg-dark-700 card-hover flex flex-col items-center cursor-pointer relative">
                             {/* Star button in top-right corner of the card */}
                             <button
