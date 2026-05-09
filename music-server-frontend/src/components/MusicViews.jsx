@@ -1203,9 +1203,9 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                         <td className="px-4 py-4 hidden lg:table-cell text-gray-400">{song.genre || 'Unknown'}</td>
                                         <td className="px-4 py-3 hidden xl:table-cell text-center">{song.playCount > 0 ? song.playCount : ''}</td>
                                         <td className="px-4 py-3 hidden lg:table-cell">{formatDate(song.lastPlayed)}</td>
-                                        <td className="px-1 sm:px-4 py-4 flex-shrink-0">
+                                        <td className="px-1 sm:px-2 py-4 w-36 sm:w-40">
                                             {/* Desktop: Show all buttons in 2-column grid */}
-                                            <div className="hidden sm:grid grid-cols-2 gap-1">
+                                            <div className="hidden sm:grid grid-cols-2 gap-0.5">
                                                  {isPlaylistView && !isPlaylistReadOnly && (
                                                     <>
                                                         <div className="flex flex-col -my-1">
@@ -1231,7 +1231,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                             }
                                                             onInstantMix(song);
                                                         }}
-                                                        className="p-1.5 rounded-lg border-2 border-accent-500 text-accent-400 hover:bg-accent-500/10 transition-all hover:scale-105 flex items-center justify-center"
+                                                        className="p-1 rounded-lg border-2 border-accent-500 text-accent-400 hover:bg-accent-500/10 transition-all hover:scale-105 flex items-center justify-center"
                                                     >
                                                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                                                     </button>
