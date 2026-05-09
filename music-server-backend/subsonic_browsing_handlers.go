@@ -146,8 +146,35 @@ func subsonicGetMusicDirectory(c *gin.Context) {
 		return
 	}
 
-	// Not a song ID - treat as artist name
-	getArtistDirectory(c, id)
+	// Not a song ID - it might be an artist ID (MD5 hash)
+	// Look up the actual artist name that corresponds to this MD5 hash
+	var actualArtistName string
+	artistQuery := `
+		SELECT DISTINCT artist FROM songs
+		WHERE artist != '' AND cancelled = 0
+		LIMIT 1000
+	`
+	rows, err := db.Query(artistQuery)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var artist string
+			if err := rows.Scan(&artist); err != nil {
+				continue
+			}
+			if GenerateArtistID(artist) == id {
+				actualArtistName = artist
+				break
+			}
+		}
+	}
+
+	if actualArtistName != "" {
+		getArtistDirectory(c, actualArtistName)
+	} else {
+		// ID doesn't match any song or artist
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Item not found."))
+	}
 }
 
 // getArtistDirectory returns all albums by an artist
