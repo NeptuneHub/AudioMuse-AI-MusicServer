@@ -5,8 +5,7 @@
 </p>
 
 
-Music Server built on the Open Subsonic API, designed to showcase AudioMuse-AI's advanced sonic analysis capabilities.
-
+Music Server built on the Open Subsonic API to showcases AudioMuse-AI’s advanced music intelligence capabilities. This is not your typical music server. It’s a new way to explore, understand, and rediscover your music library.
 
 **The full list or AudioMuse-AI related repository are:** 
   > * [AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI): the core application, it run Flask and Worker containers to actually run all the feature;
