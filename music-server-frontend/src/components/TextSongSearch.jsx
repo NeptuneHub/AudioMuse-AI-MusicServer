@@ -241,6 +241,25 @@ function TextSongSearch({ onNavigate }) {
                 </ul>
             </div>
             )}
+
+            {/* Info Section - Semantic Tab Only */}
+            {activeTab === 'semantic' && (
+            <div className="mt-8 bg-dark-700/50 rounded-xl p-6 border border-dark-600">
+                <h3 className="text-lg font-semibold mb-3 text-gray-200">
+                    🧠 How it works
+                </h3>
+                <ul className="space-y-2 text-gray-400 text-sm">
+                    <li className="flex items-start gap-2">
+                        <span className="text-accent-500 mt-0.5">•</span>
+                        <span>Uses AI to understand the meaning and emotion behind your words</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                        <span className="text-accent-500 mt-0.5">•</span>
+                        <span>Finds songs with matching themes, emotions, and messages in their lyrics</span>
+                    </li>
+                </ul>
+            </div>
+            )}
         </div>
     );
 }
