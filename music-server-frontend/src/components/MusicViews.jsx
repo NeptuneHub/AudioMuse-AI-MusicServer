@@ -1154,13 +1154,13 @@ export function Albums({ credentials, filter, onNavigate }) {
     const [albums, setAlbums] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [hasMore, setHasMore] = useState(true);
+    const [offset, setOffset] = useState(0);
     const [genres, setGenres] = useState([]);
     const [selectedGenre, setSelectedGenre] = useState('');
     const [totalCount, setTotalCount] = useState(0);
     const [isStarredFilter, setIsStarredFilter] = useState(false);
     const [starredAlbums, setStarredAlbums] = useState(new Set());
-    const PAGE_SIZE = 10;
+    const PAGE_SIZE = 50;
     
     // Load genres on component mount
     useEffect(() => {
@@ -1228,7 +1228,8 @@ export function Albums({ credentials, filter, onNavigate }) {
     
     useEffect(() => {
         setAlbums([]);
-        setHasMore(true);
+        setOffset(0);
+        setTotalCount(0);
         // If filter is an object with artistId, don't set searchTerm (use browse instead)
         if(filter) {
             if (typeof filter === 'string') {
@@ -1239,119 +1240,107 @@ export function Albums({ credentials, filter, onNavigate }) {
             }
         }
     }, [filter]);
-    
+
     useEffect(() => {
         setAlbums([]);
-        setHasMore(true);
+        setOffset(0);
+        setTotalCount(0);
     }, [searchTerm, selectedGenre, isStarredFilter]);
 
-    // Load album counts
+    // Load album counts (once per filter)
     useEffect(() => {
-        // Only update count from getMusicCounts when NOT using starred filter
-        if (isStarredFilter) return;
+        if (offset !== 0) return; // Only load count on first page
 
         const loadCounts = async () => {
             try {
-                const counts = await getMusicCounts(selectedGenre);
-                setTotalCount(counts.albums);
+                if (isStarredFilter) {
+                    const data = await getStarredSongs();
+                    const albumList = Array.isArray(data.starred2?.album)
+                        ? data.starred2.album
+                        : [data.starred2?.album].filter(Boolean);
+                    setTotalCount(albumList.length);
+                } else {
+                    const counts = await getMusicCounts(selectedGenre);
+                    setTotalCount(counts.albums);
+                }
             } catch (err) {
                 console.error('Failed to load album counts:', err);
+                setTotalCount(0);
             }
         };
         loadCounts();
-    }, [selectedGenre, isStarredFilter])
+    }, [offset, isStarredFilter, selectedGenre]);
 
 
-    const loadMoreAlbums = useCallback(() => {
-        if (isLoading || !hasMore) return;
-        setIsLoading(true);
-
-        const fetcher = async () => {
+    // Load data whenever offset changes
+    useEffect(() => {
+        const load = async () => {
+            setIsLoading(true);
             try {
                 let albumList = [];
 
                 if (isStarredFilter) {
-                    // Load starred albums
-                    const params = { type: 'starred', size: PAGE_SIZE, offset: albums.length };
+                    const data = await getStarredSongs();
+                    const all = Array.isArray(data.starred2?.album)
+                        ? data.starred2.album
+                        : [data.starred2?.album].filter(Boolean);
+                    albumList = all.slice(offset, offset + PAGE_SIZE);
+                } else if (searchTerm && searchTerm.length >= 3) {
+                    // Search
+                    const data = await subsonicFetch('search2.view', {
+                        query: searchTerm,
+                        albumCount: PAGE_SIZE,
+                        albumOffset: offset,
+                    });
+                    albumList = data.searchResult2?.album || data.searchResult3?.album || [];
+                } else if (typeof filter === 'object' && filter?.artistId) {
+                    // Browse albums for a specific artist
+                    const data = await subsonicFetch('getMusicDirectory.view', { id: filter.artistId });
+                    albumList = (data.directory?.child || []).slice(offset, offset + PAGE_SIZE);
+                } else {
+                    // Browse
+                    const params = {
+                        type: 'alphabeticalByName',
+                        size: PAGE_SIZE,
+                        offset,
+                    };
+                    if (selectedGenre) params.genre = selectedGenre;
                     const data = await subsonicFetch('getAlbumList2.view', params);
                     albumList = data.albumList2?.album || [];
-
-                    // Update total count from starred albums on first load
-                    if (albums.length === 0) {
-                        // Get the total count of starred albums
-                        const starredData = await getStarredSongs();
-                        const starredAlbumList = starredData.starred2?.album || [];
-                        const totalStarred = Array.isArray(starredAlbumList) ? starredAlbumList.length : (starredAlbumList ? 1 : 0);
-                        setTotalCount(totalStarred);
-                    }
-                } else if (typeof filter === 'object' && filter?.artistId) {
-                    // Browse albums for a specific artist using getMusicDirectory
-                    const data = await subsonicFetch('getMusicDirectory.view', { id: filter.artistId });
-                    albumList = data.directory?.child || [];
-
-                    // Set total count from directory
-                    if (albums.length === 0) {
-                        setTotalCount(albumList.length);
-                    }
-                } else {
-                    const query = searchTerm || (typeof filter === 'string' ? filter : '');
-
-                    if (query) {
-                        // Only search if query is >= 3 characters
-                        if (query.length < 3) {
-                            setHasMore(false);
-                            return;
-                        }
-                        const data = await subsonicFetch('search2.view', { query, albumCount: PAGE_SIZE, albumOffset: albums.length });
-                        albumList = data.searchResult2?.album || data.searchResult3?.album || [];
-
-                        // Update total count from search response (only on first load)
-                        if (albums.length === 0) {
-                            const totalFromSearch = data.searchResult2?.albumCount || data.searchResult3?.albumCount || 0;
-                            if (totalFromSearch > 0) {
-                                setTotalCount(totalFromSearch);
-                            }
-                        }
-                    } else {
-                        const params = { type: 'alphabeticalByName', size: PAGE_SIZE, offset: albums.length };
-                        if (selectedGenre) params.genre = selectedGenre;
-                        const data = await subsonicFetch('getAlbumList2.view', params);
-                        albumList = data.albumList2?.album || [];
-                    }
                 }
-                const newAlbums = Array.isArray(albumList) ? albumList : [albumList].filter(Boolean);
-                setAlbums(prev => [...prev, ...newAlbums]);
-                setHasMore(newAlbums.length === PAGE_SIZE);
 
+                const items = Array.isArray(albumList) ? albumList : [albumList].filter(Boolean);
+                setAlbums(prev => offset === 0 ? items : [...prev, ...items]);
             } catch (e) {
-                console.error("Failed to fetch albums:", e);
+                console.error('Failed to load albums:', e);
             } finally {
                 setIsLoading(false);
             }
         };
-        
-        fetcher();
-    }, [filter, searchTerm, albums.length, isLoading, hasMore, selectedGenre, isStarredFilter]);
-    
-    useEffect(() => {
-        if (albums.length === 0 && hasMore) {
-            const timer = setTimeout(() => loadMoreAlbums(), 300);
-            return () => clearTimeout(timer);
-        }
-    }, [albums.length, hasMore, loadMoreAlbums]);
+
+        load();
+    }, [offset, searchTerm, selectedGenre, isStarredFilter, filter]);
 
 
     const observer = useRef();
-    const lastAlbumElementRef = useCallback(node => {
+    const lastAlbumElementRef = useRef();
+
+    useEffect(() => {
         if (isLoading) return;
         if (observer.current) observer.current.disconnect();
-        observer.current = new IntersectionObserver(entries => {
-            if (entries[0].isIntersecting && hasMore) {
-                loadMoreAlbums();
+
+        observer.current = new IntersectionObserver(([entry]) => {
+            if (entry.isIntersecting && albums.length < totalCount) {
+                setOffset(prev => prev + PAGE_SIZE);
             }
         });
-        if (node) observer.current.observe(node);
-    }, [isLoading, hasMore, loadMoreAlbums]);
+
+        if (lastAlbumElementRef.current) {
+            observer.current.observe(lastAlbumElementRef.current);
+        }
+
+        return () => observer.current?.disconnect();
+    }, [isLoading, albums.length, totalCount]);
 
     return (
         <div>
@@ -1406,12 +1395,10 @@ export function Albums({ credentials, filter, onNavigate }) {
                     ))}
                 </select>
                 <button
-                    onClick={async () => {
+                    onClick={() => {
                         setSearchTerm('');
                         setSelectedGenre('');
                         setIsStarredFilter(!isStarredFilter);
-                        setAlbums([]);
-                        setHasMore(true);
                     }}
                     className={`inline-flex items-center gap-2 font-semibold py-2.5 px-5 rounded-lg transition-all whitespace-nowrap ${
                         isStarredFilter
@@ -1429,15 +1416,19 @@ export function Albums({ credentials, filter, onNavigate }) {
             {/* Album Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
                 {albums.map((album, index) => (
-                    <AlbumCard
+                    <div
+                        ref={index === albums.length - 1 ? lastAlbumElementRef : null}
                         key={album.id}
-                        album={album}
-                        isLastElement={index === albums.length - 1}
-                        lastAlbumElementRef={lastAlbumElementRef}
-                        onNavigate={onNavigate}
-                        onStarToggle={handleStarToggle}
-                        isStarred={starredAlbums.has(album.id)}
-                    />
+                    >
+                        <AlbumCard
+                            album={album}
+                            isLastElement={false}
+                            lastAlbumElementRef={null}
+                            onNavigate={onNavigate}
+                            onStarToggle={handleStarToggle}
+                            isStarred={starredAlbums.has(album.id)}
+                        />
+                    </div>
                 ))}
             </div>
             
@@ -1449,7 +1440,9 @@ export function Albums({ credentials, filter, onNavigate }) {
                     </svg>
                 </div>
             )}
-            {!hasMore && albums.length > 0 && <p className="text-center text-gray-500 mt-8 text-sm">You've reached the end</p>}
+            {!isLoading && albums.length >= totalCount && albums.length > 0 && (
+                <p className="text-center text-gray-500 mt-8">All {totalCount} albums loaded</p>
+            )}
         </div>
     );
 }
@@ -1458,20 +1451,17 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
     const [artists, setArtists] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [hasMore, setHasMore] = useState(true);
+    const [offset, setOffset] = useState(0);
     const [totalCount, setTotalCount] = useState(0);
     const [isStarredFilter, setIsStarredFilter] = useState(false);
     const [starredArtists, setStarredArtists] = useState(new Set());
-    const PAGE_SIZE = 50; // Increased page size for better performance
+    const PAGE_SIZE = 50;
 
     useEffect(() => {
         setArtists([]);
-        setHasMore(true);
-        // Reset count when filter changes, it will be updated when artists load
-        if (filter?.similarArtists) {
-            setTotalCount(0);
-        }
-    }, [searchTerm, isStarredFilter, filter]);
+        setOffset(0);
+        setTotalCount(0);
+    }, [searchTerm, isStarredFilter, filter?.similarArtists]);
 
     // Load starred artists
     useEffect(() => {
@@ -1506,105 +1496,107 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
         }
     };
 
-    // Load artist counts
+    // Load artist counts (once per filter)
     useEffect(() => {
-        const loadCounts = async () => {
+        if (offset !== 0) return; // Only load count on first page
+
+        const load = async () => {
             try {
-                const counts = await getMusicCounts('');
-                setTotalCount(counts.artists);
+                if (filter?.similarArtists) {
+                    setTotalCount(filter.similarArtists.length);
+                } else if (isStarredFilter) {
+                    const data = await getStarredSongs();
+                    const artistList = Array.isArray(data.starred2?.artist)
+                        ? data.starred2.artist
+                        : [data.starred2?.artist].filter(Boolean);
+                    setTotalCount(artistList.length);
+                } else {
+                    const counts = await getMusicCounts('');
+                    setTotalCount(counts.artists);
+                }
             } catch (err) {
                 console.error('Failed to load artist counts:', err);
+                setTotalCount(0);
             }
         };
-        loadCounts();
-    }, []);
+        load();
+    }, [offset, isStarredFilter, filter?.similarArtists]);
 
-    const loadMoreArtists = useCallback(() => {
-        if (isLoading || !hasMore) return;
-        setIsLoading(true);
-
-        const fetcher = async () => {
+    // Load data whenever offset changes
+    useEffect(() => {
+        const load = async () => {
+            setIsLoading(true);
             try {
-                let newArtists = [];
-                
-                // Handle preloaded similar artists
-                if (filter?.similarArtists && artists.length === 0) {
-                    newArtists = filter.similarArtists;
-                    setTotalCount(newArtists.length); // Update count for similar artists
-                    setHasMore(false); // Similar artists are all loaded at once
+                let artistList = [];
+
+                if (filter?.similarArtists) {
+                    // Handle preloaded similar artists
+                    artistList = filter.similarArtists.slice(offset, offset + PAGE_SIZE);
                 } else if (isStarredFilter) {
-                    // Load starred artists from getStarred
-                    if (artists.length === 0) {
-                        const data = await getStarredSongs();
-                        const artistList = data.starred2?.artist || [];
-                        newArtists = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
-                        setTotalCount(newArtists.length);
-                        setHasMore(false); // All starred artists loaded at once
-                    } else {
-                        setHasMore(false);
-                    }
-                } else {
-                    // Only search when searchTerm is >= 3 characters (never search at 0,1,2)
-                    if (searchTerm.length > 0 && searchTerm.length < 3) {
-                        // Don't search yet, just stop loading
-                        setHasMore(false);
-                        return;
-                    }
-                    
-                    const query = searchTerm.length >= 3 ? searchTerm : '*';
-                    
-                    const data = await subsonicFetch('search2.view', { 
-                        query: query, 
-                        artistCount: PAGE_SIZE, 
-                        artistOffset: artists.length,
-                        albumCount: 0,  // Don't fetch albums
-                        songCount: 0    // Don't fetch songs
+                    // Load starred artists
+                    const data = await getStarredSongs();
+                    const all = Array.isArray(data.starred2?.artist)
+                        ? data.starred2.artist
+                        : [data.starred2?.artist].filter(Boolean);
+                    artistList = all.slice(offset, offset + PAGE_SIZE);
+                } else if (searchTerm && searchTerm.length >= 3) {
+                    // Search
+                    const data = await subsonicFetch('search2.view', {
+                        query: searchTerm,
+                        artistCount: PAGE_SIZE,
+                        artistOffset: offset,
+                        albumCount: 0,
+                        songCount: 0,
                     });
-                    
-                    const artistList = data.searchResult2?.artist || data.searchResult3?.artist || [];
-                    newArtists = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
-                    
-                    // Update total count from search response (only on first load)
-                    if (artists.length === 0) {
-                        const totalFromSearch = data.searchResult2?.artistCount || data.searchResult3?.artistCount || 0;
-                        if (totalFromSearch > 0) {
-                            setTotalCount(totalFromSearch);
-                        }
-                    }
-                    
-                    setHasMore(newArtists.length === PAGE_SIZE);
+                    artistList = data.searchResult2?.artist || data.searchResult3?.artist || [];
+                } else if (searchTerm.length > 0 && searchTerm.length < 3) {
+                    // Search term too short, don't load
+                    setIsLoading(false);
+                    return;
+                } else {
+                    // Browse - load all artists with wildcard
+                    const data = await subsonicFetch('search2.view', {
+                        query: '*',
+                        artistCount: PAGE_SIZE,
+                        artistOffset: offset,
+                        albumCount: 0,
+                        songCount: 0,
+                    });
+                    artistList = data.searchResult2?.artist || data.searchResult3?.artist || [];
                 }
-                
-                setArtists(prev => [...prev, ...newArtists]);
+
+                const items = Array.isArray(artistList) ? artistList : [artistList].filter(Boolean);
+                setArtists(prev => offset === 0 ? items : [...prev, ...items]);
             } catch (e) {
-                console.error("Failed to fetch artists:", e);
+                console.error('Failed to load artists:', e);
             } finally {
                 setIsLoading(false);
             }
         };
 
-        fetcher();
-    }, [searchTerm, artists.length, isLoading, hasMore, isStarredFilter, filter]);
-    
-    useEffect(() => {
-        if (artists.length === 0 && hasMore) {
-            const timer = setTimeout(() => loadMoreArtists(), 300);
-            return () => clearTimeout(timer);
-        }
-    }, [artists.length, hasMore, loadMoreArtists]);
+        load();
+    }, [offset, searchTerm, isStarredFilter, filter?.similarArtists]);
 
 
     const observer = useRef();
-    const lastArtistElementRef = useCallback(node => {
+    const lastArtistElementRef = useRef();
+
+    useEffect(() => {
         if (isLoading) return;
         if (observer.current) observer.current.disconnect();
-        observer.current = new IntersectionObserver(entries => {
-            if (entries[0].isIntersecting && hasMore) {
-                loadMoreArtists();
+
+        observer.current = new IntersectionObserver(([entry]) => {
+            if (entry.isIntersecting && artists.length < totalCount) {
+                setOffset(prev => prev + PAGE_SIZE);
             }
         });
-        if (node) observer.current.observe(node);
-    }, [isLoading, hasMore, loadMoreArtists]);
+
+        if (lastArtistElementRef.current) {
+            observer.current.observe(lastArtistElementRef.current);
+        }
+
+        return () => observer.current?.disconnect();
+    }, [isLoading, artists.length, totalCount]);
 
     return (
         <div>
@@ -1645,11 +1637,9 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
                     )}
                 </div>
                 <button
-                    onClick={async () => {
+                    onClick={() => {
                         setSearchTerm('');
                         setIsStarredFilter(!isStarredFilter);
-                        setArtists([]);
-                        setHasMore(true);
                     }}
                     className={`inline-flex items-center gap-2 font-semibold py-2.5 px-5 rounded-lg transition-all whitespace-nowrap ${
                         isStarredFilter
@@ -1671,8 +1661,8 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
                     return (
                         <div
                             ref={index === artists.length - 1 ? lastArtistElementRef : null}
-                            key={`${artist.id}-${index}`}
-                            onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: { artistId: artist.id, artistName: artist.name } })} 
+                            key={artist.id}
+                            onClick={() => onNavigate({ page: 'albums', title: artist.name, filter: { artistId: artist.id, artistName: artist.name } })}
                             className="group bg-dark-750 rounded-xl p-3 sm:p-4 text-center hover:bg-dark-700 card-hover flex flex-col items-center cursor-pointer relative">
                             {/* Star button in top-right corner of the card */}
                             <button
@@ -1735,7 +1725,9 @@ export function Artists({ credentials, onNavigate, audioMuseUrl, onSimilarArtist
                     </svg>
                 </div>
             )}
-            {!hasMore && artists.length > 0 && <p className="text-center text-gray-500 mt-8 text-sm">You've reached the end</p>}
+            {!isLoading && artists.length >= totalCount && artists.length > 0 && (
+                <p className="text-center text-gray-500 mt-8">All {totalCount} artists loaded</p>
+            )}
         </div>
     );
 }
