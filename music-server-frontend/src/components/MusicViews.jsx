@@ -1203,9 +1203,9 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                         <td className="px-4 py-4 hidden lg:table-cell text-gray-400">{song.genre || 'Unknown'}</td>
                                         <td className="px-4 py-3 hidden xl:table-cell text-center">{song.playCount > 0 ? song.playCount : ''}</td>
                                         <td className="px-4 py-3 hidden lg:table-cell">{formatDate(song.lastPlayed)}</td>
-                                        <td className="px-1 sm:px-4 py-4 flex-shrink-0">
+                                        <td className="px-1 sm:px-4 py-4 flex-shrink-0 w-16 sm:w-48">
                                             {/* Desktop: Show all buttons */}
-                                            <div className="hidden sm:flex items-center justify-end space-x-1 sm:space-x-2 gap-0.5">
+                                            <div className="hidden sm:flex items-center justify-end space-x-1 sm:space-x-2 gap-0.5 overflow-hidden">
                                                  {isPlaylistView && !isPlaylistReadOnly && (
                                                     <>
                                                         <div className="flex flex-col -my-1">
