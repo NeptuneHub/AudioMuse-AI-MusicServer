@@ -104,6 +104,11 @@ func (cl *AudioMuseClient) buildRequest(ctx context.Context, method, targetURL s
 		return nil, err
 	}
 
+	// Set Content-Type for POST/PUT requests with body
+	if (method == "POST" || method == "PUT") && body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
 	// Attach authorization if a token is configured
 	token, err := cl.token()
 	if err != nil {
@@ -214,9 +219,13 @@ func (cl *AudioMuseClient) ProxyGin(c *gin.Context, method, path string) {
 		return
 	}
 
-	// Copy Content-Type and Accept headers from the incoming request
-	req.Header.Set("Content-Type", c.GetHeader("Content-Type"))
-	req.Header.Set("Accept", c.GetHeader("Accept"))
+	// Copy Content-Type and Accept headers from the incoming request (only if present)
+	if contentType := c.GetHeader("Content-Type"); contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if accept := c.GetHeader("Accept"); accept != "" {
+		req.Header.Set("Accept", accept)
+	}
 
 	resp, err := cl.httpClient.Do(req)
 	if err != nil {

@@ -1,7 +1,6 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { subsonicFetch, starSong, unstarSong, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed, getRadioSeed, getSimilarArtists, getAudioMuseSimilarArtists } from '../api';
-
+import { apiFetch, subsonicFetch, starSong, unstarSong, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed, getRadioSeed, getAudioMuseSimilarArtists } from '../api';
 const formatDate = (isoString) => {
     if (!isoString) return 'Never';
     try {
@@ -157,7 +156,6 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     const [playlistOwner, setPlaylistOwner] = useState(null);
     const [discoveryView, setDiscoveryView] = useState('all'); // 'all', 'recent', 'popular', 'history'
     const [baseTotalCount, setBaseTotalCount] = useState(0); // Total count of ALL songs (unfiltered)
-    const [totalCount, setTotalCount] = useState(0); // Count for current view (filtered by search/genre)
     const [isStarredFilter, setIsStarredFilter] = useState(false);
     const [radioFetching, setRadioFetching] = useState(false);
     const radioFetchedRef = useRef(false); // Track if we already fetched more songs
@@ -245,7 +243,6 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         setSongs([]);
         setAllSongs([]);
         setOffset(0);
-        setTotalCount(0); // Reset count when filters change
         setDiscoveryView('all'); // Reset discovery view on filter/genre change
         radioFetchedRef.current = false; // Reset radio fetch tracker
     }, [searchTerm, filter, refreshKey, selectedGenre]);
@@ -281,12 +278,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                         subtract_distance: seedData.subtract_distance
                     };
 
-                    const response = await fetch('/api/alchemy', {
+                    const response = await apiFetch('/api/alchemy', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        },
                         body: JSON.stringify(alchemyPayload)
                     });
 
@@ -323,7 +316,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         }
     }, [isRadioView, filter?.radioId, currentSong, playQueue, radioFetching, onAddToQueue]);
 
-    // Load base total (ALL songs unfiltered) - only once
+    // Load base total (ALL songs unfiltered)
     useEffect(() => {
         const loadBaseTotal = async () => {
             try {
@@ -336,7 +329,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
             }
         };
         loadBaseTotal();
-    }, []);
+    }, [filter, isStarredFilter, discoveryView, searchTerm, selectedGenre]);
 
     // Load view-specific counts when search/genre/filter changes
     useEffect(() => {
@@ -350,8 +343,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
 
                 // Otherwise load base counts for current view
                 if (!filter && !isStarredFilter && selectedGenre) {
-                    const counts = await getMusicCounts(selectedGenre);
-                    setTotalCount(counts.songs);
+                    await getMusicCounts(selectedGenre);
                 }
             } catch (err) {
                 console.error('Failed to load view counts:', err);
@@ -367,6 +359,12 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
             setError('');
 
             try {
+                // Skip auto-load when starred filter is active (button handler manages it)
+                if (isStarredFilter) {
+                    setIsLoading(false);
+                    return;
+                }
+
                 // Handle "All Songs" view - fetch songs with pagination using search3
                 if (!filter && !searchTerm && discoveryView === 'all' && !selectedGenre && !isStarredFilter) {
                     const data = await subsonicFetch('search3.view', {
@@ -415,10 +413,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     const songList = data.searchResult2?.song || data.searchResult3?.song || [];
                     let newSongs = Array.isArray(songList) ? songList : [songList].filter(Boolean);
 
-                    const totalFromSearch = data.searchResult2?.songCount || data.searchResult3?.songCount || 0;
-                    if (totalFromSearch > 0) {
-                        setTotalCount(totalFromSearch);
-                    }
+                    // Note: totalFromSearch available from data if needed for UI display
 
                     if (selectedGenre) {
                         newSongs = newSongs.filter(song => {
@@ -902,8 +897,6 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             setAllSongs(songList);
                             // Show all starred songs at once (no pagination) so displayed items match the total
                             setSongs(songList);
-                            // Ensure total count reflects unique starred songs (deduplicated list)
-                            setTotalCount(songList.length);
                         } catch (err) {
                             setError('Failed to load starred songs: ' + err.message);
                             setIsStarredFilter(false);

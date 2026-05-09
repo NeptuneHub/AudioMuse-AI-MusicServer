@@ -171,7 +171,7 @@ const SongActionsMenu = ({ song, onAddToPlaylist, onInstantMix, audioMuseUrl, on
 /**
  * A modal component to display and manage the current play queue.
  */
-function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelect, onTogglePlayPause, onAddToPlaylist, onInstantMix, audioMuseUrl, onClearQueue, onReorder, onCreateSongPath, onQueueUpdate, onSimilarArtists }) {
+function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelect, onTogglePlayPause, onAddToPlaylist, onInstantMix, audioMuseUrl, onClearQueue, onReorder, onCreateSongPath, onSimilarArtists }) {
     const [activeMenu, setActiveMenu] = useState({ index: null, style: {} });
     const [startSongId, setStartSongId] = useState(null);
     const [endSongId, setEndSongId] = useState(null);
@@ -186,10 +186,6 @@ function PlayQueueView({ isOpen, onClose, queue, currentIndex, onRemove, onSelec
                 await unstarSong(song.id);
             } else {
                 await starSong(song.id);
-            }
-            // Trigger queue update to refresh the starred status
-            if (onQueueUpdate) {
-                onQueueUpdate();
             }
         } catch (err) {
             console.error('Failed to toggle star:', err);

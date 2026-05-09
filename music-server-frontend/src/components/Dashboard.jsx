@@ -11,7 +11,7 @@ import CustomAudioPlayer from './AudioPlayer.jsx';
 import PlayQueueView from './PlayQueueView.jsx';
 import { subsonicFetch, getRadioSeed } from '../api';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-
+import { getAuthToken } from '../utils/tokenUtils.js';
 
 function Dashboard({ onLogout, isAdmin, credentials }) {
     // Initialize navigation from localStorage or default to artists
@@ -214,7 +214,7 @@ function Dashboard({ onLogout, isAdmin, credentials }) {
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        'Authorization': `Bearer ${getAuthToken()}`
                     },
                     body: JSON.stringify({
                         items: items,  // Array of {id, op} objects

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getRadios, getRadioSeed, deleteRadio, updateRadioName } from '../api';
-
+import { getAuthToken } from '../utils/tokenUtils.js';
 export default function Radio({ onNavigate, onAddToQueue, onPlay, onSwitchToCreate }) {
   const [radios, setRadios] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +48,7 @@ export default function Radio({ onNavigate, onAddToQueue, onPlay, onSwitchToCrea
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${getAuthToken()}`
         },
         body: JSON.stringify(alchemyPayload)
       });

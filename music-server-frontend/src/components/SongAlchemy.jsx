@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { searchMusic, createRadio } from '../api';
 import Plotly from 'plotly.js-dist-min';
-
+import { getAuthToken } from '../utils/tokenUtils.js';
 const defaultRow = () => ({ artist: '', title: '', id: '', op: 'ADD', type: 'song' });
 
 // Create Radio Form Component
@@ -157,7 +157,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
       return;
     }
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const url = `/api/alchemy/search_artists?query=${encodeURIComponent(q)}`;
       console.log('Fetching artist suggestions from:', url);
       const resp = await fetch(url, {
@@ -234,7 +234,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
         subtract_distance: subtractDistance,
         preview: true
       };
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const resp = await fetch('/api/alchemy', {
         method: 'POST',
         headers: token ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } : { 'Content-Type': 'application/json' },
@@ -426,7 +426,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
         temperature,
         subtract_distance: subtractDistance
       };
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const resp = await fetch('/api/alchemy', {
         method: 'POST',
         headers: token ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } : { 'Content-Type': 'application/json' },
@@ -500,7 +500,7 @@ export default function SongAlchemy({ onNavigate, onAddToQueue, onPlay, onRadioC
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${getAuthToken()}`
         },
         body: JSON.stringify(payload)
       });

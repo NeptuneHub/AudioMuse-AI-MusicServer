@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"errors"
 	"math/big"
 	"strings"
 
@@ -45,24 +44,6 @@ func UUIDToBase62(id uuid.UUID) string {
 	return toBase62(&intValue)
 }
 
-// Base62ToUUID converts a base62 string back to a UUID
-func Base62ToUUID(base62Str string) (uuid.UUID, error) {
-	// Convert base62 string to big integer
-	intValue, err := fromBase62(base62Str)
-	if err != nil {
-		return uuid.Nil, err
-	}
-
-	// Convert big integer to UUID bytes
-	bytes := intValue.Bytes()
-
-	// Pad to 16 bytes if necessary
-	var uuidBytes [16]byte
-	copy(uuidBytes[16-len(bytes):], bytes)
-
-	return uuid.FromBytes(uuidBytes[:])
-}
-
 // toBase62 converts a big integer to base62 string
 func toBase62(num *big.Int) string {
 	if num.Sign() == 0 {
@@ -88,21 +69,4 @@ func toBase62(num *big.Int) string {
 	}
 
 	return string(runes)
-}
-
-// fromBase62 converts a base62 string to a big integer
-func fromBase62(s string) (*big.Int, error) {
-	result := big.NewInt(0)
-	base := big.NewInt(62)
-
-	for _, char := range s {
-		result.Mul(result, base)
-		idx := strings.IndexRune(base62Alphabet, char)
-		if idx == -1 {
-			return nil, errors.New("invalid base62 character")
-		}
-		result.Add(result, big.NewInt(int64(idx)))
-	}
-
-	return result, nil
 }

@@ -371,8 +371,7 @@ func processPath(scanPath string) int64 {
 				duration := getDuration(path)
 
 				// Check if song already exists (by path) to reuse UUID
-				var existingID string
-				err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
+				existingID, err := GetSongIDByPath(db, path)
 
 				var songID string
 				if err == sql.ErrNoRows {
@@ -475,8 +474,7 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 				duration := getDuration(path)
 
 				// Check if song already exists (by path) to reuse UUID
-				var existingID string
-				err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
+				existingID, err := GetSongIDByPath(db, path)
 
 				var songID string
 				if err == sql.ErrNoRows {
@@ -609,8 +607,7 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				}
 
 				// Check if song already exists (by path) to reuse UUID
-				var existingID string
-				err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
+				existingID, err := GetSongIDByPath(db, path)
 
 				var songID string
 				var shouldComputeWaveform bool
@@ -791,8 +788,7 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 				duration := getDuration(path)
 
 				// Check if song already exists (by path) to reuse UUID
-				var existingID string
-				err = db.QueryRow("SELECT id FROM songs WHERE path = ?", path).Scan(&existingID)
+				existingID, err := GetSongIDByPath(db, path)
 
 				var songID string
 				var shouldComputeWaveform bool

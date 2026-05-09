@@ -1,7 +1,6 @@
 // Suggested path: music-server-frontend/src/components/UserSettings.jsx
 import React, { useState, useEffect } from 'react';
-
-const API_BASE = process.env.REACT_APP_API_BASE || '';
+import { apiFetch } from '../api';
 
 export function UserSettings({ credentials }) {
     const [settings, setSettings] = useState({
@@ -20,17 +19,11 @@ export function UserSettings({ credentials }) {
 
     const loadSettings = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_BASE}/api/v1/user/settings/transcoding`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-
+            const response = await apiFetch('/api/v1/user/settings/transcoding');
             if (!response.ok) {
-                throw new Error('Failed to load settings');
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to load settings');
             }
-
             const data = await response.json();
             setSettings(data);
             setLoading(false);
@@ -46,13 +39,8 @@ export function UserSettings({ credentials }) {
         setSuccess('');
 
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_BASE}/api/v1/user/settings/transcoding`, {
+            const response = await apiFetch('/api/v1/user/settings/transcoding', {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
                 body: JSON.stringify(settings)
             });
 

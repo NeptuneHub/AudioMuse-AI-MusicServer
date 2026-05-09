@@ -5,7 +5,7 @@ import WaveSurfer from 'wavesurfer.js';
 import Hover from 'wavesurfer.js/dist/plugins/hover.esm.js';
 import Hls from 'hls.js';
 import './AudioPlayer.css';
-
+import { getAuthToken } from '../utils/tokenUtils.js';
 function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevious, hasQueue, onToggleQueueView, queueCount = 0, playMode = 'sequential', onTogglePlayMode }) {
     const [audioSrc, setAudioSrc] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -100,7 +100,7 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
                 }
 
                 // Get JWT token from localStorage
-                const token = localStorage.getItem('token');
+                const token = getAuthToken();
                 if (!token) {
                     throw new Error('No authentication token found');
                 }
@@ -374,7 +374,7 @@ function CustomAudioPlayer({ song, onEnded, credentials, onPlayNext, onPlayPrevi
         // Fetch pre-computed waveform peaks for instant rendering
         const loadWaveform = async () => {
             try {
-                const token = localStorage.getItem('token');
+                const token = getAuthToken();
                 const waveformUrl = `${API_BASE}/rest/waveform.view?id=${encodeURIComponent(song.id)}&v=1.16.1&c=AudioMuse-AI&jwt=${encodeURIComponent(token)}&_t=${Date.now()}`; // Add timestamp to prevent caching
                 
                 console.log('🌊 Fetching pre-computed waveform peaks for song:', song.id);

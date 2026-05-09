@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../../api';
-
+import { getAuthToken } from '../../utils/tokenUtils';
 function SonicAnalysisPanel() {
     const [status, setStatus] = useState(null);
     const [error, setError] = useState('');
@@ -10,7 +10,7 @@ function SonicAnalysisPanel() {
 
     // Check if AudioMuse-AI Core URL is configured
     const checkAudioMuseConfiguration = useCallback(async () => {
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         try {
             const response = await fetch(`${API_BASE}/rest/getConfiguration.view?f=json`, {
                 headers: { 'Authorization': `Bearer ${token}` }
@@ -32,7 +32,7 @@ function SonicAnalysisPanel() {
     }, []);
 
     const fetchStatus = useCallback(async () => {
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         try {
             // Use the Subsonic endpoint with absolute URL for production
             const response = await fetch(`${API_BASE}/rest/getSonicAnalysisStatus.view?f=json`, {
@@ -94,7 +94,7 @@ function SonicAnalysisPanel() {
     const startTask = async (endpoint, taskName) => {
         setError('');
         setIsStarting(true);
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         try {
             // Use the Subsonic endpoint with absolute URL and original working format
             const response = await fetch(`${API_BASE}${endpoint}?f=json`, {
@@ -127,7 +127,7 @@ function SonicAnalysisPanel() {
     const handleStartCleaning = async () => {
         setError('');
         setIsStarting(true);
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         try {
             const response = await fetch(`${API_BASE}/api/cleaning/start`, {
                 method: 'POST',
@@ -157,7 +157,7 @@ function SonicAnalysisPanel() {
             return;
         }
         setError('');
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         try {
             // Use the Subsonic endpoint with original working format
             const response = await fetch(`${API_BASE}/rest/cancelSonicAnalysis.view?f=json&taskId=${status.task_id}`, {

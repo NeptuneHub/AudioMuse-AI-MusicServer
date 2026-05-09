@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
+import { getAuthToken } from './utils/tokenUtils';
 
 // --- Main App Component ---
 function App() {
@@ -13,7 +14,7 @@ function App() {
 	// Only restore if we have a valid JWT token
 	useEffect(() => {
 		const validateAndRestoreSession = async () => {
-			const token = localStorage.getItem('token');
+			const token = getAuthToken();
 			const username = localStorage.getItem('username');
 			const storedAdminStatus = localStorage.getItem('isAdmin') === 'true';
 			

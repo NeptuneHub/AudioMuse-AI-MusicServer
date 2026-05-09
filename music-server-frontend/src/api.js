@@ -3,13 +3,15 @@
 // Use relative URLs - no explicit API_BASE needed
 // Container internal routing handles the rest
 
+import { getAuthToken } from './utils/tokenUtils.js';
+
 const API_BASE = ''; // Empty = relative URLs like the working version
 
 export { API_BASE };
 
 export async function apiFetch(path, options = {}) {
     const headers = options.headers || {};
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
     if (token) {
         headers['Authorization'] = `Bearer ${token}`;
     } else if (path !== '/api/v1/user/login') {
@@ -49,7 +51,7 @@ export async function subsonicFetch(endpoint, params = {}) {
     });
     
     // FRONTEND USES JWT ONLY - no username/password in querystring
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
     const headers = {};
     if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -141,13 +143,22 @@ export async function getAlbums(params = {}) {
 
 // Rescan functionality for admin
 export async function rescanLibrary() {
-    return await apiFetch('/api/v1/admin/scan/rescan', { method: 'POST' });
+    const res = await apiFetch('/api/v1/admin/scan/rescan', { method: 'POST' });
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Rescan failed: ${res.status}`);
+    }
+    return await res.json();
 }
 
 // Discovery views
 export async function getMusicCounts(genre = '') {
     const params = genre ? `?genre=${encodeURIComponent(genre)}` : '';
     const res = await apiFetch(`/api/v1/counts${params}`);
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to load counts: ${res.status}`);
+    }
     return await res.json();
 }
 
@@ -155,6 +166,10 @@ export async function getRecentlyAdded(limit = 50, offset = 0, genre = '') {
     const params = new URLSearchParams({ limit, offset });
     if (genre) params.set('genre', genre);
     const res = await apiFetch(`/api/v1/recently-added?${params.toString()}`);
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to load recently added: ${res.status}`);
+    }
     const data = await res.json();
     return Array.isArray(data) ? data : [];
 }
@@ -163,6 +178,10 @@ export async function getMostPlayed(limit = 50, offset = 0, genre = '') {
     const params = new URLSearchParams({ limit, offset });
     if (genre) params.set('genre', genre);
     const res = await apiFetch(`/api/v1/most-played?${params.toString()}`);
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to load most played: ${res.status}`);
+    }
     const data = await res.json();
     return Array.isArray(data) ? data : [];
 }
@@ -171,6 +190,10 @@ export async function getRecentlyPlayed(limit = 50, offset = 0, genre = '') {
     const params = new URLSearchParams({ limit, offset });
     if (genre) params.set('genre', genre);
     const res = await apiFetch(`/api/v1/recently-played?${params.toString()}`);
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to load recently played: ${res.status}`);
+    }
     const data = await res.json();
     return Array.isArray(data) ? data : [];
 }
@@ -186,21 +209,37 @@ export async function createRadio(name, seedSongs, temperature, subtractDistance
             subtract_distance: subtractDistance
         })
     });
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to create radio: ${res.status}`);
+    }
     return await res.json();
 }
 
 export async function getRadios() {
     const res = await apiFetch('/api/radios');
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to load radios: ${res.status}`);
+    }
     return await res.json();
 }
 
 export async function getRadioSeed(radioId) {
     const res = await apiFetch(`/api/radios/${radioId}/seed`);
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to load radio seed: ${res.status}`);
+    }
     return await res.json();
 }
 
 export async function deleteRadio(radioId) {
     const res = await apiFetch(`/api/radios/${radioId}`, { method: 'DELETE' });
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to delete radio: ${res.status}`);
+    }
     return await res.json();
 }
 
@@ -209,6 +248,10 @@ export async function updateRadioName(radioId, name) {
         method: 'PUT',
         body: JSON.stringify({ name })
     });
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to update radio: ${res.status}`);
+    }
     return await res.json();
 }
 
@@ -219,11 +262,13 @@ export async function getSimilarArtists(artistId, count = 20) {
 
 // AudioMuse similar artists - pass artist NAME directly
 export async function getAudioMuseSimilarArtists(artistName, count = 10) {
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
+    const headers = {};
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
     const response = await fetch('/api/similar_artists?artist=' + encodeURIComponent(artistName) + '&n=' + count, {
-        headers: {
-            'Authorization': `Bearer ${token}`
-        }
+        headers
     });
     if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -237,11 +282,19 @@ export async function clapSearch(query, limit = 50) {
         method: 'POST',
         body: JSON.stringify({ query, limit })
     });
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Search failed: ${res.status}`);
+    }
     return await res.json();
 }
 
 export async function getClapTopQueries() {
     const res = await apiFetch('/api/clap/top_queries');
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to fetch queries: ${res.status}`);
+    }
     return await res.json();
 }
 
@@ -251,6 +304,10 @@ export async function semanticSearch(query, limit = 50) {
         method: 'POST',
         body: JSON.stringify({ query, limit })
     });
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Semantic search failed: ${res.status}`);
+    }
     return await res.json();
 }
 
