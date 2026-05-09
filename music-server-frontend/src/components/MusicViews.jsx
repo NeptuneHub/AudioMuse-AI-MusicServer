@@ -1,6 +1,6 @@
 // Suggested path: music-server-frontend/src/components/MusicViews.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { subsonicFetch, starSong, unstarSong, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed, getRadioSeed } from '../api';
+import { subsonicFetch, starSong, unstarSong, getStarredSongs, getGenres, getMusicCounts, getRecentlyAdded, getMostPlayed, getRecentlyPlayed, getRadioSeed, getSimilarArtists, getAudioMuseSimilarArtists } from '../api';
 
 const formatDate = (isoString) => {
     if (!isoString) return 'Never';
@@ -577,6 +577,74 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         }
     };
 
+    const handleSimilarArtists = async (song) => {
+        if (!song || !song.artist) {
+            setError('No artist found for this song');
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+            setError('');
+
+            const artistName = song.artist;
+            console.log(`Finding similar artists to "${artistName}"...`);
+
+            // Get similar artists from AudioMuse
+            const similarData = await getAudioMuseSimilarArtists(artistName, 10);
+            let similarArtists = similarData.similar_artists || [];
+            similarArtists = Array.isArray(similarArtists) ? similarArtists : [similarArtists].filter(Boolean);
+
+            if (similarArtists.length === 0) {
+                setError('No similar artists found');
+                setIsLoading(false);
+                return;
+            }
+
+            console.log(`Found ${similarArtists.length} similar artists`);
+
+            // Get songs from all similar artists using Subsonic search
+            const allArtistSongs = [];
+            for (const artist of similarArtists) {
+                try {
+                    const songData = await subsonicFetch('search2.view', {
+                        query: artist,
+                        artistCount: 0,
+                        albumCount: 0,
+                        songCount: 50
+                    });
+                    const songList = songData.searchResult2?.song || [];
+                    const songArray = Array.isArray(songList) ? songList : [songList].filter(Boolean);
+                    allArtistSongs.push(...songArray);
+                } catch (err) {
+                    console.warn(`Failed to load songs for artist ${artist}`, err);
+                }
+            }
+
+            // Cap at 200 songs
+            const finalSongs = allArtistSongs.slice(0, 200);
+
+            if (finalSongs.length === 0) {
+                setError('No songs found from similar artists');
+                setIsLoading(false);
+                return;
+            }
+
+            setSongs(finalSongs);
+            setAllSongs(finalSongs);
+            setSearchTerm('');
+            setSelectedGenre('');
+            setOffset(0);
+
+            console.log(`✨ Loaded ${finalSongs.length} songs from ${similarArtists.length} similar artists for "${artistName}"`);
+        } catch (err) {
+            console.error('Failed to load similar artists:', err);
+            setError(err.message || 'Failed to load similar artists');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     return (
         <div>
             {error && (
@@ -878,8 +946,120 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
             )}
 
             {songs.length > 0 && (
-                <div className="overflow-x-auto rounded-lg border border-dark-600">
-                    <table className="min-w-full text-sm text-left text-gray-300">
+                <>
+                    {/* Mobile Card View */}
+                    <div className="sm:hidden space-y-3 mb-6">
+                        {songs.map((song, index) => {
+                            const isCurrentSong = currentSong && currentSong.id === song.id;
+                            const isPlaying = isCurrentSong && isAudioPlaying;
+                            const isInQueue = playQueue.some(s => s.id === song.id);
+                            return (
+                                <div
+                                    ref={index === songs.length - 1 ? lastSongElementRef : null}
+                                    key={`${song.id}-${index}`}
+                                    className={`rounded-lg p-3 border border-dark-600 transition-all ${
+                                        isCurrentSong ? 'bg-accent-500/10 border-accent-500' : 'bg-dark-750 hover:bg-dark-700'
+                                    }`}
+                                >
+                                    {/* Row 1: Play and Star buttons */}
+                                    <div className="flex gap-2 mb-2">
+                                        <button
+                                            onClick={() => {
+                                                if (isCurrentSong) {
+                                                    onTogglePlayPause();
+                                                } else {
+                                                    onPlay(song, [song]);
+                                                }
+                                            }}
+                                            className={`p-1.5 rounded-lg border-2 transition-all flex items-center justify-center flex-1 ${
+                                                isPlaying
+                                                    ? 'border-accent-500 text-accent-400 bg-accent-500/20'
+                                                    : 'border-gray-600 text-gray-400 hover:border-accent-500 hover:text-accent-400'
+                                            }`}
+                                        >
+                                            {isPlaying ? (
+                                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path>
+                                                </svg>
+                                            ) : (
+                                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"></path>
+                                                </svg>
+                                            )}
+                                        </button>
+                                        <button
+                                            onClick={() => handleStarToggle(song)}
+                                            className={`p-1.5 rounded-lg border-2 transition-all flex items-center justify-center flex-1 ${
+                                                song.starred
+                                                    ? 'border-yellow-500 text-yellow-400 bg-yellow-500/10'
+                                                    : 'border-gray-600 text-gray-500 hover:border-yellow-500 hover:text-yellow-400'
+                                            }`}
+                                        >
+                                            <svg className="w-5 h-5" fill={song.starred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                                            </svg>
+                                        </button>
+                                    </div>
+
+                                    {/* Row 2: Title */}
+                                    <div className={`font-semibold mb-1 text-sm ${isPlaying ? 'text-accent-400' : 'text-white'}`}>
+                                        {song.title}
+                                    </div>
+
+                                    {/* Row 3: Artist */}
+                                    <div className="text-xs text-gray-400 mb-2">
+                                        {song.artist}
+                                    </div>
+
+                                    {/* Row 4-5: Action Buttons (2x2 grid) */}
+                                    <div className="grid grid-cols-2 gap-1">
+                                        <div className="relative group">
+                                            <button
+                                                onClick={() => {
+                                                    if (!audioMuseUrl) {
+                                                        alert('Instant Mix is not configured on the server. Ask an admin to enable AudioMuse.');
+                                                        return;
+                                                    }
+                                                    onInstantMix(song);
+                                                }}
+                                                className="w-full p-1 rounded text-xs border border-accent-500 text-accent-400 hover:bg-accent-500/10 flex items-center justify-center gap-1"
+                                            >
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                                <span className="hidden group-hover:inline text-xs">Songs</span>
+                                            </button>
+                                        </div>
+                                        <div className="relative group">
+                                            <button
+                                                onClick={() => handleSimilarArtists(song)}
+                                                className="w-full p-1 rounded text-xs border border-blue-500 text-blue-400 hover:bg-blue-500/10 flex items-center justify-center gap-1"
+                                            >
+                                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 11a6 6 0 00-11.86 0v2a1 1 0 001 1h9.86a1 1 0 001-1v-2z"></path>
+                                                </svg>
+                                                <span className="hidden group-hover:inline text-xs">Artists</span>
+                                            </button>
+                                        </div>
+                                        {isInQueue ? (
+                                            <button onClick={() => onRemoveFromQueue(song.id)} className="w-full p-1 rounded text-xs border border-red-500 text-red-400 hover:bg-red-500/10 flex items-center justify-center gap-1">
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                            </button>
+                                        ) : (
+                                            <button onClick={() => onAddToQueue(song)} className="w-full p-1 rounded text-xs border border-green-500 text-green-400 hover:bg-green-500/10 flex items-center justify-center gap-1">
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" /></svg>
+                                            </button>
+                                        )}
+                                        <button onClick={() => onAddToPlaylist(song)} className="w-full p-1 rounded text-xs border border-purple-500 text-purple-400 hover:bg-purple-500/10 flex items-center justify-center gap-1">
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Desktop Table View */}
+                    <div className="hidden sm:block overflow-x-auto rounded-lg border border-dark-600">
+                        <table className="min-w-full text-sm text-left text-gray-300">
                         <thead className="text-xs text-gray-400 uppercase bg-dark-750 border-b border-dark-600">
                             <tr>
                                 <th className="px-4 py-3 w-12"></th>
@@ -914,7 +1094,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                         onPlay(song, [song]);
                                                     }
                                                 }}
-                                                title={isPlaying ? "Pause song" : "Play this song"}
+                                                title={isPlaying ? "Pause Song" : "Play Song"}
                                                 className={`p-1.5 rounded-lg border-2 transition-all hover:scale-105 flex items-center justify-center ${
                                                     isPlaying
                                                         ? 'border-accent-500 text-accent-400 bg-accent-500/20 shadow-glow animate-pulse'
@@ -932,42 +1112,46 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                 )}
                                             </button>
                                         </td>
-                                        <td className="px-4 py-4 text-center">
-                                            <button
-                                                onClick={() => handleStarToggle(song)}
-                                                className={`p-1.5 rounded-lg border-2 transition-all hover:scale-105 flex items-center justify-center ${
-                                                    song.starred
-                                                        ? 'border-yellow-500 text-yellow-400 bg-yellow-500/10 shadow-glow'
-                                                        : 'border-gray-600 text-gray-500 hover:border-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/10'
-                                                }`}
-                                                title={song.starred ? 'Remove from favorites' : 'Add to favorites'}
-                                            >
-                                                <svg className="w-5 h-5" fill={song.starred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                                                </svg>
-                                            </button>
+                                        <td className="px-2 sm:px-4 py-4 text-center flex-shrink-0">
+                                            <div className="relative group">
+                                                <button
+                                                    onClick={() => handleStarToggle(song)}
+                                                    className={`p-1.5 rounded-lg border-2 transition-all hover:scale-105 flex items-center justify-center ${
+                                                        song.starred
+                                                            ? 'border-yellow-500 text-yellow-400 bg-yellow-500/10 shadow-glow'
+                                                            : 'border-gray-600 text-gray-500 hover:border-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/10'
+                                                    }`}
+                                                >
+                                                    <svg className="w-4 sm:w-5 h-4 sm:h-5" fill={song.starred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                                                    </svg>
+                                                </button>
+                                                <div className="hidden group-hover:block absolute bottom-full mb-2 right-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700">
+                                                    Favorites
+                                                </div>
+                                            </div>
                                         </td>
-                                        <td className={`px-4 py-4 font-medium ${isPlaying ? 'text-accent-400' : 'text-white'}`}>
-                                            <div className="flex items-center gap-2">
-                                                {song.title}
+                                        <td className={`px-2 sm:px-4 py-4 font-medium flex-grow ${isPlaying ? 'text-accent-400' : 'text-white'}`}>
+                                            <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+                                                <span className="truncate text-sm sm:text-base">{song.title}</span>
                                                 {isPlaying && (
-                                                    <span className="flex gap-0.5">
-                                                        <span className="w-1 h-3 bg-accent-400 rounded-full animate-pulse"></span>
-                                                        <span className="w-1 h-3 bg-accent-400 rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></span>
-                                                        <span className="w-1 h-3 bg-accent-400 rounded-full animate-pulse" style={{animationDelay: '0.4s'}}></span>
+                                                    <span className="flex gap-0.5 flex-shrink-0">
+                                                        <span className="w-1 h-2 sm:h-3 bg-accent-400 rounded-full animate-pulse"></span>
+                                                        <span className="w-1 h-2 sm:h-3 bg-accent-400 rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></span>
+                                                        <span className="w-1 h-2 sm:h-3 bg-accent-400 rounded-full animate-pulse" style={{animationDelay: '0.4s'}}></span>
                                                     </span>
                                                 )}
                                             </div>
-                                            <div className="sm:hidden text-xs text-gray-400 mt-1">{song.artist}</div>
+                                            <div className="text-xs sm:text-sm text-gray-400 truncate">{song.artist}</div>
                                         </td>
                                         <td className="px-4 py-4 hidden sm:table-cell">{song.artist}</td>
                                         <td className="px-4 py-4 hidden md:table-cell">{song.album}</td>
                                         <td className="px-4 py-4 hidden lg:table-cell text-gray-400">{song.genre || 'Unknown'}</td>
                                         <td className="px-4 py-3 hidden xl:table-cell text-center">{song.playCount > 0 ? song.playCount : ''}</td>
                                         <td className="px-4 py-3 hidden lg:table-cell">{formatDate(song.lastPlayed)}</td>
-                                        <td className="px-2 sm:px-4 py-4">
+                                        <td className="px-1 sm:px-4 py-4 flex-shrink-0">
                                             {/* Desktop: Show all buttons */}
-                                            <div className="hidden sm:flex items-center justify-end space-x-1 sm:space-x-2">
+                                            <div className="hidden sm:flex items-center justify-end space-x-1 sm:space-x-2 gap-0.5">
                                                  {isPlaylistView && !isPlaylistReadOnly && (
                                                     <>
                                                         <div className="flex flex-col -my-1">
@@ -984,60 +1168,124 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                         <div className="border-l border-gray-600 h-6 mx-1"></div>
                                                     </>
                                                 )}
-                                                <button
-                                                    onClick={() => {
-                                                        if (!audioMuseUrl) {
-                                                            alert('Instant Mix is not configured on the server. Ask an admin to enable AudioMuse.');
-                                                            return;
-                                                        }
-                                                        onInstantMix(song);
-                                                    }}
-                                                    title="Instant Mix"
-                                                    className="p-1.5 rounded-lg border-2 border-accent-500 text-accent-400 hover:bg-accent-500/10 transition-all hover:scale-105 flex items-center justify-center"
-                                                >
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                                                </button>
+                                                <div className="relative group">
+                                                    <button
+                                                        onClick={() => {
+                                                            if (!audioMuseUrl) {
+                                                                alert('Instant Mix is not configured on the server. Ask an admin to enable AudioMuse.');
+                                                                return;
+                                                            }
+                                                            onInstantMix(song);
+                                                        }}
+                                                        className="p-1.5 rounded-lg border-2 border-accent-500 text-accent-400 hover:bg-accent-500/10 transition-all hover:scale-105 flex items-center justify-center"
+                                                    >
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                                    </button>
+                                                    <div className="hidden group-hover:block absolute bottom-full mb-2 right-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700">
+                                                        Similar Songs
+                                                    </div>
+                                                </div>
+                                                <div className="relative group">
+                                                    <button
+                                                        onClick={() => handleSimilarArtists(song)}
+                                                        className="p-1.5 rounded-lg border-2 border-blue-500 text-blue-400 hover:bg-blue-500/10 transition-all hover:scale-105 flex items-center justify-center"
+                                                    >
+                                                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                                            <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 11a6 6 0 00-11.86 0v2a1 1 0 001 1h9.86a1 1 0 001-1v-2z"></path>
+                                                        </svg>
+                                                    </button>
+                                                    <div className="hidden group-hover:block absolute bottom-full mb-2 right-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700">
+                                                        Similar Artists
+                                                    </div>
+                                                </div>
                                                 {isInQueue ? (
-                                                    <button onClick={() => onRemoveFromQueue(song.id)} title="Remove from queue" className="p-1.5 rounded-lg border-2 border-red-500 text-red-400 hover:bg-red-500/10 transition-all hover:scale-105 flex items-center justify-center">
-                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                                    </button>
+                                                    <div className="relative group">
+                                                        <button onClick={() => onRemoveFromQueue(song.id)} className="p-1.5 rounded-lg border-2 border-red-500 text-red-400 hover:bg-red-500/10 transition-all hover:scale-105 flex items-center justify-center">
+                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                                        </button>
+                                                        <div className="hidden group-hover:block absolute bottom-full mb-2 right-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700">
+                                                            Remove from Queue
+                                                        </div>
+                                                    </div>
                                                 ) : (
-                                                    <button onClick={() => onAddToQueue(song)} title="Add to queue" className="p-1.5 rounded-lg border-2 border-green-500 text-green-400 hover:bg-green-500/10 transition-all hover:scale-105 flex items-center justify-center">
-                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" /></svg>
-                                                    </button>
+                                                    <div className="relative group">
+                                                        <button onClick={() => onAddToQueue(song)} className="p-1.5 rounded-lg border-2 border-green-500 text-green-400 hover:bg-green-500/10 transition-all hover:scale-105 flex items-center justify-center">
+                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" /></svg>
+                                                        </button>
+                                                        <div className="hidden group-hover:block absolute bottom-full mb-2 right-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700">
+                                                            Add to Queue
+                                                        </div>
+                                                    </div>
                                                 )}
-                                                <button onClick={() => onAddToPlaylist(song)} title="Add to playlist" className="p-1.5 rounded-lg border-2 border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-all hover:scale-105 flex items-center justify-center">
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
-                                                </button>
+                                                <div className="relative group">
+                                                    <button onClick={() => onAddToPlaylist(song)} className="p-1.5 rounded-lg border-2 border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-all hover:scale-105 flex items-center justify-center">
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                                                    </button>
+                                                    <div className="hidden group-hover:block absolute bottom-full mb-2 right-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700">
+                                                        Add to Playlist
+                                                    </div>
+                                                </div>
                                             </div>
 
-                                            {/* Mobile: Compact vertical buttons - matching desktop style */}
-                                            <div className="flex sm:hidden flex-col gap-1 items-end">
-                                                <button
-                                                    onClick={() => {
-                                                        if (!audioMuseUrl) {
-                                                            alert('Instant Mix is not configured on the server. Ask an admin to enable AudioMuse.');
-                                                            return;
-                                                        }
-                                                        onInstantMix(song);
-                                                    }}
-                                                    title="Instant Mix"
-                                                    className="p-1.5 rounded-lg border-2 border-accent-500 text-accent-400 hover:bg-accent-500/10 flex items-center justify-center"
-                                                >
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                                                </button>
+                                            {/* Mobile: Compact vertical buttons in a grid */}
+                                            <div className="flex sm:hidden flex-wrap gap-0.5 items-center justify-end">
+                                                <div className="relative group">
+                                                    <button
+                                                        onClick={() => {
+                                                            if (!audioMuseUrl) {
+                                                                alert('Instant Mix is not configured on the server. Ask an admin to enable AudioMuse.');
+                                                                return;
+                                                            }
+                                                            onInstantMix(song);
+                                                        }}
+                                                        className="p-1 rounded border border-accent-500 text-accent-400 hover:bg-accent-500/10 flex items-center justify-center"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                                    </button>
+                                                    <div className="hidden group-hover:block absolute bottom-full mb-1 right-0 bg-gray-900 text-white text-xs rounded px-2 py-0.5 whitespace-nowrap border border-gray-700 text-center">
+                                                        Songs
+                                                    </div>
+                                                </div>
+                                                <div className="relative group">
+                                                    <button
+                                                        onClick={() => handleSimilarArtists(song)}
+                                                        className="p-1 rounded border border-blue-500 text-blue-400 hover:bg-blue-500/10 flex items-center justify-center"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                                            <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 11a6 6 0 00-11.86 0v2a1 1 0 001 1h9.86a1 1 0 001-1v-2z"></path>
+                                                        </svg>
+                                                    </button>
+                                                    <div className="hidden group-hover:block absolute bottom-full mb-1 right-0 bg-gray-900 text-white text-xs rounded px-2 py-0.5 whitespace-nowrap border border-gray-700 text-center">
+                                                        Artists
+                                                    </div>
+                                                </div>
                                                 {isInQueue ? (
-                                                    <button onClick={() => onRemoveFromQueue(song.id)} title="Remove from queue" className="p-1.5 rounded-lg border-2 border-red-500 text-red-400 hover:bg-red-500/10 flex items-center justify-center">
-                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                                    </button>
+                                                    <div className="relative group">
+                                                        <button onClick={() => onRemoveFromQueue(song.id)} className="p-1 rounded border border-red-500 text-red-400 hover:bg-red-500/10 flex items-center justify-center">
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                                        </button>
+                                                        <div className="hidden group-hover:block absolute bottom-full mb-1 right-0 bg-gray-900 text-white text-xs rounded px-2 py-0.5 whitespace-nowrap border border-gray-700 text-center">
+                                                            Remove
+                                                        </div>
+                                                    </div>
                                                 ) : (
-                                                    <button onClick={() => onAddToQueue(song)} title="Add to queue" className="p-1.5 rounded-lg border-2 border-green-500 text-green-400 hover:bg-green-500/10 flex items-center justify-center">
-                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" /></svg>
-                                                    </button>
+                                                    <div className="relative group">
+                                                        <button onClick={() => onAddToQueue(song)} className="p-1 rounded border border-green-500 text-green-400 hover:bg-green-500/10 flex items-center justify-center">
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 10h16M4 14h4" /><path d="M16 12v8m-4-4h8" /></svg>
+                                                        </button>
+                                                        <div className="hidden group-hover:block absolute bottom-full mb-1 right-0 bg-gray-900 text-white text-xs rounded px-2 py-0.5 whitespace-nowrap border border-gray-700 text-center">
+                                                            Queue
+                                                        </div>
+                                                    </div>
                                                 )}
-                                                <button onClick={() => onAddToPlaylist(song)} title="Add to playlist" className="p-1.5 rounded-lg border-2 border-purple-500 text-purple-400 hover:bg-purple-500/10 flex items-center justify-center">
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
-                                                </button>
+                                                <div className="relative group">
+                                                    <button onClick={() => onAddToPlaylist(song)} className="p-1 rounded border border-purple-500 text-purple-400 hover:bg-purple-500/10 flex items-center justify-center">
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                                                    </button>
+                                                    <div className="hidden group-hover:block absolute bottom-full mb-1 right-0 bg-gray-900 text-white text-xs rounded px-2 py-0.5 whitespace-nowrap border border-gray-700 text-center">
+                                                        Playlist
+                                                    </div>
+                                                </div>
                                             </div>
                                         </td>
                                     </tr>
@@ -1046,7 +1294,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                         </tbody>
                     </table>
                     {isLoading && <p className="text-center text-gray-400 mt-4">Loading songs...</p>}
-                </div>
+                    </div>
+                </>
             )}
         </div>
     );

@@ -326,3 +326,8 @@ func (cl *AudioMuseClient) GetAnalysisStatus(ctx context.Context) ([]byte, int, 
 func (cl *AudioMuseClient) StartClustering(ctx context.Context) ([]byte, int, error) {
 	return cl.Post(ctx, "/api/clustering/start", nil)
 }
+
+// SemanticSearch performs a semantic text search for songs.
+func (cl *AudioMuseClient) SemanticSearch(ctx context.Context, body io.Reader) ([]byte, int, error) {
+	return cl.Post(ctx, "/api/lyrics/search/text", body)
+}

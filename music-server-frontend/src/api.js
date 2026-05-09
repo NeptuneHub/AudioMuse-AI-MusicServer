@@ -217,6 +217,20 @@ export async function getSimilarArtists(artistId, count = 20) {
     return await subsonicFetch('getSimilarArtists2.view', { id: artistId, count });
 }
 
+// AudioMuse similar artists - pass artist NAME directly
+export async function getAudioMuseSimilarArtists(artistName, count = 10) {
+    const token = localStorage.getItem('token');
+    const response = await fetch('/api/similar_artists?artist=' + encodeURIComponent(artistName) + '&n=' + count, {
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return await response.json();
+}
+
 // CLAP search functions
 export async function clapSearch(query, limit = 50) {
     const res = await apiFetch('/api/clap/search', {
@@ -228,6 +242,15 @@ export async function clapSearch(query, limit = 50) {
 
 export async function getClapTopQueries() {
     const res = await apiFetch('/api/clap/top_queries');
+    return await res.json();
+}
+
+// Semantic search function
+export async function semanticSearch(query, limit = 50) {
+    const res = await apiFetch('/api/semantic-search', {
+        method: 'POST',
+        body: JSON.stringify({ query, limit })
+    });
     return await res.json();
 }
 

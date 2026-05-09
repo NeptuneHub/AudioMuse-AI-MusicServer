@@ -318,3 +318,86 @@ func clapTopQueriesHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, topQueriesResponse)
 }
+
+// semanticSearchHandler handles semantic text search for songs.
+func semanticSearchHandler(c *gin.Context) {
+	// Allow all authenticated users to search via semantic search.
+	_ = c.MustGet("username").(string)
+
+	var requestBody struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+
+	if err := c.ShouldBindJSON(&requestBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	if requestBody.Query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Query parameter is required"})
+		return
+	}
+
+	if requestBody.Limit == 0 {
+		requestBody.Limit = 50
+	}
+
+	// Prepare the request to the AudioMuse-AI Core
+	reqBody := map[string]interface{}{
+		"query": requestBody.Query,
+		"limit": requestBody.Limit,
+	}
+	reqJSON, _ := json.Marshal(reqBody)
+
+	respBody, statusCode, err := audioMuseClient.SemanticSearch(c.Request.Context(), bytes.NewReader(reqJSON))
+	if err == ErrAudioMuse401 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
+		return
+	}
+	if err != nil {
+		log.Printf("Error calling AudioMuse-AI for semantic search: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to AudioMuse-AI Core service"})
+		return
+	}
+
+	if statusCode != http.StatusOK {
+		log.Printf("AudioMuse-AI returned non-OK status for semantic search: %d - %s", statusCode, string(respBody))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AudioMuse-AI Core error: %s", string(respBody))})
+		return
+	}
+
+	var semanticResponse struct {
+		Query   string `json:"query"`
+		Count   int    `json:"count"`
+		Results []struct {
+			ItemID            string  `json:"item_id"`
+			Title             string  `json:"title"`
+			Author            string  `json:"author"`
+			SimilarityScore   float64 `json:"similarity_score"`
+		} `json:"results"`
+	}
+
+	if err := json.Unmarshal(respBody, &semanticResponse); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse semantic search results"})
+		return
+	}
+
+	// Extract song IDs and fetch full song details
+	var songIDs []string
+	for _, result := range semanticResponse.Results {
+		songIDs = append(songIDs, result.ItemID)
+	}
+
+	songs, err := getSongsByIDs(songIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error fetching song details"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"query": semanticResponse.Query,
+		"count": semanticResponse.Count,
+		"songs": songs,
+	})
+}

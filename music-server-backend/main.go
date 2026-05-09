@@ -259,6 +259,9 @@ func main() {
 	r.POST("/api/clap/search", AuthMiddleware(), clapSearchHandler)
 	r.GET("/api/clap/top_queries", AuthMiddleware(), clapTopQueriesHandler)
 
+	// Semantic search endpoints (authenticated)
+	r.POST("/api/semantic-search", AuthMiddleware(), semanticSearchHandler)
+
 	// Serve static files from React build
 	buildDir := getEnv("FRONTEND_BUILD_DIR", "/app/music-server-frontend/build")
 	// If the absolute path used in containers doesn't exist locally, try

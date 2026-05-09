@@ -1,6 +1,6 @@
 // Suggested path: music-server-frontend/src/components/TextSongSearch.jsx
 import React, { useState, useEffect } from 'react';
-import { clapSearch, getClapTopQueries } from '../api';
+import { clapSearch, getClapTopQueries, semanticSearch } from '../api';
 
 function TextSongSearch({ onNavigate }) {
     const [query, setQuery] = useState('');
@@ -8,6 +8,7 @@ function TextSongSearch({ onNavigate }) {
     const [topQueries, setTopQueries] = useState([]);
     const [isLoadingQueries, setIsLoadingQueries] = useState(true);
     const [error, setError] = useState(null);
+    const [activeTab, setActiveTab] = useState('clap');
 
     useEffect(() => {
         const fetchTopQueries = async () => {
@@ -28,34 +29,72 @@ function TextSongSearch({ onNavigate }) {
         fetchTopQueries();
     }, []);
 
-    const handleSearch = async (searchQuery = query) => {
+    const handleClapSearch = async (searchQuery = query) => {
         if (!searchQuery.trim()) return;
 
         try {
             setIsSearching(true);
             setError(null);
-            
+
             const response = await clapSearch(searchQuery.trim(), 50);
-            
+
             if (response.songs && response.songs.length > 0) {
-                // Navigate to songs view with the search results
-                onNavigate({ 
-                    page: 'songs', 
+                onNavigate({
+                    page: 'songs',
                     title: `Text Search: "${response.query}"`,
-                    filter: { 
+                    filter: {
                         type: 'clap-search',
                         results: response.songs,
-                        query: response.query 
+                        query: response.query
                     }
                 });
             } else {
                 setError('No songs found for this query');
             }
         } catch (err) {
-            console.error('Search failed:', err);
+            console.error('CLAP search failed:', err);
             setError('Search failed. Please try again.');
         } finally {
             setIsSearching(false);
+        }
+    };
+
+    const handleSemanticSearch = async (searchQuery = query) => {
+        if (!searchQuery.trim()) return;
+
+        try {
+            setIsSearching(true);
+            setError(null);
+
+            const response = await semanticSearch(searchQuery.trim(), 50);
+
+            if (response.songs && response.songs.length > 0) {
+                onNavigate({
+                    page: 'songs',
+                    title: `Semantic Search: "${response.query}" (${response.count} results)`,
+                    filter: {
+                        type: 'semantic-search',
+                        results: response.songs,
+                        query: response.query,
+                        count: response.count
+                    }
+                });
+            } else {
+                setError('No songs found for this query');
+            }
+        } catch (err) {
+            console.error('Semantic search failed:', err);
+            setError('Search failed. Please try again.');
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    const handleSearch = async (searchQuery = query) => {
+        if (activeTab === 'clap') {
+            await handleClapSearch(searchQuery);
+        } else {
+            await handleSemanticSearch(searchQuery);
         }
     };
 
@@ -81,6 +120,30 @@ function TextSongSearch({ onNavigate }) {
                 </p>
             </div>
 
+            {/* Search Tabs */}
+            <div className="mb-6 flex gap-2">
+                <button
+                    onClick={() => setActiveTab('clap')}
+                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                        activeTab === 'clap'
+                            ? 'bg-accent-500 text-white'
+                            : 'bg-dark-700 text-gray-400 hover:text-white border border-dark-600'
+                    }`}
+                >
+                    CLAP Text Search
+                </button>
+                <button
+                    onClick={() => setActiveTab('semantic')}
+                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                        activeTab === 'semantic'
+                            ? 'bg-accent-500 text-white'
+                            : 'bg-dark-700 text-gray-400 hover:text-white border border-dark-600'
+                    }`}
+                >
+                    Semantic Text Search
+                </button>
+            </div>
+
             {/* Search Input */}
             <div className="bg-dark-700 rounded-xl p-6 mb-8 shadow-xl border border-dark-600">
                 <div className="flex flex-col sm:flex-row gap-3">
@@ -89,7 +152,10 @@ function TextSongSearch({ onNavigate }) {
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         onKeyPress={handleKeyPress}
-                        placeholder="e.g., dreamy chant indie pop, groovy falsetto funk, sad blues raspy..."
+                        placeholder={activeTab === 'clap'
+                            ? "e.g., dreamy chant indie pop, groovy falsetto funk, sad blues raspy..."
+                            : "e.g., lyrics about love, sad breakup song, happy morning song..."
+                        }
                         className="flex-1 px-4 py-3 bg-dark-600 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-accent-500 border border-dark-500 placeholder-gray-500"
                         disabled={isSearching}
                     />
@@ -157,18 +223,37 @@ function TextSongSearch({ onNavigate }) {
                     💡 How to use
                 </h3>
                 <ul className="space-y-2 text-gray-400 text-sm">
-                    <li className="flex items-start gap-2">
-                        <span className="text-accent-500 mt-0.5">•</span>
-                        <span>Combine genres, moods, vocal styles, and instruments to find specific songs</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                        <span className="text-accent-500 mt-0.5">•</span>
-                        <span>Examples: "happy energetic pop", "dark atmospheric metal", "slow jazz piano"</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                        <span className="text-accent-500 mt-0.5">•</span>
-                        <span>Click any example above to try it out</span>
-                    </li>
+                    {activeTab === 'clap' ? (
+                        <>
+                            <li className="flex items-start gap-2">
+                                <span className="text-accent-500 mt-0.5">•</span>
+                                <span>Combine genres, moods, vocal styles, and instruments to find specific songs</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                                <span className="text-accent-500 mt-0.5">•</span>
+                                <span>Examples: "happy energetic pop", "dark atmospheric metal", "slow jazz piano"</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                                <span className="text-accent-500 mt-0.5">•</span>
+                                <span>Click any example above to try it out</span>
+                            </li>
+                        </>
+                    ) : (
+                        <>
+                            <li className="flex items-start gap-2">
+                                <span className="text-accent-500 mt-0.5">•</span>
+                                <span>Search by song lyrics or thematic content</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                                <span className="text-accent-500 mt-0.5">•</span>
+                                <span>Examples: "lyrics about love and heartbreak", "sad and lonely", "party and dancing"</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                                <span className="text-accent-500 mt-0.5">•</span>
+                                <span>Results show similarity scores to help you find the most relevant songs</span>
+                            </li>
+                        </>
+                    )}
                 </ul>
             </div>
         </div>
