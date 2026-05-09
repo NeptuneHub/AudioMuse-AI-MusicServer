@@ -460,7 +460,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         };
 
         load();
-    }, [offset, filter, searchTerm, selectedGenre, credentials?.username, discoveryView, allSongs, isStarredFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [offset, filter, searchTerm, selectedGenre, credentials?.username, discoveryView, isStarredFilter]);
 
 
     // Infinite scroll observer for "All Songs" view
