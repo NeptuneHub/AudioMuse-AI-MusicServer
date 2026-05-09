@@ -106,6 +106,12 @@ func AlchemyHandler(c *gin.Context) {
 		println(string(body[:1000]))
 	}
 
+	// CRITICAL: Do NOT proxy 401 errors from AudioMuse-AI back to frontend
+	if resp.StatusCode == 401 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
+		return
+	}
+
 	// Pass through status code and body from AudioMuse-AI
 	c.Data(resp.StatusCode, "application/json", body)
 }

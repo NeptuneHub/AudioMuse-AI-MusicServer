@@ -84,6 +84,15 @@ func MapHandler(c *gin.Context) {
 
 	log.Printf("✅ Received map data from AudioMuse-AI: %d bytes (status %d)", len(body), resp.StatusCode)
 
+	// CRITICAL: Do NOT proxy 401 errors from AudioMuse-AI back to frontend
+	// A 401 from AudioMuse-AI (third-party service) does NOT mean the user's session is invalid
+	// Return 503 (Service Unavailable) instead to indicate AudioMuse-AI is not properly configured
+	if resp.StatusCode == 401 {
+		log.Printf("❌ AudioMuse-AI returned 401 - API token likely not configured or invalid")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in settings."})
+		return
+	}
+
 	// Set explicit no-cache headers to prevent ANY caching
 	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
 	c.Header("Pragma", "no-cache")
@@ -145,6 +154,13 @@ func VoyagerSearchTracksHandler(c *gin.Context) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from AudioMuse-AI Core"})
+		return
+	}
+
+	// CRITICAL: Do NOT proxy 401 errors from AudioMuse-AI back to frontend
+	if resp.StatusCode == 401 {
+		log.Printf("❌ AudioMuse-AI voyager search returned 401 - API token likely not configured")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in settings."})
 		return
 	}
 

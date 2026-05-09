@@ -64,6 +64,12 @@ func CleaningStartHandler(c *gin.Context) {
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 
+	// CRITICAL: Do NOT proxy 401 errors from AudioMuse-AI back to frontend
+	if resp.StatusCode == 401 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AudioMuse-AI authentication failed. Please configure API token in Admin settings."})
+		return
+	}
+
 	// Pass through status code and body from AudioMuse-AI
 	c.Data(resp.StatusCode, "application/json", respBody)
 }
