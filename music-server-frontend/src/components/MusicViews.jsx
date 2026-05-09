@@ -1001,7 +1001,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                 )}
                                                 <span className="text-xs">Play</span>
                                             </button>
-                                            <div className="hidden group-hover:block absolute bottom-full mb-2 left-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700 z-10">
+                                            <div className="hidden lg:group-hover:block absolute bottom-full mb-2 left-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700 z-10">
                                                 Play Song
                                             </div>
                                         </div>
@@ -1022,7 +1022,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                 </svg>
                                                 <span className="text-xs">Star</span>
                                             </button>
-                                            <div className="hidden group-hover:block absolute bottom-full mb-2 left-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700 z-10">
+                                            <div className="hidden lg:group-hover:block absolute bottom-full mb-2 left-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700 z-10">
                                                 Favorites
                                             </div>
                                         </div>
@@ -1043,7 +1043,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                                                 <span className="text-xs">Similar</span>
                                             </button>
-                                            <div className="hidden group-hover:block absolute bottom-full mb-2 left-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700 z-10">
+                                            <div className="hidden lg:group-hover:block absolute bottom-full mb-2 left-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700 z-10">
                                                 Similar Songs
                                             </div>
                                         </div>
@@ -1060,7 +1060,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                 </svg>
                                                 <span className="text-xs">Artists</span>
                                             </button>
-                                            <div className="hidden group-hover:block absolute bottom-full mb-2 left-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700 z-10">
+                                            <div className="hidden lg:group-hover:block absolute bottom-full mb-2 left-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700 z-10">
                                                 Similar Artists
                                             </div>
                                         </div>
@@ -1086,7 +1086,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                     <span className="text-xs">Queue</span>
                                                 </button>
                                             )}
-                                            <div className="hidden group-hover:block absolute bottom-full mb-2 left-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700 z-10">
+                                            <div className="hidden lg:group-hover:block absolute bottom-full mb-2 left-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700 z-10">
                                                 {isInQueue ? 'Remove from Queue' : 'Add to Queue'}
                                             </div>
                                         </div>
@@ -1101,7 +1101,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
                                                 <span className="text-xs">Playlist</span>
                                             </button>
-                                            <div className="hidden group-hover:block absolute bottom-full mb-2 left-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700 z-10">
+                                            <div className="hidden lg:group-hover:block absolute bottom-full mb-2 left-0 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap border border-gray-700 z-10">
                                                 Add to Playlist
                                             </div>
                                         </div>
