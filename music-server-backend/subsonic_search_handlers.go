@@ -2,7 +2,6 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/xml"
 	"log"
 	"strconv"
@@ -414,91 +413,42 @@ func subsonicSearch3(c *gin.Context) {
 	searchWords := strings.Fields(query)
 
 	// --- Count total results (not paginated) ---
-	// Count total artists (use the artist tag only)
+	// These counts go through the FTS5-backed helpers (CountArtists/CountAlbums/
+	// CountSongs). The previous implementation fetched every matching row into Go
+	// and de-duplicated in memory, which on a large library could pull hundreds of
+	// thousands of rows for a common term; the COUNT(DISTINCT ...) + FTS join keeps
+	// the work inside SQLite and returns a single number.
+	// Count total artists (artist tag only)
 	if artistCount > 0 {
-		seenArtists := make(map[string]bool)
-		var rows *sql.Rows
-		var err error
-		if isShortQuery || query == "" || query == "*" {
-			rows, err = db.Query("SELECT artist FROM songs WHERE artist != '' AND cancelled = 0")
-		} else {
-			var conditions []string
-			var args []interface{}
-			for _, word := range searchWords {
-				conditions = append(conditions, "artist LIKE ?")
-				like := "%" + word + "%"
-				args = append(args, like)
-			}
-			q := "SELECT artist FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND artist != '' AND cancelled = 0"
-			rows, err = db.Query(q, args...)
+		searchTerm := ""
+		if !isShortQuery && query != "" && query != "*" {
+			searchTerm = query
 		}
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var name string
-				if err := rows.Scan(&name); err != nil {
-					continue
-				}
-				name = normalizeArtistName(name)
-				key := normalizeKey(name)
-				seenArtists[key] = true
-			}
+		if cnt, err := CountArtists(db, searchTerm, false); err == nil {
+			result.ArtistCount = cnt
 		}
-		result.ArtistCount = len(seenArtists)
 	}
 
-	// Count total albums (deduplicate by normalized album name)
+	// Count total albums
 	if albumCount > 0 {
-		seenAlbums := make(map[string]bool)
-		var rows *sql.Rows
-		var err error
-		if isShortQuery {
-			rows, err = db.Query("SELECT album FROM songs WHERE album != '' AND cancelled = 0")
-		} else {
-			var conditions []string
-			var args []interface{}
-			for _, word := range searchWords {
-				// Match album name or effective artist (ignore 'unknown' album_artist)
-				conditions = append(conditions, "(album LIKE ? OR (CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END) LIKE ?)")
-				likeWord := "%" + word + "%"
-				args = append(args, likeWord, likeWord)
-			}
-			q := "SELECT album FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND cancelled = 0"
-			rows, err = db.Query(q, args...)
+		searchTerm := ""
+		if !isShortQuery {
+			searchTerm = query
 		}
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var albumName string
-				if err := rows.Scan(&albumName); err != nil {
-					continue
-				}
-				albumName = strings.TrimSpace(albumName)
-				if albumName == "" {
-					continue
-				}
-				seenAlbums[normalizeKey(albumName)] = true
-			}
+		if cnt, err := CountAlbums(db, searchTerm); err == nil {
+			result.AlbumCount = cnt
 		}
-		result.AlbumCount = len(seenAlbums)
 	}
 
 	// Count total songs
 	if songCount > 0 {
-		var countQuery string
-		var countArgs []interface{}
-		if isShortQuery {
-			countQuery = "SELECT COUNT(*) FROM songs WHERE cancelled = 0"
-		} else {
-			var conditions []string
-			for _, word := range searchWords {
-				conditions = append(conditions, "(title LIKE ? OR artist LIKE ? OR album LIKE ?)")
-				likeWord := "%" + word + "%"
-				countArgs = append(countArgs, likeWord, likeWord, likeWord)
-			}
-			countQuery = "SELECT COUNT(*) FROM songs WHERE " + strings.Join(conditions, " AND ") + " AND cancelled = 0"
+		searchTerm := ""
+		if !isShortQuery {
+			searchTerm = query
 		}
-		db.QueryRow(countQuery, countArgs...).Scan(&result.SongCount)
+		if cnt, err := CountSongs(db, searchTerm); err == nil {
+			result.SongCount = cnt
+		}
 	}
 
 	// --- Artist Search ---

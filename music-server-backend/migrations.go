@@ -7,6 +7,32 @@ import (
 	"strings"
 )
 
+// ensureSongSearchIndexes creates the secondary indexes on the songs table that
+// the search/listing queries depend on. It is idempotent (CREATE INDEX IF NOT
+// EXISTS) and safe to call from both fresh-install (initDB) and migration paths.
+//
+// These indexes are the single most important fix for slow search on large
+// libraries: helpers such as getAlbumDisplayArtist, CheckAlbumHasAlbumArtist,
+// AlbumExists and QueryArtistPath filter by album/album_path/artist/album_artist.
+// Without indexes each of those is a full table scan; because search resolves a
+// display artist once per matching album, the cost is O(albums * rows) — minutes
+// on a 1M-song collection. With the (album, album_path) and artist indexes each
+// lookup becomes an index seek over just that album's rows.
+func ensureSongSearchIndexes(db *sql.DB) {
+	indexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_songs_album_albumpath ON songs (album, album_path)`,
+		`CREATE INDEX IF NOT EXISTS idx_songs_album_path ON songs (album_path)`,
+		`CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs (artist)`,
+		`CREATE INDEX IF NOT EXISTS idx_songs_album_artist ON songs (album_artist)`,
+		`CREATE INDEX IF NOT EXISTS idx_songs_genre ON songs (genre)`,
+	}
+	for _, stmt := range indexes {
+		if _, err := db.Exec(stmt); err != nil {
+			log.Printf("ensureSongSearchIndexes: warning - could not create index (%s): %v", stmt, err)
+		}
+	}
+}
+
 // migrateDB performs lightweight, idempotent schema and configuration migrations
 // to bring older databases up-to-date without destroying existing data.
 func migrateDB() error {
@@ -121,6 +147,13 @@ func migrateDB() error {
 			}
 		}
 	}
+
+	// Ensure secondary indexes on the songs table for fast search/grouping.
+	// Without these, helpers like getAlbumDisplayArtist (WHERE album=? AND
+	// album_path=?) run a full table scan on every call; when invoked once per
+	// matching album during a search that becomes an N+1 of full scans and a
+	// search over a large library can take minutes. See ensureSongSearchIndexes.
+	ensureSongSearchIndexes(db)
 
 	// --- STARRED_SONGS TABLE ---
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS starred_songs (

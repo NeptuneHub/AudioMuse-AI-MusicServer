@@ -103,6 +103,20 @@ func main() {
 	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
 		log.Printf("Warning: could not set PRAGMA busy_timeout: %v", err)
 	}
+	// Read-performance PRAGMAs. These do not affect durability (synchronous/WAL
+	// above govern that) but materially speed up search/listing on large
+	// libraries: a larger page cache keeps hot index pages in memory, memory
+	// temp store avoids spilling GROUP BY/ORDER BY scratch to disk, and mmap
+	// lets SQLite read the DB file via the page cache instead of syscalls.
+	if _, err := db.Exec("PRAGMA cache_size = -65536"); err != nil { // ~64MB page cache
+		log.Printf("Warning: could not set PRAGMA cache_size: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA temp_store = MEMORY"); err != nil {
+		log.Printf("Warning: could not set PRAGMA temp_store: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA mmap_size = 268435456"); err != nil { // 256MB
+		log.Printf("Warning: could not set PRAGMA mmap_size: %v", err)
+	}
 
 	// Verify DB integrity on startup and attempt restore from single rotating backup if corrupted
 	if err := checkAndRestoreDB(dbPath); err != nil {
@@ -760,6 +774,9 @@ func initDB() {
 	if err != nil {
 		log.Fatalf("Failed to create songs table: %v", err)
 	}
+
+	// Create secondary indexes used by search/listing queries (idempotent).
+	ensureSongSearchIndexes(db)
 
 	// Add starred column if it doesn't exist (backward compatibility)
 	_, err = db.Exec(`ALTER TABLE songs ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;`)

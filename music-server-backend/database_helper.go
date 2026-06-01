@@ -787,14 +787,24 @@ func CountArtists(db *sql.DB, searchTerm string, useEffective bool) (int, error)
 
 	if useEffective {
 		if searchTerm != "" {
-			query = `SELECT COUNT(DISTINCT CASE
-				WHEN album_artist IS NOT NULL AND TRIM(album_artist) != ''
-					AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')
-				THEN album_artist ELSE artist END)
-			FROM songs
-			WHERE (artist LIKE ? OR album_artist LIKE ?) AND cancelled = 0`
-			searchPattern := "%" + searchTerm + "%"
-			args = []interface{}{searchPattern, searchPattern}
+			if ftsAvailable(db) {
+				query = `SELECT COUNT(DISTINCT CASE
+					WHEN songs.album_artist IS NOT NULL AND TRIM(songs.album_artist) != ''
+						AND LOWER(TRIM(songs.album_artist)) NOT IN ('unknown','unknown artist')
+					THEN songs.album_artist ELSE songs.artist END)
+				FROM songs JOIN songs_fts f ON f.rowid = songs.rowid
+				WHERE songs_fts MATCH ? AND cancelled = 0`
+				args = []interface{}{buildFTSQuery(searchTerm)}
+			} else {
+				query = `SELECT COUNT(DISTINCT CASE
+					WHEN album_artist IS NOT NULL AND TRIM(album_artist) != ''
+						AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')
+					THEN album_artist ELSE artist END)
+				FROM songs
+				WHERE (artist LIKE ? OR album_artist LIKE ?) AND cancelled = 0`
+				searchPattern := "%" + searchTerm + "%"
+				args = []interface{}{searchPattern, searchPattern}
+			}
 		} else {
 			query = `SELECT COUNT(DISTINCT CASE
 				WHEN album_artist IS NOT NULL AND TRIM(album_artist) != ''
@@ -804,8 +814,13 @@ func CountArtists(db *sql.DB, searchTerm string, useEffective bool) (int, error)
 		}
 	} else {
 		if searchTerm != "" {
-			query = `SELECT COUNT(DISTINCT artist) FROM songs WHERE artist LIKE ? AND artist != '' AND cancelled = 0`
-			args = []interface{}{"%" + searchTerm + "%"}
+			if ftsAvailable(db) {
+				query = `SELECT COUNT(DISTINCT songs.artist) FROM songs JOIN songs_fts f ON f.rowid = songs.rowid WHERE songs_fts MATCH ? AND songs.artist != '' AND cancelled = 0`
+				args = []interface{}{buildFTSQuery(searchTerm)}
+			} else {
+				query = `SELECT COUNT(DISTINCT artist) FROM songs WHERE artist LIKE ? AND artist != '' AND cancelled = 0`
+				args = []interface{}{"%" + searchTerm + "%"}
+			}
 		} else {
 			query = `SELECT COUNT(DISTINCT artist) FROM songs WHERE artist != '' AND cancelled = 0`
 		}
