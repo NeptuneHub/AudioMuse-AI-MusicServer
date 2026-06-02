@@ -1305,22 +1305,9 @@ func subsonicGetCoverArt(c *gin.Context) {
 	}
 
 	// Try to resolve as artist ID (MD5 hash) to artist name
-	artistRows, err := db.Query(`SELECT DISTINCT COALESCE(NULLIF(album_artist, ''), artist) AS artist FROM songs WHERE COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0`)
-	if err != nil {
-		log.Printf("Error querying artists for cover art: %v", err)
-		c.Status(http.StatusNotFound)
+	if name, ok := resolveArtistIDToName(db, id); ok {
+		handleArtistArt(c, name, size)
 		return
-	}
-	defer artistRows.Close()
-	for artistRows.Next() {
-		var name string
-		if err := artistRows.Scan(&name); err != nil {
-			continue
-		}
-		if GenerateArtistID(name) == id {
-			handleArtistArt(c, name, size)
-			return
-		}
 	}
 
 	// If not found as artist ID, treat as artist name directly (backward compatibility)
@@ -1517,30 +1504,13 @@ func subsonicStar(c *gin.Context) {
 
 		// If direct match not found, try resolving by artist ID (MD5 hash)
 		if !exists {
-			// Look up distinct effective artist names (album_artist fallback) and compare generated IDs
-			rows, err := db.Query("SELECT DISTINCT COALESCE(NULLIF(album_artist, ''), artist) AS artist FROM songs WHERE COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0")
-			if err != nil {
-				log.Printf("Artist resolution query error: %v", err)
-				continue
-			}
-			resolved := false
-			for rows.Next() {
-				var name string
-				if err := rows.Scan(&name); err != nil {
-					continue
-				}
-				if GenerateArtistID(name) == artistID {
-					artistName = name
-					resolved = true
-					log.Printf("Resolved artist ID %s to artist name %s", artistID, artistName)
-					break
-				}
-			}
-			rows.Close()
+			name, resolved := resolveArtistIDToName(db, artistID)
 			if !resolved {
 				log.Printf("Artist %s not found for starring", artistID)
 				continue
 			}
+			artistName = name
+			log.Printf("Resolved artist ID %s to artist name %s", artistID, artistName)
 		}
 
 		err = StarArtist(db, user.ID, artistName, now)
@@ -1597,28 +1567,12 @@ func subsonicUnstar(c *gin.Context) {
 			continue
 		}
 		if !exists {
-			rows, err := db.Query("SELECT DISTINCT COALESCE(NULLIF(album_artist, ''), artist) AS artist FROM songs WHERE COALESCE(NULLIF(album_artist, ''), artist) != '' AND cancelled = 0")
-			if err != nil {
-				log.Printf("Artist resolution query error: %v", err)
-				continue
-			}
-			resolved := false
-			for rows.Next() {
-				var name string
-				if err := rows.Scan(&name); err != nil {
-					continue
-				}
-				if GenerateArtistID(name) == artistID {
-					artistName = name
-					resolved = true
-					break
-				}
-			}
-			rows.Close()
+			name, resolved := resolveArtistIDToName(db, artistID)
 			if !resolved {
 				log.Printf("Artist %s not found for un-starring", artistID)
 				continue
 			}
+			artistName = name
 		}
 
 		err = UnstarArtist(db, user.ID, artistName)

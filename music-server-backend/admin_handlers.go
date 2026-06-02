@@ -126,6 +126,7 @@ func chooseAlbumArtist(albumArtist, artist string) string {
 func scanSingleLibrary(pathId int) {
 	defer func() {
 		db.Exec("UPDATE scan_status SET is_scanning = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+		invalidateArtistIDCache()
 		log.Println("Single library scan process finished, final status updated.")
 	}()
 
@@ -235,6 +236,7 @@ func scanSingleLibrary(pathId int) {
 func scanAllLibraries() {
 	defer func() {
 		db.Exec("UPDATE scan_status SET is_scanning = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
+		invalidateArtistIDCache()
 		log.Println("Finished scanning all libraries, final status updated.")
 	}()
 

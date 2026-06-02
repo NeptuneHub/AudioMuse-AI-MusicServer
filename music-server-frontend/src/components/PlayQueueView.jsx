@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { subsonicFetch, starSong, unstarSong } from '../api';
+import { subsonicFetch, starSong, unstarSong, addSongsToPlaylist } from '../api';
 
 const SaveAsPlaylistModal = ({ isOpen, onClose, queue, onSuccess }) => {
     const [playlistName, setPlaylistName] = useState('');
@@ -48,12 +48,7 @@ const SaveAsPlaylistModal = ({ isOpen, onClose, queue, onSuccess }) => {
             }
 
             // Step 3: Add all queue songs to the playlist
-            for (const song of queue) {
-                await subsonicFetch('updatePlaylist.view', {
-                    playlistId: newPlaylist.id,
-                    songIdToAdd: song.id
-                });
-            }
+            await addSongsToPlaylist(newPlaylist.id, queue.map(song => song.id));
 
             setSuccess(`Successfully created "${playlistName}" with ${queue.length} songs!`);
             onSuccess?.(playlistName, queue.length);

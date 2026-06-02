@@ -1,6 +1,6 @@
 // Suggested path: music-server-frontend/src/components/Playlists.jsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { subsonicFetch } from '../api';
+import { subsonicFetch, addSongsToPlaylist } from '../api';
 
 const Modal = ({ children, onClose }) => (
     <div className="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
@@ -196,9 +196,7 @@ function Playlists({ credentials, isAdmin, onNavigate }) {
             if (!newPlaylist) throw new Error("Could not find the newly created playlist.");
 
             setSuccessMessage(`Created playlist "${playlistName}". Now adding ${songs.length} songs...`);
-            for (const song of songs) {
-                await subsonicFetch('updatePlaylist.view', { playlistId: newPlaylist.id, songIdToAdd: song.id });
-            }
+            await addSongsToPlaylist(newPlaylist.id, songs.map(s => s.id));
 
             setSuccessMessage(`Successfully created "${playlistName}" with ${songs.length} songs!`);
             fetchPlaylists();

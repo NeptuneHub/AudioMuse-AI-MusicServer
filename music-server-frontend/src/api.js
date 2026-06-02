@@ -93,6 +93,29 @@ export async function subsonicFetch(endpoint, params = {}) {
     return data['subsonic-response'];
 }
 
+// Add many songs to a playlist in a few batched requests instead of one request
+// per song. Uses repeated songIdToAdd params (Subsonic append semantics) and
+// chunks them so the request URL stays a reasonable length for large playlists.
+export async function addSongsToPlaylist(playlistId, songIds) {
+    const ids = (songIds || []).filter(Boolean);
+    const CHUNK = 300;
+    const token = getAuthToken();
+    if (!token) {
+        throw new Error('No JWT token found. Please log in again.');
+    }
+    for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        const params = new URLSearchParams({ v: '1.16.1', c: 'AudioMuse-AI', f: 'json', playlistId });
+        chunk.forEach(id => params.append('songIdToAdd', id));
+        const res = await fetch(`${API_BASE}/rest/updatePlaylist.view?${params.toString()}`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) {
+            throw new Error(`Failed to add songs to playlist: ${res.status}`);
+        }
+    }
+}
+
 // Star/Unstar functions
 export async function starSong(songId) {
     return await subsonicFetch('star.view', { id: songId });

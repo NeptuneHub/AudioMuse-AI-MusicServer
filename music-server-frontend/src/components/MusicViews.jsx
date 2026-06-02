@@ -194,25 +194,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     }
                 });
 
-                // Validate each genre has at least one song before showing
-                const validGenres = [];
-                for (const genre of individualGenres) {
-                    try {
-                        const songData = await subsonicFetch('getSongsByGenre.view', {
-                            genre: genre.name,
-                            size: 1,
-                            offset: 0
-                        });
-                        const songs = songData.songsByGenre?.song;
-                        if (songs) {
-                            validGenres.push(genre);
-                        }
-                    } catch (err) {
-                        console.warn(`Genre "${genre.name}" has no songs or fetch failed`);
-                    }
-                }
-
-                setGenres(validGenres.sort((a, b) => a.name.localeCompare(b.name)));
+                setGenres(individualGenres.sort((a, b) => a.name.localeCompare(b.name)));
             } catch (err) {
                 console.error('Failed to load genres:', err);
             }

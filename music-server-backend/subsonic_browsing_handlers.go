@@ -331,44 +331,13 @@ func subsonicGetArtist(c *gin.Context) {
 
 	log.Printf("getArtist called with ID: %s", artistID)
 
-	// Resolve artist ID to artist name by finding any song with matching effective artist ID
-	var artistName string
-	err := db.QueryRow(`
-		SELECT DISTINCT COALESCE(NULLIF(album_artist, ''), artist) AS artist
-		FROM songs
-		WHERE COALESCE(NULLIF(album_artist, ''), artist) != ''
-		AND cancelled = 0
-		LIMIT 1000
-	`).Scan(&artistName)
-
-	// Scan through artists to find matching ID (since we generate IDs dynamically)
-	var foundArtist string
-	artistRows, err := db.Query(`SELECT DISTINCT CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist') THEN album_artist ELSE artist END AS artist FROM songs WHERE ((album_artist IS NOT NULL AND TRIM(album_artist) != '' AND LOWER(TRIM(album_artist)) NOT IN ('unknown','unknown artist')) OR artist != '') AND cancelled = 0`)
-	if err != nil {
-		log.Printf("Error querying artists: %v", err)
-		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
-		return
-	}
-	defer artistRows.Close()
-
-	for artistRows.Next() {
-		var name string
-		if err := artistRows.Scan(&name); err != nil {
-			continue
-		}
-		if GenerateArtistID(name) == artistID {
-			foundArtist = name
-			break
-		}
-	}
-
-	if foundArtist == "" {
+	// Resolve artist ID (MD5 hash) to artist name via the cached ID->name map.
+	artistName, found := resolveArtistIDToName(db, artistID)
+	if !found {
 		log.Printf("Artist not found for ID: %s", artistID)
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Artist not found."))
 		return
 	}
-
-	artistName = foundArtist
 	log.Printf("Resolved artist ID %s to name: %s", artistID, artistName)
 
 	// Get albums by this artist

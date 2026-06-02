@@ -6,7 +6,6 @@ import (
 	"encoding/xml"
 	"log"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -72,31 +71,13 @@ func subsonicGetSimilarArtists2(c *gin.Context) {
 	// Convert to Subsonic format
 	var subsonicArtists []SubsonicArtist
 	for _, sa := range similarArtists {
-		// Get album count for this artist from database using normalized deduplication
-		seenAlbums := make(map[string]bool)
-		rowsAlbums, rErr := db.Query("SELECT album, album_path FROM songs WHERE artist = ? AND cancelled = 0", sa.Artist)
-		if rErr == nil {
-			for rowsAlbums.Next() {
-				var albumName, albumPath string
-				if err := rowsAlbums.Scan(&albumName, &albumPath); err != nil {
-					continue
-				}
-				var nameForKey string
-				albumName = strings.TrimSpace(albumName)
-				albumPath = strings.TrimSpace(albumPath)
-				if albumName != "" {
-					nameForKey = albumName
-				} else {
-					nameForKey = albumPath
-				}
-				if nameForKey == "" {
-					continue
-				}
-				seenAlbums[normalizeKey(nameForKey)] = true
-			}
-			rowsAlbums.Close()
-		}
-		albumCount := len(seenAlbums)
+		// Get album count for this artist with a single aggregate query.
+		var albumCount int
+		_ = db.QueryRow(`SELECT COUNT(DISTINCT CASE
+			WHEN TRIM(album) != '' THEN LOWER(TRIM(album))
+			ELSE LOWER(TRIM(album_path)) END)
+			FROM songs
+			WHERE artist = ? AND cancelled = 0 AND (TRIM(album) != '' OR TRIM(album_path) != '')`, sa.Artist).Scan(&albumCount)
 
 		log.Printf("Processing artist: %s (ID: %s, Albums: %d)", sa.Artist, sa.ArtistID, albumCount)
 
