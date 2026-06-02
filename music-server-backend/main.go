@@ -778,6 +778,9 @@ func initDB() {
 	// Create secondary indexes used by search/listing queries (idempotent).
 	ensureSongSearchIndexes(db)
 
+	// Create the derived artists/albums tables and their FTS indexes.
+	ensureLibraryDerivedTables(db)
+
 	// Add starred column if it doesn't exist (backward compatibility)
 	_, err = db.Exec(`ALTER TABLE songs ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;`)
 	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {

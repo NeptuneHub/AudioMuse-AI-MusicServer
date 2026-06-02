@@ -111,15 +111,12 @@ func getMusicCounts(c *gin.Context) {
 
 	var counts CountsResponse
 
-	db.QueryRow("SELECT COUNT(DISTINCT artist) FROM songs WHERE artist != '' AND cancelled = 0").Scan(&counts.Artists)
+	db.QueryRow("SELECT COUNT(*) FROM artists").Scan(&counts.Artists)
 
-	albumQuery := `SELECT COUNT(DISTINCT CASE
-		WHEN album IS NOT NULL AND TRIM(album) != '' THEN album
-		ELSE album_path END)
-		FROM songs WHERE cancelled = 0 AND (TRIM(album) != '' OR TRIM(album_path) != '')`
+	albumQuery := "SELECT COUNT(*) FROM albums"
 	albumArgs := []interface{}{}
 	if genre != "" {
-		albumQuery += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
+		albumQuery += " WHERE (genres = ? OR genres LIKE ? OR genres LIKE ? OR genres LIKE ?)"
 		albumArgs = append(albumArgs, genre, genre+";%", "%;"+genre+";%", "%;"+genre)
 	}
 	db.QueryRow(albumQuery, albumArgs...).Scan(&counts.Albums)

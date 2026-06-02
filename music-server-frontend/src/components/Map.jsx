@@ -332,10 +332,10 @@ export default function Map({ onNavigate, onAddToQueue, onPlay, onRemoveFromQueu
       // Require at least 3 chars to reduce noise and match song view behavior
       if ((!query || query.length < 2)) { setSuggestions([]); return; }
       try {
-        // Use the same search as the Songs view (subsonic search2.view) to avoid voyager proxy 404s
+        // Use the same search as the Songs view (subsonic search3.view) to avoid voyager proxy 404s
         const data = await searchMusic(query, { songCount: 50 });
-        // searchMusic returns the Subsonic response object (searchResult2/searchResult3)
-        const songs = (data.searchResult2 && data.searchResult2.song) || (data.searchResult3 && data.searchResult3.song) || [];
+        // searchMusic returns the Subsonic response object (searchResult3/searchResult2)
+        const songs = (data.searchResult3 && data.searchResult3.song) || (data.searchResult2 && data.searchResult2.song) || [];
         const list = Array.isArray(songs) ? songs : (songs ? [songs] : []);
         // Normalize to an array of simple objects the Map UI expects
         const normalized = list.map(s => ({ item_id: s.id || s.itemId || '', title: s.title || s.name || '', author: s.artist || s.author || '' }));

@@ -887,14 +887,20 @@ func subsonicScrobble(c *gin.Context) {
 func subsonicGetArtists(c *gin.Context) {
 	_ = c.MustGet("user") // Auth is handled by middleware
 
-	// List artists (do not use album_artist fallback) and dedupe by artist name
-	// OPTIMIZED: Single query with album count aggregation (no N+1 queries)
-	results, err := QueryArtists(db, ArtistQueryOptions{
-		IncludeCounts: true,
-	})
+	// List artists from the derived artists table (counts precomputed).
+	rows, err := db.Query(`SELECT name, song_count, album_count FROM artists ORDER BY name COLLATE NOCASE`)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying artists."))
 		return
+	}
+	defer rows.Close()
+	var results []ArtistResult
+	for rows.Next() {
+		var r ArtistResult
+		if err := rows.Scan(&r.Name, &r.SongCount, &r.AlbumCount); err != nil {
+			continue
+		}
+		results = append(results, r)
 	}
 
 	artistIndex := make(map[string][]SubsonicArtist)
@@ -968,114 +974,59 @@ func subsonicGetAlbumList2(c *gin.Context) {
 
 	log.Printf("getAlbumList2: type=%s, size=%d, offset=%d, genre=%s", listType, size, offset, genreParam)
 
-	// Build query with optional genre filter and exclude cancelled songs
-	whereClause := "WHERE album != '' AND cancelled = 0"
+	// Read from the derived albums table (display artist + counts precomputed).
+	where := []string{}
 	var args []interface{}
 	if genreParam != "" {
-		// Support multi-genre format (semicolon-separated values)
-		whereClause += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
+		where = append(where, "(genres = ? OR genres LIKE ? OR genres LIKE ? OR genres LIKE ?)")
 		args = append(args, genreParam, genreParam+";%", "%;"+genreParam+";%", "%;"+genreParam)
 	}
 
-	// Determine ORDER BY clause and HAVING clause based on list type
 	var orderByClause string
-	var havingClause string
 	switch listType {
 	case "starred":
-		// Starred albums - Filter by checking if the album's MIN(id) is in starred_albums
 		user := c.MustGet("user").(User)
-		havingClause = "HAVING MIN(id) IN (SELECT album_id FROM starred_albums WHERE user_id = ?)"
+		where = append(where, "id IN (SELECT album_id FROM starred_albums WHERE user_id = ?)")
 		args = append(args, user.ID)
-		orderByClause = "ORDER BY album COLLATE NOCASE"
+		orderByClause = "ORDER BY name COLLATE NOCASE"
 	case "newest":
-		// Recently added albums - sort by the most recent date_added of songs in each album
-		orderByClause = "ORDER BY MAX(date_added) DESC, artist, album"
+		orderByClause = "ORDER BY max_date_added DESC, artist, name"
 	case "recent":
-		// Recently played albums - sort by most recent last_played
-		orderByClause = "ORDER BY MAX(last_played) DESC, artist, album"
+		orderByClause = "ORDER BY max_last_played DESC, artist, name"
 	case "frequent":
-		// Most frequently played albums
-		orderByClause = "ORDER BY SUM(play_count) DESC, artist, album"
+		orderByClause = "ORDER BY total_play_count DESC, artist, name"
 	case "random":
-		// Random albums
 		orderByClause = "ORDER BY RANDOM()"
 	case "alphabeticalByName":
-		// Sorted by album name
-		orderByClause = "ORDER BY album COLLATE NOCASE, artist"
+		orderByClause = "ORDER BY name COLLATE NOCASE, artist"
 	case "alphabeticalByArtist":
-		// Sorted by artist then album (default)
-		orderByClause = "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE"
+		orderByClause = "ORDER BY artist COLLATE NOCASE, name COLLATE NOCASE"
 	default:
-		// Unknown type - default to alphabetical by artist
 		log.Printf("Warning: Unknown album list type '%s', defaulting to alphabeticalByArtist", listType)
-		orderByClause = "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE"
+		orderByClause = "ORDER BY artist COLLATE NOCASE, name COLLATE NOCASE"
 	}
 
-	// Count distinct albums using same GROUP BY logic as the actual query
-	seenAlbumKeys := make(map[string]bool)
-	// Always use GROUP BY for consistent deduplication (album_path || '|||' || album)
-	countQ := fmt.Sprintf(`SELECT album, MIN(NULLIF(album_path, '')) as album_path FROM songs %s
-		GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END
-		%s`, whereClause, havingClause)
-	// Need to duplicate args for count query
+	whereSQL := ""
+	if len(where) > 0 {
+		whereSQL = "WHERE " + strings.Join(where, " AND ")
+	}
+
+	var totalAlbums int
 	countArgs := make([]interface{}, len(args))
 	copy(countArgs, args)
-	rowsCount, err := db.Query(countQ, countArgs...)
-	if err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM albums "+whereSQL, countArgs...).Scan(&totalAlbums); err != nil {
 		log.Printf("Error counting albums for pagination: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying albums."))
 		return
 	}
-	defer rowsCount.Close()
-	for rowsCount.Next() {
-		var albumName, albumPath string
-		if err := rowsCount.Scan(&albumName, &albumPath); err != nil {
-			continue
-		}
-		var nameForKey string
-		albumName = strings.TrimSpace(albumName)
-		albumPath = strings.TrimSpace(albumPath)
-		if albumName != "" {
-			nameForKey = albumName
-		} else {
-			nameForKey = albumPath
-		}
-		if nameForKey == "" {
-			continue
-		}
-		seenAlbumKeys[normalizeKey(nameForKey)] = true
-	}
-	totalAlbums := len(seenAlbumKeys)
 
-	// If offset is beyond total, return empty result (like Navidrome)
 	if offset >= totalAlbums {
-		responseBody := &SubsonicAlbumList2{Albums: []SubsonicAlbum{}}
-		response := newSubsonicResponse(responseBody)
-		subsonicRespond(c, response)
+		subsonicRespond(c, newSubsonicResponse(&SubsonicAlbumList2{Albums: []SubsonicAlbum{}}))
 		return
 	}
 
-	// Query albums grouped by album_path + album (folder + title)
-	// OPTIMIZED: Include song count in the query
-	query := fmt.Sprintf(`
-		SELECT
-			album,
-			MIN(NULLIF(album_path, '')) as album_path,
-			COALESCE(genre, '') as genre,
-			MIN(id) as album_id,
-			COUNT(*) as song_count
-		FROM songs
-		%s
-		GROUP BY
-			CASE
-				WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
-				ELSE album
-			END
-		%s
-		%s
-		LIMIT ? OFFSET ?
-	`, whereClause, havingClause, orderByClause)
-
+	query := fmt.Sprintf(`SELECT id, name, artist, artist_id, COALESCE(genre,''), song_count
+		FROM albums %s %s LIMIT ? OFFSET ?`, whereSQL, orderByClause)
 	args = append(args, size, offset)
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -1089,17 +1040,10 @@ func subsonicGetAlbumList2(c *gin.Context) {
 	seen := make(map[string]bool)
 	for rows.Next() {
 		var album SubsonicAlbum
-		var albumPath string
-		var songCount int
-		if err := rows.Scan(&album.Name, &albumPath, &album.Genre, &album.ID, &songCount); err != nil {
+		if err := rows.Scan(&album.ID, &album.Name, &album.Artist, &album.ArtistID, &album.Genre, &album.SongCount); err != nil {
 			log.Printf("Error scanning album row: %v", err)
 			continue
 		}
-		// Compute display artist by scanning album's songs
-		displayArtist, _ := getAlbumDisplayArtist(db, album.Name, strings.TrimSpace(albumPath))
-		album.Artist = displayArtist
-		album.SongCount = songCount
-		// Normalize legacy 'Unknown' album label
 		if album.Name == "Unknown" {
 			album.Name = "Unknown Album"
 		}
@@ -1109,7 +1053,6 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		}
 		seen[key] = true
 		album.CoverArt = album.ID
-		album.ArtistID = GenerateArtistID(album.Artist)
 		albums = append(albums, album)
 	}
 
@@ -1141,8 +1084,8 @@ func subsonicGetAlbum(c *gin.Context) {
 	albumDir := filepath.Dir(albumPath)
 	log.Printf("getAlbum: Fetching songs for album='%s', artist='%s', albumId=%s, albumDir='%s'", albumName, artistName, albumSongId, albumDir)
 
-	// Compute display album artist using album_path + album name (prefer album_artist, else artists)
-	displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumDir)
+	// Display album artist (precomputed in the derived albums table)
+	displayArtist := albumDisplayArtist(db, albumName, albumDir)
 
 	// Query songs that match the album title and are in the same directory
 	// This ensures we return songs from the SAME physical album location regardless of individual track artist

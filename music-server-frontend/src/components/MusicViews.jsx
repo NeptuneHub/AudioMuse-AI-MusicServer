@@ -398,8 +398,8 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                 if (searchTerm.length >= 3) {
                     if (offset !== 0) return; // Load search results only once
 
-                    const data = await subsonicFetch('search2.view', { query: searchTerm, songCount: DISCOVERY_LOAD_SIZE, songOffset: 0, artistCount: 0, albumCount: 0 });
-                    const songList = data.searchResult2?.song || data.searchResult3?.song || [];
+                    const data = await subsonicFetch('search3.view', { query: searchTerm, songCount: DISCOVERY_LOAD_SIZE, songOffset: 0, artistCount: 0, albumCount: 0 });
+                    const songList = data.searchResult3?.song || data.searchResult2?.song || [];
                     let newSongs = Array.isArray(songList) ? songList : [songList].filter(Boolean);
 
                     // Note: totalFromSearch available from data if needed for UI display
@@ -591,13 +591,13 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
             const allArtistSongs = [];
             for (const artist of similarArtists) {
                 try {
-                    const songData = await subsonicFetch('search2.view', {
+                    const songData = await subsonicFetch('search3.view', {
                         query: artist,
                         artistCount: 0,
                         albumCount: 0,
                         songCount: 50
                     });
-                    const songList = songData.searchResult2?.song || [];
+                    const songList = songData.searchResult3?.song || songData.searchResult2?.song || [];
                     const songArray = Array.isArray(songList) ? songList : [songList].filter(Boolean);
                     allArtistSongs.push(...songArray);
                 } catch (err) {

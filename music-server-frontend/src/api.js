@@ -156,7 +156,7 @@ export async function getSongsByGenre(genre, params = {}) {
 
 // Enhanced search with genre support
 export async function searchMusic(query, params = {}) {
-    return await subsonicFetch('search2.view', { artistCount: 0, albumCount: 0, query, ...params });
+    return await subsonicFetch('search3.view', { artistCount: 0, albumCount: 0, query, ...params });
 }
 
 // Enhanced album list with genre filtering

@@ -28,6 +28,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 		duration INTEGER,
 		play_count INTEGER,
 		last_played TEXT,
+		date_added TEXT,
 		cancelled INTEGER DEFAULT 0
 	);
 	`

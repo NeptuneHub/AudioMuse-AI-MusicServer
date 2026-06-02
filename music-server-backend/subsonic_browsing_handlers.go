@@ -46,22 +46,8 @@ func subsonicGetIndexes(c *gin.Context) {
 		}
 	}
 
-	// Query all artists - OPTIMIZED: Single query with proper album counting
-	query := `
-		SELECT
-			s.artist,
-			COUNT(DISTINCT CASE
-				WHEN s.album != '' AND s.album_path != '' THEN s.album_path || '|||' || s.album
-				WHEN s.album != '' THEN s.album
-				ELSE s.album_path
-			END) as album_count
-		FROM songs s
-		WHERE s.artist != '' AND s.cancelled = 0
-		GROUP BY s.artist
-		ORDER BY s.artist COLLATE NOCASE
-	`
-
-	rows, err := db.Query(query)
+	// Read artists from the derived artists table (album counts precomputed).
+	rows, err := db.Query(`SELECT id, name, album_count FROM artists ORDER BY name COLLATE NOCASE`)
 	if err != nil {
 		log.Printf("Error querying artists for getIndexes: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying artists."))
@@ -74,7 +60,7 @@ func subsonicGetIndexes(c *gin.Context) {
 	seenArtists := make(map[string]bool)
 	for rows.Next() {
 		var artist SubsonicIndexArtist
-		if err := rows.Scan(&artist.Name, &artist.AlbumCount); err != nil {
+		if err := rows.Scan(&artist.ID, &artist.Name, &artist.AlbumCount); err != nil {
 			log.Printf("Error scanning artist for getIndexes: %v", err)
 			continue
 		}
@@ -85,9 +71,7 @@ func subsonicGetIndexes(c *gin.Context) {
 		}
 		seenArtists[key] = true
 
-		artistID := GenerateArtistID(artist.Name)
-		artist.ID = artistID       // Use MD5 hash as artist ID
-		artist.CoverArt = artistID // Set cover art ID for artist images
+		artist.CoverArt = artist.ID // Set cover art ID for artist images
 
 		// Determine index character
 		var indexChar string
@@ -146,30 +130,8 @@ func subsonicGetMusicDirectory(c *gin.Context) {
 		return
 	}
 
-	// Not a song ID - it might be an artist ID (MD5 hash)
-	// Look up the actual artist name that corresponds to this MD5 hash
-	var actualArtistName string
-	artistQuery := `
-		SELECT DISTINCT artist FROM songs
-		WHERE artist != '' AND cancelled = 0
-		LIMIT 1000
-	`
-	rows, err := db.Query(artistQuery)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var artist string
-			if err := rows.Scan(&artist); err != nil {
-				continue
-			}
-			if GenerateArtistID(artist) == id {
-				actualArtistName = artist
-				break
-			}
-		}
-	}
-
-	if actualArtistName != "" {
+	// Not a song ID - it might be an artist ID (MD5 hash). Resolve via the cache.
+	if actualArtistName, ok := resolveArtistIDToName(db, id); ok {
 		getArtistDirectory(c, actualArtistName)
 	} else {
 		// ID doesn't match any song or artist
@@ -183,15 +145,20 @@ func subsonicGetMusicDirectory(c *gin.Context) {
 func getArtistDirectory(c *gin.Context, artistName string) {
 	// Group by album_path + album for deterministic filesystem-based grouping
 	// Match on BOTH artist and album_artist to show all albums where this artist appears in ANY song
+	// Albums where this artist contributes (as track artist or album_artist),
+	// joined to the derived albums table so the display artist is precomputed.
 	query := `
-		SELECT album, MIN(id) as album_id, COUNT(*) as song_count, COALESCE(genre, ''), MIN(album_path) as album_path
-		FROM songs
-		WHERE (artist = ? OR album_artist = ?) AND cancelled = 0
-		GROUP BY CASE
-			WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
-			ELSE album
-		END
-		ORDER BY album COLLATE NOCASE
+		SELECT a.id, a.name, a.artist, COALESCE(a.genre, '')
+		FROM albums a
+		WHERE a.group_key IN (
+			SELECT CASE
+				WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album
+				ELSE album
+			END
+			FROM songs
+			WHERE (artist = ? OR album_artist = ?) AND album != '' AND cancelled = 0
+		)
+		ORDER BY a.name COLLATE NOCASE
 	`
 
 	rows, err := db.Query(query, artistName, artistName)
@@ -204,19 +171,11 @@ func getArtistDirectory(c *gin.Context, artistName string) {
 
 	var children []SubsonicDirectoryChild
 	for rows.Next() {
-		var albumName string
-		var albumID string
-		var songCount int
-		var genre string
-		var albumPath string
-
-		if err := rows.Scan(&albumName, &albumID, &songCount, &genre, &albumPath); err != nil {
+		var albumName, albumID, displayArtist, genre string
+		if err := rows.Scan(&albumID, &albumName, &displayArtist, &genre); err != nil {
 			log.Printf("Error scanning album: %v", err)
 			continue
 		}
-
-		// Compute display artist for this album (may concatenate multiple album_artist or track artists)
-		displayArtist, _ := getAlbumDisplayArtist(db, albumName, strings.TrimSpace(albumPath))
 
 		child := SubsonicDirectoryChild{
 			ID:       albumID,
@@ -254,8 +213,8 @@ func getAlbumDirectory(c *gin.Context, user User, albumID string, albumName, art
 
 	// Extract the album's directory to prevent mixing duplicate albums from different paths
 	albumDir := filepath.Dir(albumPath)
-	// Compute display album artist for this album (prefer album_artist values, else artists)
-	displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumDir)
+	// Display album artist (precomputed in the derived albums table)
+	displayArtist := albumDisplayArtist(db, albumName, albumDir)
 
 	query := `
 		SELECT s.id, s.title, s.artist, s.album, s.duration, s.play_count, s.last_played, COALESCE(s.genre, ''),
@@ -374,8 +333,8 @@ func subsonicGetArtist(c *gin.Context) {
 			continue
 		}
 
-		// Compute display artist for this album (handles multiple album_artists with ";")
-		displayArtist, _ := getAlbumDisplayArtist(db, albumName, strings.TrimSpace(albumPath))
+		// Display artist for this album (precomputed in the derived albums table)
+		displayArtist := albumDisplayArtist(db, albumName, strings.TrimSpace(albumPath))
 
 		album := SubsonicAlbum{
 			ID:       albumID,

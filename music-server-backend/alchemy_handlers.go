@@ -76,14 +76,13 @@ func SearchArtistsHandler(c *gin.Context) {
 		return
 	}
 
-	// Search for artists matching the query (artist field only)
+	// Search artists by name from the derived artists table.
 	searchPattern := "%" + strings.ToLower(query) + "%"
 	rows, err := db.Query(`
-		SELECT artist as artist, COUNT(DISTINCT id) as track_count
-		FROM songs
-		WHERE LOWER(artist) LIKE ? AND artist != '' AND cancelled = 0
-		GROUP BY artist
-		ORDER BY track_count DESC, artist COLLATE NOCASE
+		SELECT name as artist, song_count as track_count
+		FROM artists
+		WHERE LOWER(name) LIKE ?
+		ORDER BY track_count DESC, name COLLATE NOCASE
 		LIMIT 20
 	`, searchPattern)
 

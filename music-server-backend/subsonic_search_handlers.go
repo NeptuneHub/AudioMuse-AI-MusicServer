@@ -143,7 +143,7 @@ func subsonicSearch2(c *gin.Context) {
 				albumName := strings.TrimSpace(ar.Name)
 				albumPath := strings.TrimSpace(ar.AlbumPath)
 				if albumName == "" && albumPath == "" { continue }
-				displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumPath)
+				displayArtist := albumDisplayArtist(db, albumName, albumPath)
 				match := true
 				for _, word := range searchWords {
 					lw := strings.ToLower(word)
@@ -199,7 +199,7 @@ func subsonicSearch2(c *gin.Context) {
 						albumName = strings.TrimSpace(albumName)
 						albumPath = strings.TrimSpace(albumPath)
 						if albumName == "" && albumPath == "" { continue }
-						displayArtist, _ := getAlbumDisplayArtist(db, albumName, albumPath)
+						displayArtist := albumDisplayArtist(db, albumName, albumPath)
 						key := normalizeKey(albumName)
 						candidate := SubsonicAlbum{ID: albumID, Name: albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: genre, CoverArt: albumID, SongCount: songCount}
 						if existing, ok := seen[key]; ok {
@@ -547,7 +547,7 @@ func subsonicSearch3(c *gin.Context) {
 				var songCount int
 				if err := albumRows.Scan(&albumName, &albumPath, &genre, &albumID, &songCount); err == nil {
 					// Compute display artist for this album
-					displayArtist, _ := getAlbumDisplayArtist(db, albumName, strings.TrimSpace(albumPath))
+					displayArtist := albumDisplayArtist(db, albumName, strings.TrimSpace(albumPath))
 					// Ensure album matches search words by album name or display artist (case-insensitive)
 					match := true
 					for _, word := range searchWords {

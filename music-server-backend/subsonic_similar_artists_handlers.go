@@ -71,13 +71,9 @@ func subsonicGetSimilarArtists2(c *gin.Context) {
 	// Convert to Subsonic format
 	var subsonicArtists []SubsonicArtist
 	for _, sa := range similarArtists {
-		// Get album count for this artist with a single aggregate query.
+		// Album count from the derived artists table (falls back to 0 if unknown).
 		var albumCount int
-		_ = db.QueryRow(`SELECT COUNT(DISTINCT CASE
-			WHEN TRIM(album) != '' THEN LOWER(TRIM(album))
-			ELSE LOWER(TRIM(album_path)) END)
-			FROM songs
-			WHERE artist = ? AND cancelled = 0 AND (TRIM(album) != '' OR TRIM(album_path) != '')`, sa.Artist).Scan(&albumCount)
+		_ = db.QueryRow(`SELECT album_count FROM artists WHERE name = ?`, sa.Artist).Scan(&albumCount)
 
 		log.Printf("Processing artist: %s (ID: %s, Albums: %d)", sa.Artist, sa.ArtistID, albumCount)
 

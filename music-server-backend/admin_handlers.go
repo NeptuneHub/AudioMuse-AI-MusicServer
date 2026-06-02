@@ -127,6 +127,9 @@ func scanSingleLibrary(pathId int) {
 	defer func() {
 		db.Exec("UPDATE scan_status SET is_scanning = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
 		invalidateArtistIDCache()
+		if err := RebuildLibraryIndex(db); err != nil {
+			log.Printf("RebuildLibraryIndex after single-library scan failed: %v", err)
+		}
 		log.Println("Single library scan process finished, final status updated.")
 	}()
 
@@ -237,6 +240,9 @@ func scanAllLibraries() {
 	defer func() {
 		db.Exec("UPDATE scan_status SET is_scanning = 0, last_update_time = ? WHERE id = 1", time.Now().Format(time.RFC3339))
 		invalidateArtistIDCache()
+		if err := RebuildLibraryIndex(db); err != nil {
+			log.Printf("RebuildLibraryIndex after full scan failed: %v", err)
+		}
 		log.Println("Finished scanning all libraries, final status updated.")
 	}()
 

@@ -33,6 +33,32 @@ func ensureSongSearchIndexes(db *sql.DB) {
 	}
 }
 
+// songsFTSIndexEmpty reports whether the songs_fts full-text index contains no
+// indexed rows. Because songs_fts uses external content, a plain COUNT(*) is
+// meaningless, so we take a token from an existing song and probe with MATCH:
+// a populated index returns a row, an empty one returns none.
+func songsFTSIndexEmpty(db *sql.DB) bool {
+	var sample string
+	err := db.QueryRow(`SELECT title FROM songs WHERE TRIM(COALESCE(title,'')) != '' AND cancelled = 0 LIMIT 1`).Scan(&sample)
+	if err != nil {
+		// Fall back to artist if no usable title is present.
+		if err = db.QueryRow(`SELECT artist FROM songs WHERE TRIM(COALESCE(artist,'')) != '' AND cancelled = 0 LIMIT 1`).Scan(&sample); err != nil {
+			return false
+		}
+	}
+	fields := strings.Fields(sample)
+	if len(fields) == 0 {
+		return false
+	}
+	ftsExpr := buildFTSQuery(fields[0])
+	if ftsExpr == "" {
+		return false
+	}
+	var x int
+	err = db.QueryRow(`SELECT 1 FROM songs_fts WHERE songs_fts MATCH ? LIMIT 1`, ftsExpr).Scan(&x)
+	return err == sql.ErrNoRows
+}
+
 // migrateDB performs lightweight, idempotent schema and configuration migrations
 // to bring older databases up-to-date without destroying existing data.
 func migrateDB() error {
@@ -84,11 +110,26 @@ func migrateDB() error {
 	// --- SONGS TABLE ---
 	// ...existing code for songs table and per-column ensureColumnExists...
 
+	// If an older songs_fts exists that was created without accent folding,
+	// drop it (and its triggers) so it is recreated below with the
+	// remove_diacritics tokenizer. The rebuild-if-empty block then repopulates it.
+	var existingFTSSQL string
+	_ = db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='songs_fts'`).Scan(&existingFTSSQL)
+	if existingFTSSQL != "" && !strings.Contains(existingFTSSQL, "remove_diacritics") {
+		log.Printf("migrateDB: recreating songs_fts with accent-insensitive tokenizer")
+		for _, trig := range []string{"songs_ai", "songs_au", "songs_ad"} {
+			_, _ = db.Exec(`DROP TRIGGER IF EXISTS ` + trig)
+		}
+		if _, dropErr := db.Exec(`DROP TABLE IF EXISTS songs_fts`); dropErr != nil {
+			log.Printf("migrateDB: warning - could not drop legacy songs_fts: %v", dropErr)
+		}
+	}
+
 	// Ensure full-text index exists for fast text searches (albums/artists/songs)
 	// attempt to create the FTS table; if the underlying SQLite does not
 	// support fts5 (common on macOS), simply log and continue.
 	if _, err = db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts
-		USING fts5(title, artist, album, album_artist, content='songs', content_rowid='rowid');`); err != nil {
+		USING fts5(title, artist, album, album_artist, content='songs', content_rowid='rowid', tokenize='unicode61 remove_diacritics 2');`); err != nil {
 		log.Printf("migrateDB: warning - could not create songs_fts virtual table (fts5 may be unavailable): %v", err)
 		// Drop any pre-existing FTS triggers that reference songs_fts; if those
 		// triggers exist from an older install they will cause every INSERT/UPDATE/
@@ -133,13 +174,16 @@ func migrateDB() error {
 			log.Printf("migrateDB: warning - could not create songs_ad trigger: %v", err)
 		}
 
-		// If songs already has rows but songs_fts is empty (e.g. user scanned with
-		// an older build that lacked FTS5), rebuild the index from the content
-		// table so existing songs are searchable without requiring a full rescan.
-		var songsCount, ftsCount int
-		_ = db.QueryRow(`SELECT COUNT(*) FROM songs`).Scan(&songsCount)
-		_ = db.QueryRow(`SELECT COUNT(*) FROM songs_fts`).Scan(&ftsCount)
-		if songsCount > 0 && ftsCount == 0 {
+		// If songs exist but the songs_fts index is empty, rebuild it from the
+		// content table so existing songs are searchable without a full rescan.
+		// NOTE: songs_fts is an external-content FTS5 table, so COUNT(*) on it
+		// proxies to the content table (songs) and is NOT a measure of how many
+		// rows are indexed. We must probe the index with a MATCH instead. This
+		// also covers the case where the table was just recreated to change the
+		// tokenizer (recreating drops the index but keeps the content rows).
+		var songsCount int
+		_ = db.QueryRow(`SELECT COUNT(*) FROM songs WHERE cancelled = 0`).Scan(&songsCount)
+		if songsCount > 0 && songsFTSIndexEmpty(db) {
 			if _, err = db.Exec(`INSERT INTO songs_fts(songs_fts) VALUES('rebuild')`); err != nil {
 				log.Printf("migrateDB: warning - could not rebuild songs_fts index: %v", err)
 			} else {
@@ -154,6 +198,11 @@ func migrateDB() error {
 	// matching album during a search that becomes an N+1 of full scans and a
 	// search over a large library can take minutes. See ensureSongSearchIndexes.
 	ensureSongSearchIndexes(db)
+
+	// Derived artists/albums tables (+ their FTS indexes) used by the list/search
+	// endpoints. Built from songs; rebuilt on first run if missing.
+	ensureLibraryDerivedTables(db)
+	rebuildLibraryIndexIfEmpty(db)
 
 	// --- STARRED_SONGS TABLE ---
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS starred_songs (
