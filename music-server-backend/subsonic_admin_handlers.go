@@ -330,6 +330,7 @@ func subsonicUpdateUser(c *gin.Context) {
 			subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to update password."))
 			return
 		}
+		invalidateAuthCache()
 	}
 	subsonicRespond(c, newSubsonicResponse(nil))
 }
@@ -383,5 +384,6 @@ func subsonicChangePassword(c *gin.Context) {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Failed to update password."))
 		return
 	}
+	invalidateAuthCache()
 	subsonicRespond(c, newSubsonicResponse(nil))
 }

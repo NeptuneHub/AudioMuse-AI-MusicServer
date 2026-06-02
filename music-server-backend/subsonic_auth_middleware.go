@@ -95,6 +95,14 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 		if username != "" {
 			// Plaintext or hex-encoded password check
 			if password != "" {
+				// Fast path: a recently-verified credential skips the expensive
+				// bcrypt comparison (which otherwise runs on every request).
+				if cachedUser, ok := authCacheLookup(username, password); ok {
+					c.Set("user", cachedUser)
+					c.Next()
+					return
+				}
+
 				var storedUser User
 				var passwordHash string
 				var storedApiKey sql.NullString // Use sql.NullString for potentially NULL api_key
@@ -114,6 +122,7 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 							// NEW: Check if the decoded string is the user's API key
 							if storedApiKey.Valid && storedApiKey.String != "" && decodedString == storedApiKey.String {
 								log.Printf("DEBUG: Successfully authenticated user '%s' via API key in hex-encoded password", storedUser.Username)
+								authCacheStore(username, password, storedUser)
 								c.Set("user", storedUser)
 								c.Next()
 								return
@@ -122,6 +131,7 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 							// Fallback: Check if it's the user's password
 							if checkPasswordHash(decodedString, passwordHash) {
 								log.Printf("DEBUG: Successfully authenticated user '%s' via hex-encoded password", storedUser.Username)
+								authCacheStore(username, password, storedUser)
 								c.Set("user", storedUser)
 								c.Next()
 								return
@@ -133,6 +143,7 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 						}
 					} else if checkPasswordHash(password, passwordHash) { // Plaintext password check
 						log.Printf("DEBUG: Successfully authenticated user '%s' via plaintext password", storedUser.Username)
+						authCacheStore(username, password, storedUser)
 						c.Set("user", storedUser)
 						c.Next()
 						return
