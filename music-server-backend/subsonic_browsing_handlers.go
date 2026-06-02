@@ -302,7 +302,7 @@ func subsonicGetArtist(c *gin.Context) {
 	// Get albums by this artist
 	// Match on BOTH artist and album_artist fields to show all albums where this artist appears in ANY song
 	query := `
-		SELECT album, MIN(id) as album_id, COUNT(*) as song_count, COALESCE(genre, '') as genre, MIN(album_path) as album_path
+		SELECT album, MIN(id) as album_id, COUNT(*) as song_count, COALESCE(genre, '') as genre, MIN(album_path) as album_path, COALESCE(SUM(duration), 0) as total_duration, MIN(date_added) as created
 		FROM songs
 		WHERE (artist = ? OR album_artist = ?) AND cancelled = 0
 		GROUP BY CASE
@@ -324,11 +324,12 @@ func subsonicGetArtist(c *gin.Context) {
 	for rows.Next() {
 		var albumName string
 		var albumID string
-		var songCount int
+		var songCount, totalDuration int
 		var genre string
 		var albumPath string
+		var created sql.NullString
 
-		if err := rows.Scan(&albumName, &albumID, &songCount, &genre, &albumPath); err != nil {
+		if err := rows.Scan(&albumName, &albumID, &songCount, &genre, &albumPath, &totalDuration, &created); err != nil {
 			log.Printf("Error scanning album: %v", err)
 			continue
 		}
@@ -344,6 +345,8 @@ func subsonicGetArtist(c *gin.Context) {
 			CoverArt: albumID,
 			Genre:    genre,
 			SongCount: songCount,
+			Duration:  totalDuration,
+			Created:   created.String,
 		}
 		albums = append(albums, album)
 	}

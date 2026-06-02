@@ -32,6 +32,8 @@ type AlbumQueryOptions struct {
 	IncludeAlbumID bool   // Include MIN(id) as albumId
 	IncludeGenre   bool   // Include genre
 	IncludeArtist  bool   // Include effective artist
+	IncludeDuration bool  // Include SUM(duration) as total_duration (requires GroupByPath)
+	IncludeCreated  bool  // Include MIN(date_added) as created (requires GroupByPath)
 }
 
 // SongQueryOptions defines options for song queries
@@ -68,6 +70,8 @@ type AlbumResult struct {
 	Genre     string
 	AlbumID   string
 	SongCount int
+	Duration  int    // Aggregate song duration in seconds (when IncludeDuration)
+	Created   string // Earliest song date_added, RFC3339 (when IncludeCreated)
 }
 
 // SongResult represents a song query result
@@ -304,6 +308,16 @@ func QueryAlbums(db *sql.DB, opts AlbumQueryOptions) ([]AlbumResult, error) {
 		selectFields = append(selectFields, "COUNT(*) as song_count")
 	}
 
+	// These aggregates ride along on the existing GROUP BY scan (no extra query
+	// or join), so they add negligible cost to the album search.
+	if opts.IncludeDuration {
+		selectFields = append(selectFields, "COALESCE(SUM(songs.duration), 0) as total_duration")
+	}
+
+	if opts.IncludeCreated {
+		selectFields = append(selectFields, "MIN(songs.date_added) as created")
+	}
+
 	query.WriteString(strings.Join(selectFields, ", "))
 	query.WriteString(" FROM songs")
 
@@ -401,6 +415,15 @@ func QueryAlbums(db *sql.DB, opts AlbumQueryOptions) ([]AlbumResult, error) {
 			scanArgs = append(scanArgs, &result.SongCount)
 		}
 
+		if opts.IncludeDuration {
+			scanArgs = append(scanArgs, &result.Duration)
+		}
+
+		var created sql.NullString
+		if opts.IncludeCreated {
+			scanArgs = append(scanArgs, &created)
+		}
+
 		if err := rows.Scan(scanArgs...); err != nil {
 			continue
 		}
@@ -413,6 +436,9 @@ func QueryAlbums(db *sql.DB, opts AlbumQueryOptions) ([]AlbumResult, error) {
 		}
 		if albumID.Valid {
 			result.AlbumID = albumID.String
+		}
+		if created.Valid {
+			result.Created = created.String
 		}
 
 		results = append(results, result)

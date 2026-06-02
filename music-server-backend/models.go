@@ -111,6 +111,8 @@ type SubsonicAlbumWithSongs struct {
 	Name      string         `xml:"name,attr,omitempty" json:"name,omitempty"`
 	CoverArt  string         `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
 	SongCount int            `xml:"songCount,attr" json:"songCount"`
+	Duration  int            `xml:"duration,attr" json:"duration"`
+	Created   string         `xml:"created,attr,omitempty" json:"created,omitempty"`
 	Songs     []SubsonicSong `xml:"song" json:"song"`
 }
 
@@ -167,6 +169,11 @@ type SubsonicAlbum struct {
 	CoverArt  string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
 	Genre     string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
 	SongCount int      `xml:"songCount,attr,omitempty" json:"songCount,omitempty"`
+	// Duration is the aggregate of song durations in seconds. The OpenSubsonic
+	// spec marks it required for AlbumID3, so it is always emitted (even 0).
+	Duration int `xml:"duration,attr" json:"duration"`
+	// Created is the album's earliest song date_added (RFC3339), omitted when unknown.
+	Created string `xml:"created,attr,omitempty" json:"created,omitempty"`
 }
 
 type SubsonicPlaylists struct {

@@ -1025,7 +1025,7 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		return
 	}
 
-	query := fmt.Sprintf(`SELECT id, name, artist, artist_id, COALESCE(genre,''), song_count
+	query := fmt.Sprintf(`SELECT id, name, artist, artist_id, COALESCE(genre,''), song_count, total_duration, COALESCE(min_date_added,'')
 		FROM albums %s %s LIMIT ? OFFSET ?`, whereSQL, orderByClause)
 	args = append(args, size, offset)
 	rows, err := db.Query(query, args...)
@@ -1040,7 +1040,7 @@ func subsonicGetAlbumList2(c *gin.Context) {
 	seen := make(map[string]bool)
 	for rows.Next() {
 		var album SubsonicAlbum
-		if err := rows.Scan(&album.ID, &album.Name, &album.Artist, &album.ArtistID, &album.Genre, &album.SongCount); err != nil {
+		if err := rows.Scan(&album.ID, &album.Name, &album.Artist, &album.ArtistID, &album.Genre, &album.SongCount, &album.Duration, &album.Created); err != nil {
 			log.Printf("Error scanning album row: %v", err)
 			continue
 		}
@@ -1090,7 +1090,7 @@ func subsonicGetAlbum(c *gin.Context) {
 	// Query songs that match the album title and are in the same directory
 	// This ensures we return songs from the SAME physical album location regardless of individual track artist
 	query := `
-		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''), s.duration,
+		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''), s.duration, COALESCE(s.date_added, ''),
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
@@ -1108,18 +1108,25 @@ func subsonicGetAlbum(c *gin.Context) {
 	defer rows.Close()
 
 	var songs []SubsonicSong
+	var albumDuration int
+	var albumCreated string
 	for rows.Next() {
 		var s SubsonicSong
 		var lastPlayed sql.NullString
 		var duration int
 		var starred int
 		var songPath string
-		if err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &songPath, &s.PlayCount, &lastPlayed, &s.Genre, &duration, &starred); err != nil {
+		var dateAdded string
+		if err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &songPath, &s.PlayCount, &lastPlayed, &s.Genre, &duration, &dateAdded, &starred); err != nil {
 			log.Printf("Error scanning song in getAlbum: %v", err)
 			continue
 		}
 		s.CoverArt = albumSongId
 		s.Duration = duration
+		albumDuration += duration
+		if dateAdded != "" && (albumCreated == "" || dateAdded < albumCreated) {
+			albumCreated = dateAdded
+		}
 		s.Starred = starred == 1
 		s.ArtistID = GenerateArtistID(s.Artist)        // Track artist ID
 		s.AlbumID = albumSongId                        // Album ID
@@ -1144,6 +1151,8 @@ func subsonicGetAlbum(c *gin.Context) {
 		Name:      albumName,
 		CoverArt:  albumSongId,
 		SongCount: len(songs),
+		Duration:  albumDuration,
+		Created:   albumCreated,
 		Songs:     songs,
 	}
 

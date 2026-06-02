@@ -2,6 +2,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/xml"
 	"log"
 	"strconv"
@@ -132,9 +133,9 @@ func subsonicSearch2(c *gin.Context) {
 		var albums []AlbumResult
 		var qerr error
 		if isShortQuery {
-			albums, qerr = QueryAlbums(db, AlbumQueryOptions{GroupByPath: true, IncludeGenre: true, IncludeAlbumID: true, IncludeCounts: true, Limit: albumCount, Offset: albumOffset})
+			albums, qerr = QueryAlbums(db, AlbumQueryOptions{GroupByPath: true, IncludeGenre: true, IncludeAlbumID: true, IncludeCounts: true, IncludeDuration: true, IncludeCreated: true, Limit: albumCount, Offset: albumOffset})
 		} else {
-			albums, qerr = QueryAlbums(db, AlbumQueryOptions{SearchTerm: query, GroupByPath: true, IncludeGenre: true, IncludeAlbumID: true, IncludeCounts: true})
+			albums, qerr = QueryAlbums(db, AlbumQueryOptions{SearchTerm: query, GroupByPath: true, IncludeGenre: true, IncludeAlbumID: true, IncludeCounts: true, IncludeDuration: true, IncludeCreated: true})
 		}
 		if qerr == nil {
 			seen := make(map[string]SubsonicAlbum)
@@ -151,7 +152,7 @@ func subsonicSearch2(c *gin.Context) {
 				}
 				if !match { continue }
 				key := normalizeKey(albumName)
-				candidate := SubsonicAlbum{ID: ar.AlbumID, Name: albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: ar.Genre, CoverArt: ar.AlbumID, SongCount: ar.SongCount}
+				candidate := SubsonicAlbum{ID: ar.AlbumID, Name: albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: ar.Genre, CoverArt: ar.AlbumID, SongCount: ar.SongCount, Duration: ar.Duration, Created: ar.Created}
 				if existing, ok := seen[key]; ok { candIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, albumName, albumPath); existIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, existing.Name, ""); if candIsAlbumArtist && !existIsAlbumArtist { seen[key] = candidate } } else { seen[key] = candidate; order = append(order, key) }
 			}
 			start := albumOffset
@@ -173,7 +174,9 @@ func subsonicSearch2(c *gin.Context) {
 					MIN(NULLIF(album_path, '')) as album_path,
 					COALESCE(genre, '') as genre,
 					MIN(id) as albumId,
-					COUNT(*) as song_count
+					COUNT(*) as song_count,
+					COALESCE(SUM(duration), 0) as total_duration,
+					MIN(date_added) as created
 				FROM songs
 				WHERE album != '' AND cancelled = 0
 				GROUP BY CASE
@@ -194,14 +197,15 @@ func subsonicSearch2(c *gin.Context) {
 				for albumRows.Next() {
 					var albumName, albumPath, genre string
 					var albumID string
-					var songCount int
-					if err := albumRows.Scan(&albumName, &albumPath, &genre, &albumID, &songCount); err == nil {
+					var songCount, totalDuration int
+					var created sql.NullString
+					if err := albumRows.Scan(&albumName, &albumPath, &genre, &albumID, &songCount, &totalDuration, &created); err == nil {
 						albumName = strings.TrimSpace(albumName)
 						albumPath = strings.TrimSpace(albumPath)
 						if albumName == "" && albumPath == "" { continue }
 						displayArtist := albumDisplayArtist(db, albumName, albumPath)
 						key := normalizeKey(albumName)
-						candidate := SubsonicAlbum{ID: albumID, Name: albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: genre, CoverArt: albumID, SongCount: songCount}
+						candidate := SubsonicAlbum{ID: albumID, Name: albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: genre, CoverArt: albumID, SongCount: songCount, Duration: totalDuration, Created: created.String}
 						if existing, ok := seen[key]; ok {
 							candIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, albumName, albumPath)
 							existIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, existing.Name, "")
@@ -233,7 +237,7 @@ func subsonicSearch2(c *gin.Context) {
 			}
 
 			songQuery := `
-				SELECT album, MIN(NULLIF(album_path, '')) as album_path, album_artist, artist, id, COALESCE(genre, '') as genre
+				SELECT album, MIN(NULLIF(album_path, '')) as album_path, album_artist, artist, id, COALESCE(genre, '') as genre, COALESCE(duration, 0) as duration, COALESCE(date_added, '') as date_added
 				FROM songs
 				WHERE (` + strings.Join(songConditions, " AND ") + `) AND cancelled = 0
 				ORDER BY album COLLATE NOCASE, id`
@@ -244,21 +248,24 @@ func subsonicSearch2(c *gin.Context) {
 			} else {
 				defer rows.Close()
 				type albumGroup struct {
-					albumName string
-					albumPath string
-					genre     string
-					albumID   string
-					songCount int
-					albumArts map[string]bool
-					artists   map[string]bool
+					albumName     string
+					albumPath     string
+					genre         string
+					albumID       string
+					songCount     int
+					totalDuration int
+					minCreated    string
+					albumArts     map[string]bool
+					artists       map[string]bool
 				}
 
 				groups := make(map[string]*albumGroup)
 				order := []string{}
 
 				for rows.Next() {
-					var albumName, albumPath, albumArtist, artist, id, genre string
-					if err := rows.Scan(&albumName, &albumPath, &albumArtist, &artist, &id, &genre); err != nil {
+					var albumName, albumPath, albumArtist, artist, id, genre, dateAdded string
+					var duration int
+					if err := rows.Scan(&albumName, &albumPath, &albumArtist, &artist, &id, &genre, &duration, &dateAdded); err != nil {
 						continue
 					}
 					albumName = strings.TrimSpace(albumName)
@@ -291,6 +298,10 @@ func subsonicSearch2(c *gin.Context) {
 						g.artists[strings.TrimSpace(artist)] = true
 					}
 					g.songCount++
+					g.totalDuration += duration
+					if dateAdded != "" && (g.minCreated == "" || dateAdded < g.minCreated) {
+						g.minCreated = dateAdded
+					}
 				}
 
 				// Build candidates and deduplicate by normalized album name, preferring album_artist-backed groups
@@ -310,7 +321,7 @@ func subsonicSearch2(c *gin.Context) {
 						displayArtist = strings.Join(artistList, "; ")
 					}
 
-					candidate := SubsonicAlbum{ID: g.albumID, Name: g.albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: g.genre, CoverArt: g.albumID, SongCount: g.songCount}
+					candidate := SubsonicAlbum{ID: g.albumID, Name: g.albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: g.genre, CoverArt: g.albumID, SongCount: g.songCount, Duration: g.totalDuration, Created: g.minCreated}
 
 					nk := normalizeKey(g.albumName)
 					if existing, ok := seen[nk]; ok {
@@ -496,7 +507,9 @@ func subsonicSearch3(c *gin.Context) {
 					MIN(NULLIF(album_path, '')) as albumPath,
 					COALESCE(genre, '') as genre,
 					MIN(id) as albumId,
-					COUNT(*) as song_count
+					COUNT(*) as song_count,
+					COALESCE(SUM(duration), 0) as total_duration,
+					MIN(date_added) as created
 				FROM songs
 				WHERE album != '' AND cancelled = 0
 				GROUP BY CASE
@@ -522,7 +535,9 @@ func subsonicSearch3(c *gin.Context) {
 					MIN(NULLIF(album_path, '')) as albumPath,
 					COALESCE(genre, '') as genre,
 					MIN(id) as albumId,
-					COUNT(*) as song_count
+					COUNT(*) as song_count,
+					COALESCE(SUM(duration), 0) as total_duration,
+					MIN(date_added) as created
 				FROM songs
 				WHERE (` + strings.Join(albumConditions, " AND ") + `) AND cancelled = 0
 				GROUP BY CASE
@@ -544,8 +559,9 @@ func subsonicSearch3(c *gin.Context) {
 			for albumRows.Next() {
 				var albumName, genre, albumPath string
 				var albumID string
-				var songCount int
-				if err := albumRows.Scan(&albumName, &albumPath, &genre, &albumID, &songCount); err == nil {
+				var songCount, totalDuration int
+				var created sql.NullString
+				if err := albumRows.Scan(&albumName, &albumPath, &genre, &albumID, &songCount, &totalDuration, &created); err == nil {
 					// Compute display artist for this album
 					displayArtist := albumDisplayArtist(db, albumName, strings.TrimSpace(albumPath))
 					// Ensure album matches search words by album name or display artist (case-insensitive)
@@ -572,6 +588,8 @@ func subsonicSearch3(c *gin.Context) {
 						Genre:     genre,
 						CoverArt:  albumID,
 						SongCount: songCount,
+						Duration:  totalDuration,
+						Created:   created.String,
 					}
 					candidates = append(candidates, candidate)
 				}

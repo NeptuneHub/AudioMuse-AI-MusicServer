@@ -42,8 +42,10 @@ CREATE TABLE IF NOT EXISTS albums (
 	song_count INTEGER NOT NULL DEFAULT 0,
 	has_album_artist INTEGER NOT NULL DEFAULT 0,
 	max_date_added TEXT NOT NULL DEFAULT '',
+	min_date_added TEXT NOT NULL DEFAULT '',
 	max_last_played TEXT NOT NULL DEFAULT '',
 	total_play_count INTEGER NOT NULL DEFAULT 0,
+	total_duration INTEGER NOT NULL DEFAULT 0,
 	genres TEXT NOT NULL DEFAULT '',
 	search_text TEXT NOT NULL DEFAULT ''
 );
@@ -68,12 +70,23 @@ func ensureLibraryDerivedTables(db *sql.DB) {
 	albumCols := map[string]string{
 		"artist_id": "TEXT NOT NULL DEFAULT ''", "genre": "TEXT NOT NULL DEFAULT ''",
 		"has_album_artist": "INTEGER NOT NULL DEFAULT 0", "max_date_added": "TEXT NOT NULL DEFAULT ''",
+		"min_date_added": "TEXT NOT NULL DEFAULT ''",
 		"max_last_played": "TEXT NOT NULL DEFAULT ''", "total_play_count": "INTEGER NOT NULL DEFAULT 0",
+		"total_duration": "INTEGER NOT NULL DEFAULT 0",
 		"genres": "TEXT NOT NULL DEFAULT ''", "search_text": "TEXT NOT NULL DEFAULT ''",
 	}
+	// If total_duration is newly added, the albums table predates the aggregate
+	// columns and its rows hold the defaults (0 / ''); flag a rebuild so
+	// getAlbumList2 returns real duration/created right after an upgrade.
+	needsAggregateRebuild := false
 	for col, def := range albumCols {
-		if _, err := ensureColumnExists(db, "albums", col, def); err != nil {
+		added, err := ensureColumnExists(db, "albums", col, def)
+		if err != nil {
 			log.Printf("ensureLibraryDerivedTables: albums.%s: %v", col, err)
+			continue
+		}
+		if added && col == "total_duration" {
+			needsAggregateRebuild = true
 		}
 	}
 	for col, def := range map[string]string{"song_count": "INTEGER NOT NULL DEFAULT 0", "album_count": "INTEGER NOT NULL DEFAULT 0", "search_text": "TEXT NOT NULL DEFAULT ''"} {
@@ -83,6 +96,17 @@ func ensureLibraryDerivedTables(db *sql.DB) {
 	}
 	ensureDerivedFTS(db, "artists_fts", "artists")
 	ensureDerivedFTS(db, "albums_fts", "albums")
+
+	if needsAggregateRebuild {
+		var songs int
+		_ = db.QueryRow(`SELECT COUNT(*) FROM songs WHERE cancelled = 0`).Scan(&songs)
+		if songs > 0 {
+			log.Printf("ensureLibraryDerivedTables: backfilling album duration/created aggregates")
+			if err := RebuildLibraryIndex(db); err != nil {
+				log.Printf("ensureLibraryDerivedTables: aggregate backfill rebuild: %v", err)
+			}
+		}
+	}
 }
 
 func ensureDerivedFTS(db *sql.DB, ftsName, contentTable string) {
@@ -110,8 +134,10 @@ type albumAccumulator struct {
 	songCount      int
 	hasAlbumArtist bool
 	maxDateAdded   string
+	minDateAdded   string
 	maxLastPlayed  string
 	totalPlayCount int
+	totalDuration  int
 	displaySeen    map[string]string // normalizeKey -> original display token
 	searchTokens   map[string]bool
 	genreTokens    map[string]bool
@@ -153,7 +179,7 @@ func RebuildLibraryIndex(db *sql.DB) error {
 
 	rows, err := db.Query(`SELECT COALESCE(id,''), COALESCE(title,''), COALESCE(artist,''),
 		COALESCE(album,''), COALESCE(album_artist,''), COALESCE(album_path,''), COALESCE(genre,''),
-		COALESCE(date_added,''), COALESCE(last_played,''), COALESCE(play_count,0)
+		COALESCE(date_added,''), COALESCE(last_played,''), COALESCE(play_count,0), COALESCE(duration,0)
 		FROM songs WHERE cancelled = 0`)
 	if err != nil {
 		return err
@@ -165,7 +191,8 @@ func RebuildLibraryIndex(db *sql.DB) error {
 	for rows.Next() {
 		var id, title, artist, album, albumArtist, albumPath, genre, dateAdded, lastPlayed string
 		var playCount int
-		if err := rows.Scan(&id, &title, &artist, &album, &albumArtist, &albumPath, &genre, &dateAdded, &lastPlayed, &playCount); err != nil {
+		var duration int
+		if err := rows.Scan(&id, &title, &artist, &album, &albumArtist, &albumPath, &genre, &dateAdded, &lastPlayed, &playCount, &duration); err != nil {
 			continue
 		}
 		artist = strings.TrimSpace(artist)
@@ -214,10 +241,15 @@ func RebuildLibraryIndex(db *sql.DB) error {
 		if dateAdded > acc.maxDateAdded {
 			acc.maxDateAdded = dateAdded
 		}
+		// Earliest date_added is the album's "created" timestamp.
+		if dateAdded != "" && (acc.minDateAdded == "" || dateAdded < acc.minDateAdded) {
+			acc.minDateAdded = dateAdded
+		}
 		if lastPlayed > acc.maxLastPlayed {
 			acc.maxLastPlayed = lastPlayed
 		}
 		acc.totalPlayCount += playCount
+		acc.totalDuration += duration
 
 		// display-artist candidate for this song (album_artist preferred, else artist)
 		cand := effectiveArtist(albumArtist, artist)
@@ -273,8 +305,8 @@ func RebuildLibraryIndex(db *sql.DB) error {
 	artStmt.Close()
 
 	albStmt, err := tx.Prepare(`INSERT OR REPLACE INTO albums
-		(group_key, id, name, album_path, artist, artist_id, genre, song_count, has_album_artist, max_date_added, max_last_played, total_play_count, genres, search_text)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		(group_key, id, name, album_path, artist, artist_id, genre, song_count, has_album_artist, max_date_added, min_date_added, max_last_played, total_play_count, total_duration, genres, search_text)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -287,7 +319,7 @@ func RebuildLibraryIndex(db *sql.DB) error {
 		searchText := buildSearchText(acc.searchTokens)
 		genres := joinTokens(acc.genreTokens, ";")
 		if _, err := albStmt.Exec(acc.groupKey, acc.id, acc.name, acc.albumPath, display, GenerateArtistID(display),
-			acc.genre, acc.songCount, hasAA, acc.maxDateAdded, acc.maxLastPlayed, acc.totalPlayCount, genres, searchText); err != nil {
+			acc.genre, acc.songCount, hasAA, acc.maxDateAdded, acc.minDateAdded, acc.maxLastPlayed, acc.totalPlayCount, acc.totalDuration, genres, searchText); err != nil {
 			albStmt.Close()
 			return err
 		}
