@@ -107,10 +107,20 @@ func buildFTSQuery(term string) string {
 	return strings.Join(out, " ")
 }
 
+// ftsAvailable reports whether full-text search can actually be used. It is not
+// enough for the songs_fts table to exist: if the binary was built WITHOUT the
+// fts5 build tag, the table may exist (from a previous fts5-enabled build) but
+// any MATCH query fails at runtime with "no such module: fts5". We therefore
+// probe with a real MATCH and fall back to LIKE-based search when it errors.
 func ftsAvailable(db *sql.DB) bool {
 	var count int
 	_ = db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='songs_fts'`).Scan(&count)
-	return count > 0
+	if count == 0 {
+		return false
+	}
+	var x int
+	err := db.QueryRow(`SELECT 1 FROM songs_fts WHERE songs_fts MATCH 'zz_fts_probe_zz' LIMIT 1`).Scan(&x)
+	return err == nil || err == sql.ErrNoRows
 }
 
 func QueryArtists(db *sql.DB, opts ArtistQueryOptions) ([]ArtistResult, error) {
