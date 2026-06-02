@@ -147,6 +147,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
     const [songs, setSongs] = useState([]);
     const [allSongs, setAllSongs] = useState([]); // All loaded songs from backend
     const [searchTerm, setSearchTerm] = useState('');
+    const [searchInput, setSearchInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
     const [offset, setOffset] = useState(0);
@@ -246,6 +247,12 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
         setDiscoveryView('all'); // Reset discovery view on filter/genre change
         radioFetchedRef.current = false; // Reset radio fetch tracker
     }, [searchTerm, filter, refreshKey, selectedGenre]);
+
+    useEffect(() => {
+        if (searchInput === searchTerm) return;
+        const t = setTimeout(() => setSearchTerm(searchInput), 350);
+        return () => clearTimeout(t);
+    }, [searchInput, searchTerm]);
 
     // Radio Auto-Rerun: Fetch more songs when approaching end of queue
     useEffect(() => {
@@ -409,7 +416,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                 if (searchTerm.length >= 3) {
                     if (offset !== 0) return; // Load search results only once
 
-                    const data = await subsonicFetch('search2.view', { query: searchTerm, songCount: DISCOVERY_LOAD_SIZE, songOffset: 0 });
+                    const data = await subsonicFetch('search2.view', { query: searchTerm, songCount: DISCOVERY_LOAD_SIZE, songOffset: 0, artistCount: 0, albumCount: 0 });
                     const songList = data.searchResult2?.song || data.searchResult3?.song || [];
                     let newSongs = Array.isArray(songList) ? songList : [songList].filter(Boolean);
 
@@ -628,6 +635,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
             setSongs(finalSongs);
             setAllSongs(finalSongs);
             setSearchTerm('');
+            setSearchInput('');
             setSelectedGenre('');
             setOffset(0);
 
@@ -689,6 +697,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                                 setAllSongs([]);
                                 setOffset(0);
                                 setSearchTerm('');
+                                setSearchInput('');
                                 setIsStarredFilter(false); // Reset starred filter
                             }}
                             className={`px-3 sm:px-4 py-2 rounded-lg font-semibold whitespace-nowrap transition-all ${
@@ -819,13 +828,13 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     <input
                         type="text"
                         placeholder="Search for a song or artist..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
                         className="w-full pl-10 pr-4 py-3 bg-dark-750 rounded-lg border border-dark-600 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 text-white placeholder-gray-500 transition-all"
                     />
-                    {searchTerm && (
+                    {searchInput && (
                         <button
-                            onClick={() => setSearchTerm('')}
+                            onClick={() => { setSearchInput(''); setSearchTerm(''); }}
                             className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-white"
                         >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -878,6 +887,7 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             setIsLoading(true);
                             setError('');
                             setSearchTerm('');
+                            setSearchInput('');
                             setSelectedGenre('');
                             setOffset(0);
                             setIsStarredFilter(true);

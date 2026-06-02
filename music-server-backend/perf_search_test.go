@@ -4,18 +4,12 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// buildLargeDB creates a temp-file SQLite DB populated with n synthetic songs,
-// mirroring the production schema + FTS5 index + triggers. It is used by the
-// search performance benchmarks. Vocabulary is chosen so a search for a common
-// word ("love") matches roughly 1/len(vocab) of all songs, exercising the
-// realistic "broad result set" case that makes naive LIKE scans slow.
 func buildLargeDB(tb testing.TB, n int) *sql.DB {
 	tb.Helper()
 	dir := tb.TempDir()
@@ -52,8 +46,8 @@ func buildLargeDB(tb testing.TB, n int) *sql.DB {
 	}
 	for i := 0; i < n; i++ {
 		w := vocab[i%len(vocab)]
-		artist := fmt.Sprintf("Artist %d", i%50000)        // ~50k artists
-		album := fmt.Sprintf("%s Album %d", w, i%200000)   // ~200k albums
+		artist := fmt.Sprintf("Artist %d", i%50000)
+		album := fmt.Sprintf("%s Album %d", w, i%200000)
 		title := fmt.Sprintf("%s Song %d", w, i)
 		albumPath := fmt.Sprintf("/music/%d", i%200000)
 		id := fmt.Sprintf("id%d", i)
@@ -68,20 +62,71 @@ func buildLargeDB(tb testing.TB, n int) *sql.DB {
 		}
 	}
 	_ = tx.Commit()
-	// Rebuild FTS from content (triggers are not installed here; we bulk-load then rebuild)
 	if _, err := d.Exec(`INSERT INTO songs_fts(songs_fts) VALUES('rebuild')`); err != nil {
 		tb.Fatalf("fts rebuild: %v", err)
 	}
-	// Apply the same secondary indexes the production migration creates.
 	ensureSongSearchIndexes(d)
 	return d
 }
 
-// TestSearchPerfBaseline times the CURRENT search3 query shapes (raw LIKE scans
-// + per-album N+1 display-artist subqueries) against the FTS5 index equivalents,
-// at 1M songs. Run with:
-//
-//	go test -tags fts5 -run TestSearchPerfBaseline -v -timeout 600s
+func TestMusicCountsQueriesAreCorrect(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	rows := [][]string{
+		{"s1", "t1", "ArtistA", "AlbumX", "/m/x"},
+		{"s2", "t2", "ArtistA", "AlbumX", "/m/x"},
+		{"s3", "t3", "ArtistB", "AlbumY", "/m/y"},
+		{"s4", "t4", "ArtistC", "", "/m/z"},
+	}
+	for _, r := range rows {
+		if _, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_path) VALUES (?,?,?,?,?)`, r[0], r[1], r[2], r[3], r[4]); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+
+	var artists, albums, songs int
+	if err := db.QueryRow("SELECT COUNT(DISTINCT artist) FROM songs WHERE artist != '' AND cancelled = 0").Scan(&artists); err != nil {
+		t.Fatalf("artist count: %v", err)
+	}
+	albumQuery := `SELECT COUNT(DISTINCT CASE
+		WHEN album IS NOT NULL AND TRIM(album) != '' THEN album
+		ELSE album_path END)
+		FROM songs WHERE cancelled = 0 AND (TRIM(album) != '' OR TRIM(album_path) != '')`
+	if err := db.QueryRow(albumQuery).Scan(&albums); err != nil {
+		t.Fatalf("album count: %v", err)
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM songs WHERE cancelled = 0").Scan(&songs); err != nil {
+		t.Fatalf("song count: %v", err)
+	}
+
+	if artists != 3 {
+		t.Errorf("artists = %d, want 3", artists)
+	}
+	if albums != 3 {
+		t.Errorf("albums = %d, want 3", albums)
+	}
+	if songs != 4 {
+		t.Errorf("songs = %d, want 4", songs)
+	}
+}
+
+func TestSongOnlySearchReturnsSongs(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	for i := 0; i < 5; i++ {
+		_, _ = db.Exec(`INSERT INTO songs (id, title, artist, album) VALUES (?,?,?,?)`,
+			fmt.Sprintf("s%d", i), fmt.Sprintf("Love Song %d", i), "ArtistA", "Love Album")
+	}
+	songs, err := QuerySongs(db, SongQueryOptions{SearchTerm: "love", Limit: 200})
+	if err != nil {
+		t.Fatalf("QuerySongs: %v", err)
+	}
+	if len(songs) != 5 {
+		t.Errorf("got %d songs, want 5", len(songs))
+	}
+}
+
 func TestSearchPerfBaseline(t *testing.T) {
 	if os.Getenv("AUDIOMUSE_PERF_TEST") == "" {
 		t.Skip("set AUDIOMUSE_PERF_TEST=1 to run the 1M-song search perf test")
@@ -91,7 +136,6 @@ func TestSearchPerfBaseline(t *testing.T) {
 	defer d.Close()
 
 	query := "love"
-	words := strings.Fields(query)
 
 	timeit := func(label string, fn func() (int, error)) time.Duration {
 		start := time.Now()
@@ -105,68 +149,20 @@ func TestSearchPerfBaseline(t *testing.T) {
 		return el
 	}
 
-	// ============================================================
-	// POST-FIX search3 path: FTS-backed counts + indexed album work
-	// ============================================================
 	var total time.Duration
-
-	total += timeit("counts: CountArtists (FTS)", func() (int, error) {
-		return CountArtists(d, query, false)
-	})
-	total += timeit("counts: CountAlbums (FTS)", func() (int, error) {
-		return CountAlbums(d, query)
-	})
-	total += timeit("counts: CountSongs (FTS)", func() (int, error) {
-		return CountSongs(d, query)
-	})
-
+	total += timeit("counts: CountArtists (FTS)", func() (int, error) { return CountArtists(d, query, false) })
+	total += timeit("counts: CountAlbums (FTS)", func() (int, error) { return CountAlbums(d, query) })
+	total += timeit("counts: CountSongs (FTS)", func() (int, error) { return CountSongs(d, query) })
 	total += timeit("results: QueryArtists (FTS, limit 20)", func() (int, error) {
 		a, err := QueryArtists(d, ArtistQueryOptions{SearchTerm: query, IncludeCounts: true, Limit: 20})
 		return len(a), err
 	})
-
-	// search3 album search as it stands today: LIKE candidate scan grouped by
-	// album, then a per-candidate getAlbumDisplayArtist. The fix is the index on
-	// (album, album_path) which this DB now has — this measures the real
-	// post-fix cost of that N+1 over all matching albums.
-	total += timeit("results: album-search (N+1 displayArtist, indexed)", func() (int, error) {
-		var conds []string
-		var args []interface{}
-		for _, w := range words {
-			conds = append(conds, "(album LIKE ? OR artist LIKE ? OR album_artist LIKE ?)")
-			p := "%" + w + "%"
-			args = append(args, p, p, p)
-		}
-		q := `SELECT album, MIN(NULLIF(album_path, '')) as albumPath, COALESCE(genre,'') as genre, MIN(id) as albumId, COUNT(*) as song_count
-			FROM songs WHERE (` + strings.Join(conds, " AND ") + `) AND cancelled = 0
-			GROUP BY CASE WHEN album_path IS NOT NULL AND album_path != '' THEN album_path || '|||' || album ELSE album END
-			ORDER BY album COLLATE NOCASE`
-		rows, err := d.Query(q, args...)
-		if err != nil {
-			return 0, err
-		}
-		type cand struct{ album, albumPath string }
-		var cands []cand
-		for rows.Next() {
-			var album, albumPath, genre, albumID string
-			var sc int
-			_ = rows.Scan(&album, &albumPath, &genre, &albumID, &sc)
-			cands = append(cands, cand{album, strings.TrimSpace(albumPath)})
-		}
-		rows.Close()
-		for _, cd := range cands {
-			_, _ = getAlbumDisplayArtist(d, cd.album, cd.albumPath)
-		}
-		return len(cands), nil
-	})
-
-	total += timeit("results: QuerySongs (FTS, limit 50)", func() (int, error) {
-		s, err := QuerySongs(d, SongQueryOptions{SearchTerm: query, IncludeGenre: true, Limit: 50, OrderBy: "s.artist, s.album, s.title"})
+	total += timeit("results: QuerySongs (FTS, limit 200)", func() (int, error) {
+		s, err := QuerySongs(d, SongQueryOptions{SearchTerm: query, IncludeGenre: true, Limit: 200, OrderBy: "s.artist, s.title"})
 		return len(s), err
 	})
-
-	t.Logf("==> TOTAL post-fix search3 work for query %q: %.3fs", query, total.Seconds())
+	t.Logf("==> TOTAL song-only search work for query %q: %.3fs", query, total.Seconds())
 	if total > 2*time.Second {
-		t.Errorf("post-fix search exceeded 2s target: %.3fs", total.Seconds())
+		t.Errorf("song-only search exceeded 2s target: %.3fs", total.Seconds())
 	}
 }

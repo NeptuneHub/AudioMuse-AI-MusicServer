@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -112,56 +111,19 @@ func getMusicCounts(c *gin.Context) {
 
 	var counts CountsResponse
 
-	// Count artists (deduplicate by normalized artist name) - artists are independent of genre
-	artistQuery := "SELECT artist FROM songs WHERE artist != '' AND cancelled = 0"
-	rows, err := db.Query(artistQuery)
-	if err == nil {
-		defer rows.Close()
-		seen := make(map[string]bool)
-		for rows.Next() {
-			var name string
-			if err := rows.Scan(&name); err != nil {
-				continue
-			}
-			name = normalizeArtistName(name)
-			seen[normalizeKey(name)] = true
-		}
-		counts.Artists = len(seen)
-	}
+	db.QueryRow("SELECT COUNT(DISTINCT artist) FROM songs WHERE artist != '' AND cancelled = 0").Scan(&counts.Artists)
 
-	// Count albums using normalized deduplication (album name or path fallback)
-	albumQuery := "SELECT album, album_path FROM songs WHERE cancelled = 0"
+	albumQuery := `SELECT COUNT(DISTINCT CASE
+		WHEN album IS NOT NULL AND TRIM(album) != '' THEN album
+		ELSE album_path END)
+		FROM songs WHERE cancelled = 0 AND (TRIM(album) != '' OR TRIM(album_path) != '')`
 	albumArgs := []interface{}{}
 	if genre != "" {
 		albumQuery += " AND (genre = ? OR genre LIKE ? OR genre LIKE ? OR genre LIKE ?)"
 		albumArgs = append(albumArgs, genre, genre+";%", "%;"+genre+";%", "%;"+genre)
 	}
-	rowsA, err := db.Query(albumQuery, albumArgs...)
-	if err == nil {
-		defer rowsA.Close()
-		seenAlbums := make(map[string]bool)
-		for rowsA.Next() {
-			var albumName, albumPath string
-			if err := rowsA.Scan(&albumName, &albumPath); err != nil {
-				continue
-			}
-			albumName = strings.TrimSpace(albumName)
-			albumPath = strings.TrimSpace(albumPath)
-			var nameForKey string
-			if albumName != "" {
-				nameForKey = albumName
-			} else {
-				nameForKey = albumPath
-			}
-			if nameForKey == "" {
-				continue
-			}
-			seenAlbums[normalizeKey(nameForKey)] = true
-		}
-		counts.Albums = len(seenAlbums)
-	}
+	db.QueryRow(albumQuery, albumArgs...).Scan(&counts.Albums)
 
-	// Count songs
 	songQuery := "SELECT COUNT(*) FROM songs WHERE cancelled = 0"
 	songArgs := []interface{}{}
 	if genre != "" {
