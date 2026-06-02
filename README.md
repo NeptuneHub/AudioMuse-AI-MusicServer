@@ -67,8 +67,20 @@ Going in /music-server-backend/
 ```
 go mod init music-server-backend
 go mod tidy
-go build -o music-server
+CGO_ENABLED=1 go build -tags fts5 -o music-server
 ./music-server
+```
+
+> **Important:** the `-tags fts5` flag (and `CGO_ENABLED=1`) are required. They
+> compile SQLite's FTS5 full-text search module into the binary. Without them
+> the build succeeds but search silently returns no results and rescans log
+> `no such module: fts5`. The Docker image already builds with this flag.
+
+By default the database is created at `/config/music.db`. To use a different
+location, set `DATABASE_PATH`, e.g.:
+
+```
+DATABASE_PATH=/path/to/music.db ./music-server
 ```
 
 API will be reacheable on http://localhost:8080/rest/

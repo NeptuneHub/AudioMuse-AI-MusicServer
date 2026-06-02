@@ -674,6 +674,14 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                     <div className="flex gap-2 overflow-x-auto pb-2">
                         <button
                             onClick={() => {
+                                // Already on the All Songs view at the top: do nothing.
+                                // Clearing the list here would not change any effect
+                                // dependency, so no reload would fire and the list
+                                // would be left empty. (The genre filter is kept,
+                                // consistent with the other discovery tabs.)
+                                if (discoveryView === 'all' && !searchTerm && !isStarredFilter && offset === 0) {
+                                    return;
+                                }
                                 setDiscoveryView('all');
                                 setSongs([]);
                                 setAllSongs([]);
