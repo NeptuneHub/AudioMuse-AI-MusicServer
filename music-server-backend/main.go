@@ -81,6 +81,12 @@ func getEnv(key, fallback string) string {
 
 func main() {
 	var err error
+
+	// Establish the JWT signing secret before any auth-related work. Must run
+	// before the HTTP server starts so no token is ever signed/verified with an
+	// uninitialized key.
+	initJWTKey()
+
 	defaultDbPath := "/config/music.db"
 	dbPath := getEnv("DATABASE_PATH", defaultDbPath)
 

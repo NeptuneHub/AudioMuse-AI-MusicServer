@@ -83,11 +83,8 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 				c.Next()
 				return
 			} else {
-				tokenPreview := tokenString
-				if len(tokenString) > 20 {
-					tokenPreview = tokenString[:20] + "..."
-				}
-				log.Printf("ERROR: JWT parsing failed for token: %s, error: %v", tokenPreview, err)
+				// Do not log token material (not even a prefix); log only the reason.
+				log.Printf("ERROR: JWT parsing failed: %v", err)
 			}
 		}
 
@@ -170,7 +167,9 @@ func SubsonicAuthMiddleware() gin.HandlerFunc {
 						c.Next()
 						return
 					} else {
-						log.Printf("DEBUG: Token/salt check failed for user '%s' (expected: %s, got: %s)", storedUser.Username, expectedToken, token)
+						// Never log the expected or provided token: with the
+						// stored salt these reveal the user's password.
+						log.Printf("DEBUG: Token/salt check failed for user '%s'", storedUser.Username)
 					}
 				} else {
 					if err != nil {

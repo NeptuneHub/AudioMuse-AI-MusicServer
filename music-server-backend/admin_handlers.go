@@ -1098,15 +1098,43 @@ func updateSongCountForPath(path string, pathId int) {
 	}
 }
 
+// browseRoot returns the directory tree that the admin file browser is confined
+// to. Browsing is jailed under this root so the endpoint can only be used to
+// pick library folders, never to enumerate the host filesystem (e.g. /etc,
+// /Users). Override with BROWSE_ROOT; defaults to the documented /music mount.
+func browseRoot() string {
+	root := getEnv("BROWSE_ROOT", "/music")
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	return filepath.Clean(root)
+}
+
 func browseFiles(c *gin.Context) {
-	path := c.DefaultQuery("path", "/")
+	root := browseRoot()
+
+	path := c.DefaultQuery("path", root)
 	if path == "" {
-		path = "/"
+		path = root
 	}
 
 	if len(path) == 2 && path[1] == ':' {
 		path += "\\"
 	}
+
+	// Resolve to an absolute, cleaned path and confine it to the browse root.
+	// This rejects absolute escapes (e.g. /etc) and traversal (e.g. ../..).
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+		return
+	}
+	abs = filepath.Clean(abs)
+	if abs != root && !strings.HasPrefix(abs, root+string(os.PathSeparator)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Path is outside the permitted browse root"})
+		return
+	}
+	path = abs
 
 	dirEntries, err := os.ReadDir(path)
 	if err != nil {

@@ -2,8 +2,12 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -11,8 +15,30 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 )
 
-// Use a single, consistent secret key for signing and verifying tokens.
-var jwtKey = []byte("a_very_secret_and_consistent_key")
+// jwtKey is the secret used to sign and verify JWTs. It is populated once at
+// startup by initJWTKey() and must never be hardcoded: a static key shipped in
+// source lets anyone forge admin tokens.
+var jwtKey []byte
+
+// initJWTKey establishes the JWT signing secret for this process. If JWT_SECRET
+// is set in the environment it is used (allowing tokens to survive restarts and
+// to be shared across replicas); otherwise a cryptographically random key is
+// generated for this process. With a random key, existing tokens are
+// invalidated on every restart, which is the safe default.
+func initJWTKey() {
+	if secret := os.Getenv("JWT_SECRET"); secret != "" {
+		jwtKey = []byte(secret)
+		log.Println("JWT signing key loaded from JWT_SECRET environment variable.")
+		return
+	}
+
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		log.Fatalf("Failed to generate JWT signing key: %v", err)
+	}
+	jwtKey = []byte(hex.EncodeToString(buf))
+	log.Println("JWT signing key generated randomly for this process (set JWT_SECRET to persist tokens across restarts).")
+}
 
 type Claims struct {
 	UserID   int    `json:"user_id"`
