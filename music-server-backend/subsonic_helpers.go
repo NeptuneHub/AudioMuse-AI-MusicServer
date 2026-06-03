@@ -111,6 +111,22 @@ func subsonicRespond(c *gin.Context, response SubsonicResponse) {
 			bodyMap["songsByGenre"] = body
 		case *SubsonicGenres:
 			bodyMap["genres"] = body
+		case *SubsonicAlbumList:
+			bodyMap["albumList"] = body
+		case *SubsonicArtistInfo:
+			bodyMap["artistInfo"] = body
+		case *SubsonicArtistInfo2:
+			bodyMap["artistInfo2"] = body
+		case *SubsonicNowPlaying:
+			bodyMap["nowPlaying"] = body
+		case *SubsonicBookmarks:
+			bodyMap["bookmarks"] = body
+		case *SubsonicVideos:
+			bodyMap["videos"] = body
+		case *SubsonicRandomSongs:
+			bodyMap["randomSongs"] = body
+		case *SubsonicPlaylistWithSongs:
+			bodyMap["playlist"] = body
 		case nil:
 			// No body
 		default:

@@ -457,13 +457,16 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                         const idParam = filter.albumId || filter.playlistId;
                         if (idParam) {
                             const data = await subsonicFetch(endpoint, { id: idParam });
-                            const songContainer = data.album || data.directory;
+                            // getAlbum -> album.song; getPlaylist -> playlist.entry
+                            // (directory.* kept as a backward-compatible fallback).
+                            const songContainer = data.album || data.playlist || data.directory;
 
                             if (filter.playlistId && data.playlist) {
                                 setPlaylistOwner(data.playlist.owner || null);
                             }
 
-                            if (songContainer?.song) songList = Array.isArray(songContainer.song) ? songContainer.song : [songContainer.song];
+                            const items = songContainer?.song || songContainer?.entry;
+                            if (items) songList = Array.isArray(items) ? items : [items];
                         }
                     }
 
@@ -884,7 +887,9 @@ export function Songs({ credentials, filter, onPlay, onTogglePlayPause, onAddToQ
                             setDiscoveryView('all'); // Switch to "All Songs" tab
 
                             const data = await getStarredSongs();
-                            const starredSongs = data.starred2?.song;
+                            // getStarred returns the <starred> element (getStarred2 returns <starred2>);
+                            // fall back to starred2 for backward compatibility.
+                            const starredSongs = (data.starred ?? data.starred2)?.song;
 
                             // Handle empty/missing starred songs properly
                             let songList = [];

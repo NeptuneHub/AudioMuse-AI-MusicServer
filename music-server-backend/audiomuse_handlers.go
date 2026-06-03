@@ -18,19 +18,10 @@ func getSongsByIDs(ids []string) ([]SubsonicSong, error) {
 		return nil, err
 	}
 
-	// Convert to SubsonicSong format
+	// Convert to spec-aligned SubsonicSong (Child) format
 	var songs []SubsonicSong
 	for _, result := range results {
-		songs = append(songs, SubsonicSong{
-			ID:         result.ID,
-			Title:      result.Title,
-			Artist:     result.Artist,
-			Album:      result.Album,
-			Path:       result.Path,
-			Duration:   result.Duration,
-			PlayCount:  result.PlayCount,
-			LastPlayed: result.LastPlayed,
-		})
+		songs = append(songs, buildSubsonicSong(result))
 	}
 
 	return songs, nil
@@ -371,10 +362,10 @@ func semanticSearchHandler(c *gin.Context) {
 		Query   string `json:"query"`
 		Count   int    `json:"count"`
 		Results []struct {
-			ItemID            string  `json:"item_id"`
-			Title             string  `json:"title"`
-			Author            string  `json:"author"`
-			SimilarityScore   float64 `json:"similarity_score"`
+			ItemID          string  `json:"item_id"`
+			Title           string  `json:"title"`
+			Author          string  `json:"author"`
+			SimilarityScore float64 `json:"similarity_score"`
 		} `json:"results"`
 	}
 

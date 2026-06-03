@@ -22,6 +22,9 @@ func ensureSongSearchIndexes(db *sql.DB) {
 	indexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_songs_album_albumpath ON songs (album, album_path)`,
 		`CREATE INDEX IF NOT EXISTS idx_songs_album_path ON songs (album_path)`,
+		// (album_path, id) lets the per-song albumId subquery resolve MIN(id)
+		// as an index seek instead of scanning each album's rows.
+		`CREATE INDEX IF NOT EXISTS idx_songs_albumpath_id ON songs (album_path, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs (artist)`,
 		`CREATE INDEX IF NOT EXISTS idx_songs_album_artist ON songs (album_artist)`,
 		`CREATE INDEX IF NOT EXISTS idx_songs_genre ON songs (genre)`,
@@ -477,6 +480,21 @@ func migrateDB() error {
 
 	// Add album_path column for grouping (match fresh install)
 	maybeAddColumn(&columnsAdded, db, "songs", "album_path", "TEXT DEFAULT ''")
+
+	// OpenSubsonic Child metadata extracted from tags at scan time. Defaults of
+	// 0 mean "unknown" and are omitted from responses (omitempty).
+	maybeAddColumn(&columnsAdded, db, "songs", "track", "INTEGER DEFAULT 0")
+	maybeAddColumn(&columnsAdded, db, "songs", "year", "INTEGER DEFAULT 0")
+	maybeAddColumn(&columnsAdded, db, "songs", "disc_number", "INTEGER DEFAULT 0")
+
+	// OpenSubsonic Child audio properties captured from a single ffprobe pass at
+	// scan time (size also via os.Stat). Defaults of 0 mean "unknown" (omitted).
+	maybeAddColumn(&columnsAdded, db, "songs", "size", "INTEGER DEFAULT 0")
+	maybeAddColumn(&columnsAdded, db, "songs", "bitrate", "INTEGER DEFAULT 0")
+	maybeAddColumn(&columnsAdded, db, "songs", "sample_rate", "INTEGER DEFAULT 0")
+	maybeAddColumn(&columnsAdded, db, "songs", "channels", "INTEGER DEFAULT 0")
+	maybeAddColumn(&columnsAdded, db, "songs", "bit_depth", "INTEGER DEFAULT 0")
+	maybeAddColumn(&columnsAdded, db, "songs", "comment", "TEXT DEFAULT ''")
 
 	log.Printf("migrateDB: summary: columns_added=%d songs_migrated=%d date_added_backfilled=%d date_updated_backfilled=%d", columnsAdded, songsMigrated, dateAddedBackfilled, dateUpdatedBackfilled)
 	log.Println("migrateDB: completed migrations (idempotent)")

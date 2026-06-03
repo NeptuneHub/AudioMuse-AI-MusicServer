@@ -18,7 +18,7 @@ import (
 
 // readFileMetadata attempts to read tags from an audio file. If tags aren't available or readable,
 // it returns empty strings so that callers can fallback to filename/path parsing.
-func readFileMetadata(path string) (title, artist, album, albumArtist, genre string) {
+func readFileMetadata(path string) (title, artist, album, albumArtist, genre, comment string, track, year, disc int) {
 	file, err := os.Open(path)
 	if err != nil {
 		log.Printf("Error opening file for metadata %s: %v", path, err)
@@ -35,6 +35,11 @@ func readFileMetadata(path string) (title, artist, album, albumArtist, genre str
 		album = meta.Album()
 		albumArtist = meta.AlbumArtist()
 		genre = meta.Genre()
+		comment = meta.Comment()
+		// Track/disc are returned as (number, total); we only keep the number.
+		track, _ = meta.Track()
+		disc, _ = meta.Disc()
+		year = meta.Year()
 	}
 
 	// Fallbacks (centralized): title <- filename, artist <- path, album <- path
@@ -369,14 +374,15 @@ func processPath(scanPath string) int64 {
 				}
 				defer file.Close()
 
-				title, artist, album, albumArtist, genre := readFileMetadata(path)
+				title, artist, album, albumArtist, genre, comment, track, year, disc := readFileMetadata(path)
 
 				currentTime := time.Now().Format(time.RFC3339)
 				if genre == "" {
 					genre = "Unknown"
 				}
 				// Get duration using ffprobe
-				duration := getDuration(path)
+				audioProps := getAudioProperties(path)
+				duration := audioProps.Duration
 
 				// Check if song already exists (by path) to reuse UUID
 				existingID, err := GetSongIDByPath(db, path)
@@ -406,8 +412,8 @@ func processPath(scanPath string) int64 {
 					album = "Unknown Album"
 				}
 
-				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, track, year, disc_number, size, bitrate, sample_rate, channels, bit_depth, comment, date_added, date_updated, cancelled) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
 						artist=excluded.artist, 
@@ -416,10 +422,19 @@ func processPath(scanPath string) int64 {
 						album_path=excluded.album_path, 
 						genre=excluded.genre,
 						duration=excluded.duration,
+						track=excluded.track,
+						year=excluded.year,
+						disc_number=excluded.disc_number,
+						size=excluded.size,
+						bitrate=excluded.bitrate,
+						sample_rate=excluded.sample_rate,
+						channels=excluded.channels,
+						bit_depth=excluded.bit_depth,
+						comment=excluded.comment,
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated,
 						cancelled=0`,
-					songID, title, artist, album, chooseAlbumArtist(albumArtist, artist), path, albumPath, genre, duration, currentTime, currentTime)
+					songID, title, artist, album, chooseAlbumArtist(albumArtist, artist), path, albumPath, genre, duration, track, year, disc, audioProps.Size, audioProps.BitRate, audioProps.SamplingRate, audioProps.ChannelCount, audioProps.BitDepth, comment, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -472,14 +487,15 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 				}
 				defer file.Close()
 
-				title, artist, album, albumArtist, genre := readFileMetadata(path)
+				title, artist, album, albumArtist, genre, comment, track, year, disc := readFileMetadata(path)
 
 				currentTime := time.Now().Format(time.RFC3339)
 				if genre == "" {
 					genre = "Unknown"
 				}
 				// Get duration using ffprobe
-				duration := getDuration(path)
+				audioProps := getAudioProperties(path)
+				duration := audioProps.Duration
 
 				// Check if song already exists (by path) to reuse UUID
 				existingID, err := GetSongIDByPath(db, path)
@@ -507,8 +523,8 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 					album = "Unknown Album"
 				}
 
-				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+				res, err := db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, track, year, disc_number, size, bitrate, sample_rate, channels, bit_depth, comment, date_added, date_updated, cancelled) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 					ON CONFLICT(path) DO UPDATE SET 
 						title=excluded.title, 
 						artist=excluded.artist, 
@@ -517,10 +533,19 @@ func processPathWithRunningTotal(scanPath string, totalSongsAdded *int64) {
 						album_path=excluded.album_path, 
 						genre=excluded.genre,
 						duration=excluded.duration,
+						track=excluded.track,
+						year=excluded.year,
+						disc_number=excluded.disc_number,
+						size=excluded.size,
+						bitrate=excluded.bitrate,
+						sample_rate=excluded.sample_rate,
+						channels=excluded.channels,
+						bit_depth=excluded.bit_depth,
+						comment=excluded.comment,
 						date_added=COALESCE(songs.date_added, excluded.date_added),
 						date_updated=excluded.date_updated,
 						cancelled=0`,
-					songID, title, artist, album, chooseAlbumArtist(albumArtist, artist), path, albumPath, genre, duration, currentTime, currentTime)
+					songID, title, artist, album, chooseAlbumArtist(albumArtist, artist), path, albumPath, genre, duration, track, year, disc, audioProps.Size, audioProps.BitRate, audioProps.SamplingRate, audioProps.ChannelCount, audioProps.BitDepth, comment, currentTime, currentTime)
 				if err != nil {
 					log.Printf("Error upserting song from %s into DB: %v", path, err)
 					return nil
@@ -570,7 +595,7 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				(*scannedPaths)[path] = true
 
 				// Read metadata with centralized fallbacks
-				title, artist, album, albumArtist, genre := readFileMetadata(path)
+				title, artist, album, albumArtist, genre, comment, track, year, disc := readFileMetadata(path)
 
 				currentTime := time.Now().Format(time.RFC3339)
 				if genre == "" {
@@ -606,7 +631,8 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				// Ensure album artist is canonicalized to match artist
 				normalizeArtistAndAlbumArtist(&artist, &albumArtist)
 				// Get duration using ffprobe
-				duration := getDuration(path)
+				audioProps := getAudioProperties(path)
+				duration := audioProps.Duration
 
 				// DEBUG: Log the first few songs being inserted
 				if songsAdded < 3 {
@@ -665,8 +691,8 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 				var res sql.Result
 				if shouldComputeWaveform && waveformPeaks != "" {
 					// NEW song: Insert with waveform
-					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, waveform_peaks, cancelled) 
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, track, year, disc_number, size, bitrate, sample_rate, channels, bit_depth, comment, date_added, date_updated, waveform_peaks, cancelled) 
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 						ON CONFLICT(path) DO UPDATE SET 
 							title=excluded.title, 
 							artist=excluded.artist, 
@@ -675,15 +701,24 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 							album_path=excluded.album_path, 
 							genre=excluded.genre,
 							duration=excluded.duration,
+							track=excluded.track,
+							year=excluded.year,
+							disc_number=excluded.disc_number,
+							size=excluded.size,
+							bitrate=excluded.bitrate,
+							sample_rate=excluded.sample_rate,
+							channels=excluded.channels,
+							bit_depth=excluded.bit_depth,
+							comment=excluded.comment,
 							date_added=COALESCE(songs.date_added, excluded.date_added),
 							date_updated=excluded.date_updated,
 							waveform_peaks=excluded.waveform_peaks,
 							cancelled=0`,
-						songID, title, artist, album, albumArtist, path, albumPath, genre, duration, currentTime, currentTime, waveformPeaks)
+						songID, title, artist, album, albumArtist, path, albumPath, genre, duration, track, year, disc, audioProps.Size, audioProps.BitRate, audioProps.SamplingRate, audioProps.ChannelCount, audioProps.BitDepth, comment, currentTime, currentTime, waveformPeaks)
 				} else {
 					// EXISTING song (rescan) or new song without waveform: Preserve existing waveform
-					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, track, year, disc_number, size, bitrate, sample_rate, channels, bit_depth, comment, date_added, date_updated, cancelled) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 						ON CONFLICT(path) DO UPDATE SET 
 							title=excluded.title, 
 							artist=excluded.artist, 
@@ -691,10 +726,19 @@ func processPathWithTracking(scanPath string, scannedPaths *map[string]bool) int
 							album_path=excluded.album_path, 
 							genre=excluded.genre,
 							duration=excluded.duration,
+							track=excluded.track,
+							year=excluded.year,
+							disc_number=excluded.disc_number,
+							size=excluded.size,
+							bitrate=excluded.bitrate,
+							sample_rate=excluded.sample_rate,
+							channels=excluded.channels,
+							bit_depth=excluded.bit_depth,
+							comment=excluded.comment,
 							date_added=COALESCE(songs.date_added, excluded.date_added),
 							date_updated=excluded.date_updated,
 							cancelled=0`,
-						songID, title, artist, album, albumArtist, path, albumPath, genre, duration, currentTime, currentTime)
+						songID, title, artist, album, albumArtist, path, albumPath, genre, duration, track, year, disc, audioProps.Size, audioProps.BitRate, audioProps.SamplingRate, audioProps.ChannelCount, audioProps.BitDepth, comment, currentTime, currentTime)
 				}
 
 				if err != nil {
@@ -756,7 +800,7 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 				(*scannedPaths)[path] = true
 
 				// Read metadata with centralized fallbacks
-				title, artist, album, albumArtist, genre := readFileMetadata(path)
+				title, artist, album, albumArtist, genre, comment, track, year, disc := readFileMetadata(path)
 
 				// Fallback to filename parsing if metadata is empty (like Navidrome does)
 				// Priority: 1. Metadata tags, 2. Filename parsing, 3. Folder structure
@@ -793,7 +837,8 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 
 				// Timestamps and duration for DB
 				currentTime := time.Now().Format(time.RFC3339)
-				duration := getDuration(path)
+				audioProps := getAudioProperties(path)
+				duration := audioProps.Duration
 
 				// Check if song already exists (by path) to reuse UUID
 				existingID, err := GetSongIDByPath(db, path)
@@ -834,8 +879,8 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 				var res sql.Result
 				if shouldComputeWaveform && waveformPeaks != "" {
 					// NEW song: Insert with waveform
-					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, waveform_peaks, cancelled) 
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, track, year, disc_number, size, bitrate, sample_rate, channels, bit_depth, comment, date_added, date_updated, waveform_peaks, cancelled) 
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 						ON CONFLICT(path) DO UPDATE SET 
 							title=excluded.title, 
 							artist=excluded.artist, 
@@ -844,15 +889,24 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 							album_path=excluded.album_path, 
 							genre=excluded.genre,
 							duration=excluded.duration,
+							track=excluded.track,
+							year=excluded.year,
+							disc_number=excluded.disc_number,
+							size=excluded.size,
+							bitrate=excluded.bitrate,
+							sample_rate=excluded.sample_rate,
+							channels=excluded.channels,
+							bit_depth=excluded.bit_depth,
+							comment=excluded.comment,
 							date_added=COALESCE(songs.date_added, excluded.date_added),
 							date_updated=excluded.date_updated,
 							waveform_peaks=excluded.waveform_peaks,
 							cancelled=0`,
-						songID, title, artist, album, albumArtist, path, albumPath, genre, duration, currentTime, currentTime, waveformPeaks)
+						songID, title, artist, album, albumArtist, path, albumPath, genre, duration, track, year, disc, audioProps.Size, audioProps.BitRate, audioProps.SamplingRate, audioProps.ChannelCount, audioProps.BitDepth, comment, currentTime, currentTime, waveformPeaks)
 				} else {
 					// EXISTING song (rescan) or new song without waveform: Preserve existing waveform
-					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, date_added, date_updated, cancelled) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+					res, err = db.Exec(`INSERT INTO songs (id, title, artist, album, album_artist, path, album_path, genre, duration, track, year, disc_number, size, bitrate, sample_rate, channels, bit_depth, comment, date_added, date_updated, cancelled) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 						ON CONFLICT(path) DO UPDATE SET 
 							title=excluded.title, 
 							artist=excluded.artist, 
@@ -860,10 +914,19 @@ func processPathWithRunningTotalAndTracking(scanPath string, totalSongsAdded *in
 							album_path=excluded.album_path, 
 							genre=excluded.genre,
 							duration=excluded.duration,
+							track=excluded.track,
+							year=excluded.year,
+							disc_number=excluded.disc_number,
+							size=excluded.size,
+							bitrate=excluded.bitrate,
+							sample_rate=excluded.sample_rate,
+							channels=excluded.channels,
+							bit_depth=excluded.bit_depth,
+							comment=excluded.comment,
 							date_added=COALESCE(songs.date_added, excluded.date_added),
 							date_updated=excluded.date_updated,
 							cancelled=0`,
-						songID, title, artist, album, albumArtist, path, albumPath, genre, duration, currentTime, currentTime)
+						songID, title, artist, album, albumArtist, path, albumPath, genre, duration, track, year, disc, audioProps.Size, audioProps.BitRate, audioProps.SamplingRate, audioProps.ChannelCount, audioProps.BitDepth, comment, currentTime, currentTime)
 				}
 
 				if err != nil {

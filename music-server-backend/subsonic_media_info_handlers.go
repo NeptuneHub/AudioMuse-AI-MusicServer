@@ -44,18 +44,7 @@ func subsonicGetTopSongs(c *gin.Context) {
 
 	var songs []SubsonicSong
 	for _, result := range results {
-		song := SubsonicSong{
-			ID:         result.ID,
-			Title:      result.Title,
-			Artist:     result.Artist,
-			ArtistID:   GenerateArtistID(result.Artist),
-			Album:      result.Album,
-			Genre:      result.Genre,
-			CoverArt:   result.ID,
-			PlayCount:  result.PlayCount,
-			LastPlayed: result.LastPlayed,
-		}
-		songs = append(songs, song)
+		songs = append(songs, buildSubsonicSong(result))
 	}
 
 	// Ensure songs is never nil for JSON marshaling
@@ -93,19 +82,7 @@ func subsonicGetSimilarSongs2(c *gin.Context) {
 
 	var songs []SubsonicSong
 	for _, result := range results {
-		song := SubsonicSong{
-			ID:         result.ID,
-			Title:      result.Title,
-			Artist:     result.Artist,
-			ArtistID:   GenerateArtistID(result.Artist),
-			Album:      result.Album,
-			Genre:      result.Genre,
-			CoverArt:   result.ID,
-			PlayCount:  result.PlayCount,
-			Duration:   result.Duration,
-			LastPlayed: result.LastPlayed,
-		}
-		songs = append(songs, song)
+		songs = append(songs, buildSubsonicSong(result))
 	}
 
 	// Ensure songs is never nil for JSON marshaling

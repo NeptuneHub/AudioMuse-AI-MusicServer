@@ -22,18 +22,18 @@ type ArtistQueryOptions struct {
 
 // AlbumQueryOptions defines options for album queries
 type AlbumQueryOptions struct {
-	Artist         string // Filter by artist
-	SearchTerm     string // Optional search filter (LIKE)
-	IncludeCounts  bool   // Include song_count
-	GroupByPath    bool   // Group by album_path + album
-	Limit          int    // Limit results (0 = no limit)
-	Offset         int    // Offset for pagination
-	OrderBy        string // Order clause (default: "album COLLATE NOCASE")
-	IncludeAlbumID bool   // Include MIN(id) as albumId
-	IncludeGenre   bool   // Include genre
-	IncludeArtist  bool   // Include effective artist
-	IncludeDuration bool  // Include SUM(duration) as total_duration (requires GroupByPath)
-	IncludeCreated  bool  // Include MIN(date_added) as created (requires GroupByPath)
+	Artist          string // Filter by artist
+	SearchTerm      string // Optional search filter (LIKE)
+	IncludeCounts   bool   // Include song_count
+	GroupByPath     bool   // Group by album_path + album
+	Limit           int    // Limit results (0 = no limit)
+	Offset          int    // Offset for pagination
+	OrderBy         string // Order clause (default: "album COLLATE NOCASE")
+	IncludeAlbumID  bool   // Include MIN(id) as albumId
+	IncludeGenre    bool   // Include genre
+	IncludeArtist   bool   // Include effective artist
+	IncludeDuration bool   // Include SUM(duration) as total_duration (requires GroupByPath)
+	IncludeCreated  bool   // Include MIN(date_added) as created (requires GroupByPath)
 }
 
 // SongQueryOptions defines options for song queries
@@ -87,6 +87,21 @@ type SongResult struct {
 	Genre              string
 	Starred            bool
 	TranscodingEnabled bool
+	// Fields below carry the data needed to build a fully spec-aligned
+	// OpenSubsonic Child object (see buildSubsonicSong).
+	AlbumArtist  string // album_artist tag
+	AlbumID      string // representative album id (MIN(id) over album_path)
+	Created      string // date_added (RFC3339)
+	Track        int    // track number (0 = unknown)
+	Year         int    // release year (0 = unknown)
+	DiscNumber   int    // disc number (0 = unknown)
+	Size         int64  // file size in bytes (0 = unknown)
+	BitRate      int    // kbps (0 = unknown)
+	SamplingRate int    // Hz (0 = unknown)
+	ChannelCount int    // channels (0 = unknown)
+	BitDepth     int    // bits per sample (0 = unknown)
+	Comment      string // free-text comment tag
+	ReplayGain   *SubsonicReplayGain
 }
 
 // ============================================================================
@@ -510,8 +525,11 @@ func QuerySongs(db *sql.DB, opts SongQueryOptions) ([]SongResult, error) {
 	var query strings.Builder
 	var args []interface{}
 
-	// Build SELECT clause
-	query.WriteString(`SELECT s.id, s.title, s.artist, s.album, s.path, s.duration, s.play_count, s.last_played`)
+	// Build SELECT clause. The fixed columns after last_played carry the data
+	// needed for a fully spec-aligned OpenSubsonic Child object. The album_id
+	// correlated subquery resolves each song's representative album id via the
+	// idx_songs_albumpath_id index (album_path, id) so MIN(id) is an index seek.
+	query.WriteString(`SELECT s.id, s.title, s.artist, s.album, s.path, s.duration, s.play_count, s.last_played, COALESCE(s.album_artist, ''), COALESCE(s.date_added, ''), s.replaygain_track_gain, s.replaygain_track_peak, s.replaygain_album_gain, s.replaygain_album_peak, (SELECT MIN(s2.id) FROM songs s2 WHERE s2.album_path = s.album_path AND s2.cancelled = 0) AS album_id, COALESCE(s.track, 0), COALESCE(s.year, 0), COALESCE(s.disc_number, 0), COALESCE(s.size, 0), COALESCE(s.bitrate, 0), COALESCE(s.sample_rate, 0), COALESCE(s.channels, 0), COALESCE(s.bit_depth, 0), COALESCE(s.comment, '')`)
 
 	if opts.IncludeGenre {
 		query.WriteString(`, COALESCE(s.genre, '') as genre`)
@@ -634,10 +652,18 @@ func QuerySongs(db *sql.DB, opts SongQueryOptions) ([]SongResult, error) {
 		var transInt sql.NullInt64
 		var durationInt sql.NullInt64
 		var playCountInt sql.NullInt64
+		var albumArtist sql.NullString
+		var created sql.NullString
+		var rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak sql.NullFloat64
+		var albumID sql.NullString
+		var trackInt, yearInt, discInt sql.NullInt64
 
 		scanArgs := []interface{}{
 			&result.ID, &title, &artist, &album,
 			&path, &durationInt, &playCountInt, &lastPlayed,
+			&albumArtist, &created, &rgTrackGain, &rgTrackPeak, &rgAlbumGain, &rgAlbumPeak, &albumID,
+			&trackInt, &yearInt, &discInt,
+			&result.Size, &result.BitRate, &result.SamplingRate, &result.ChannelCount, &result.BitDepth, &result.Comment,
 		}
 		if opts.IncludeGenre {
 			scanArgs = append(scanArgs, &genre)
@@ -679,6 +705,19 @@ func QuerySongs(db *sql.DB, opts SongQueryOptions) ([]SongResult, error) {
 		if genre.Valid {
 			result.Genre = genre.String
 		}
+		if albumArtist.Valid {
+			result.AlbumArtist = albumArtist.String
+		}
+		if created.Valid {
+			result.Created = created.String
+		}
+		if albumID.Valid {
+			result.AlbumID = albumID.String
+		}
+		result.Track = int(trackInt.Int64)
+		result.Year = int(yearInt.Int64)
+		result.DiscNumber = int(discInt.Int64)
+		result.ReplayGain = newReplayGain(rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak)
 
 		if opts.IncludeStarred {
 			result.Starred = (starredInt.Valid && starredInt.Int64 == 1)
@@ -743,16 +782,22 @@ func QuerySimilarSongs(db *sql.DB, songID string, limit int) ([]SongResult, erro
 		return nil, err
 	}
 
-	// Build query for similar songs
+	// Build query for similar songs. Selects the same spec-aligned columns as
+	// QuerySongs so the resulting Child objects are fully populated.
 	query := `
-		SELECT id, title, artist, album, path, play_count, last_played, genre, duration
-		FROM songs
-		WHERE cancelled = 0 AND id != ?
-			AND (artist = ? OR genre = ?)
+		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''), s.duration,
+			COALESCE(s.album_artist, ''), COALESCE(s.date_added, ''),
+			s.replaygain_track_gain, s.replaygain_track_peak, s.replaygain_album_gain, s.replaygain_album_peak,
+			(SELECT MIN(s2.id) FROM songs s2 WHERE s2.album_path = s.album_path AND s2.cancelled = 0) AS album_id,
+			COALESCE(s.track, 0), COALESCE(s.year, 0), COALESCE(s.disc_number, 0),
+			COALESCE(s.size, 0), COALESCE(s.bitrate, 0), COALESCE(s.sample_rate, 0), COALESCE(s.channels, 0), COALESCE(s.bit_depth, 0), COALESCE(s.comment, '')
+		FROM songs s
+		WHERE s.cancelled = 0 AND s.id != ?
+			AND (s.artist = ? OR s.genre = ?)
 		ORDER BY
-			CASE WHEN artist = ? AND genre = ? THEN 0
-				 WHEN artist = ? THEN 1
-				 WHEN genre = ? THEN 2
+			CASE WHEN s.artist = ? AND s.genre = ? THEN 0
+				 WHEN s.artist = ? THEN 1
+				 WHEN s.genre = ? THEN 2
 				 ELSE 3 END,
 			RANDOM()
 		LIMIT ?
@@ -769,9 +814,15 @@ func QuerySimilarSongs(db *sql.DB, songID string, limit int) ([]SongResult, erro
 		var result SongResult
 		var lastPlayed sql.NullString
 		var genreVal sql.NullString
+		var albumArtist, created, albumID sql.NullString
+		var rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak sql.NullFloat64
+		var trackInt, yearInt, discInt sql.NullInt64
 
 		if err := rows.Scan(&result.ID, &result.Title, &result.Artist, &result.Album,
-			&result.Path, &result.PlayCount, &lastPlayed, &genreVal, &result.Duration); err != nil {
+			&result.Path, &result.PlayCount, &lastPlayed, &genreVal, &result.Duration,
+			&albumArtist, &created, &rgTrackGain, &rgTrackPeak, &rgAlbumGain, &rgAlbumPeak, &albumID,
+			&trackInt, &yearInt, &discInt,
+			&result.Size, &result.BitRate, &result.SamplingRate, &result.ChannelCount, &result.BitDepth, &result.Comment); err != nil {
 			continue
 		}
 
@@ -781,6 +832,19 @@ func QuerySimilarSongs(db *sql.DB, songID string, limit int) ([]SongResult, erro
 		if genreVal.Valid {
 			result.Genre = genreVal.String
 		}
+		if albumArtist.Valid {
+			result.AlbumArtist = albumArtist.String
+		}
+		if created.Valid {
+			result.Created = created.String
+		}
+		if albumID.Valid {
+			result.AlbumID = albumID.String
+		}
+		result.Track = int(trackInt.Int64)
+		result.Year = int(yearInt.Int64)
+		result.DiscNumber = int(discInt.Int64)
+		result.ReplayGain = newReplayGain(rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak)
 
 		results = append(results, result)
 	}
@@ -1188,9 +1252,14 @@ func QuerySongsByIDs(db *sql.DB, songIDs []string) ([]SongResult, error) {
 
 	placeholders := strings.Repeat("?,", len(songIDs)-1) + "?"
 	query := fmt.Sprintf(`
-		SELECT id, title, artist, album, path, play_count, last_played, duration
-		FROM songs
-		WHERE id IN (%s)
+		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, s.duration,
+			COALESCE(s.genre, ''), COALESCE(s.album_artist, ''), COALESCE(s.date_added, ''),
+			s.replaygain_track_gain, s.replaygain_track_peak, s.replaygain_album_gain, s.replaygain_album_peak,
+			(SELECT MIN(s2.id) FROM songs s2 WHERE s2.album_path = s.album_path AND s2.cancelled = 0) AS album_id,
+			COALESCE(s.track, 0), COALESCE(s.year, 0), COALESCE(s.disc_number, 0),
+			COALESCE(s.size, 0), COALESCE(s.bitrate, 0), COALESCE(s.sample_rate, 0), COALESCE(s.channels, 0), COALESCE(s.bit_depth, 0), COALESCE(s.comment, '')
+		FROM songs s
+		WHERE s.id IN (%s)
 	`, placeholders)
 
 	args := make([]interface{}, len(songIDs))
@@ -1208,15 +1277,37 @@ func QuerySongsByIDs(db *sql.DB, songIDs []string) ([]SongResult, error) {
 	for rows.Next() {
 		var result SongResult
 		var lastPlayed sql.NullString
+		var genreVal, albumArtist, created, albumID sql.NullString
+		var rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak sql.NullFloat64
+		var trackInt, yearInt, discInt sql.NullInt64
 
 		if err := rows.Scan(&result.ID, &result.Title, &result.Artist, &result.Album,
-			&result.Path, &result.PlayCount, &lastPlayed, &result.Duration); err != nil {
+			&result.Path, &result.PlayCount, &lastPlayed, &result.Duration,
+			&genreVal, &albumArtist, &created, &rgTrackGain, &rgTrackPeak, &rgAlbumGain, &rgAlbumPeak, &albumID,
+			&trackInt, &yearInt, &discInt,
+			&result.Size, &result.BitRate, &result.SamplingRate, &result.ChannelCount, &result.BitDepth, &result.Comment); err != nil {
 			continue
 		}
 
 		if lastPlayed.Valid {
 			result.LastPlayed = lastPlayed.String
 		}
+		if genreVal.Valid {
+			result.Genre = genreVal.String
+		}
+		if albumArtist.Valid {
+			result.AlbumArtist = albumArtist.String
+		}
+		if created.Valid {
+			result.Created = created.String
+		}
+		if albumID.Valid {
+			result.AlbumID = albumID.String
+		}
+		result.Track = int(trackInt.Int64)
+		result.Year = int(yearInt.Int64)
+		result.DiscNumber = int(discInt.Int64)
+		result.ReplayGain = newReplayGain(rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak)
 
 		results = append(results, result)
 	}

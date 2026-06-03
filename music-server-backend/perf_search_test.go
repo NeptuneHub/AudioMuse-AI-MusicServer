@@ -27,6 +27,9 @@ func buildLargeDB(tb testing.TB, n int) *sql.DB {
 		path TEXT UNIQUE NOT NULL, play_count INTEGER DEFAULT 0, last_played TEXT,
 		date_added TEXT, date_updated TEXT, starred INTEGER DEFAULT 0,
 		genre TEXT DEFAULT '', album_path TEXT DEFAULT '', duration INTEGER DEFAULT 0,
+		replaygain_track_gain REAL, replaygain_track_peak REAL,
+		replaygain_album_gain REAL, replaygain_album_peak REAL,
+		track INTEGER DEFAULT 0, year INTEGER DEFAULT 0, disc_number INTEGER DEFAULT 0, size INTEGER DEFAULT 0, bitrate INTEGER DEFAULT 0, sample_rate INTEGER DEFAULT 0, channels INTEGER DEFAULT 0, bit_depth INTEGER DEFAULT 0, comment TEXT DEFAULT '',
 		cancelled INTEGER NOT NULL DEFAULT 0
 	);`
 	if _, err := d.Exec(schema); err != nil {

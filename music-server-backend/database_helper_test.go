@@ -29,6 +29,19 @@ func setupTestDB(t *testing.T) *sql.DB {
 		play_count INTEGER,
 		last_played TEXT,
 		date_added TEXT,
+		replaygain_track_gain REAL,
+		replaygain_track_peak REAL,
+		replaygain_album_gain REAL,
+		replaygain_album_peak REAL,
+		track INTEGER DEFAULT 0,
+		year INTEGER DEFAULT 0,
+		disc_number INTEGER DEFAULT 0,
+		size INTEGER DEFAULT 0,
+		bitrate INTEGER DEFAULT 0,
+		sample_rate INTEGER DEFAULT 0,
+		channels INTEGER DEFAULT 0,
+		bit_depth INTEGER DEFAULT 0,
+		comment TEXT DEFAULT '',
 		cancelled INTEGER DEFAULT 0
 	);
 	`

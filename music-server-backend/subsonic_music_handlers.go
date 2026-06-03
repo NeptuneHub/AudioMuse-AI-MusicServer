@@ -60,6 +60,70 @@ func getDuration(filePath string) int {
 	return int(durationFloat + 0.5)
 }
 
+// audioProperties holds the OpenSubsonic Child audio metadata captured during a
+// scan. All numeric fields are 0 when unknown (omitted from responses).
+type audioProperties struct {
+	Duration     int   // seconds
+	Size         int64 // bytes
+	BitRate      int   // kbps
+	SamplingRate int   // Hz
+	ChannelCount int
+	BitDepth     int
+}
+
+// getAudioProperties probes a file's audio properties with a single ffprobe call
+// (plus an os.Stat for size), replacing the bare getDuration probe during scans
+// so we capture bitRate/samplingRate/channelCount/bitDepth without a second pass.
+func getAudioProperties(filePath string) audioProperties {
+	props := audioProperties{}
+	if fi, err := os.Stat(filePath); err == nil {
+		props.Size = fi.Size()
+	}
+
+	cmd := exec.Command("ffprobe",
+		"-v", "error",
+		"-select_streams", "a:0",
+		"-show_entries", "format=duration,bit_rate:stream=sample_rate,channels,bits_per_raw_sample",
+		"-of", "default=noprint_wrappers=1",
+		filePath)
+	output, err := cmd.Output()
+	if err != nil {
+		log.Printf("⚠️  FFprobe properties failed for %s: %v", filepath.Base(filePath), err)
+		return props
+	}
+
+	for _, line := range strings.Split(string(output), "\n") {
+		kv := strings.SplitN(strings.TrimSpace(line), "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		val := strings.TrimSpace(kv[1])
+		switch kv[0] {
+		case "duration":
+			if f, e := strconv.ParseFloat(val, 64); e == nil {
+				props.Duration = int(f + 0.5)
+			}
+		case "bit_rate":
+			if n, e := strconv.Atoi(val); e == nil {
+				props.BitRate = n / 1000 // bps -> kbps
+			}
+		case "sample_rate":
+			if n, e := strconv.Atoi(val); e == nil {
+				props.SamplingRate = n
+			}
+		case "channels":
+			if n, e := strconv.Atoi(val); e == nil {
+				props.ChannelCount = n
+			}
+		case "bits_per_raw_sample":
+			if n, e := strconv.Atoi(val); e == nil {
+				props.BitDepth = n
+			}
+		}
+	}
+	return props
+}
+
 // extractTitleFromFilename extracts title from filename with proper priority
 // Priority: 1. Metadata, 2. Filename parsing, 3. Folder structure
 func extractTitleFromFilename(filePath string) string {
@@ -951,9 +1015,10 @@ func subsonicGetArtists(c *gin.Context) {
 	subsonicRespond(c, response)
 }
 
-func subsonicGetAlbumList2(c *gin.Context) {
-	_ = c.MustGet("user") // Auth is handled by middleware
-
+// fetchAlbumList resolves the album list for getAlbumList/getAlbumList2 from the
+// derived albums table (display artist + counts precomputed). On a DB error it
+// responds with a Subsonic error and returns ok=false.
+func fetchAlbumList(c *gin.Context) (resultAlbums []SubsonicAlbum, ok bool) {
 	// Get parameters
 	sizeParam := c.DefaultQuery("size", "500")
 	offsetParam := c.DefaultQuery("offset", "0")
@@ -1017,12 +1082,11 @@ func subsonicGetAlbumList2(c *gin.Context) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM albums "+whereSQL, countArgs...).Scan(&totalAlbums); err != nil {
 		log.Printf("Error counting albums for pagination: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying albums."))
-		return
+		return nil, false
 	}
 
 	if offset >= totalAlbums {
-		subsonicRespond(c, newSubsonicResponse(&SubsonicAlbumList2{Albums: []SubsonicAlbum{}}))
-		return
+		return []SubsonicAlbum{}, true
 	}
 
 	query := fmt.Sprintf(`SELECT id, name, artist, artist_id, COALESCE(genre,''), song_count, total_duration, COALESCE(min_date_added,'')
@@ -1032,7 +1096,7 @@ func subsonicGetAlbumList2(c *gin.Context) {
 	if err != nil {
 		log.Printf("Error querying albums: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error querying albums."))
-		return
+		return nil, false
 	}
 	defer rows.Close()
 
@@ -1053,14 +1117,47 @@ func subsonicGetAlbumList2(c *gin.Context) {
 		}
 		seen[key] = true
 		album.CoverArt = album.ID
+		decorateAlbum(&album)
 		albums = append(albums, album)
 	}
 
-	log.Printf("getAlbumList2: Returning %d albums (total=%d)", len(albums), totalAlbums)
+	log.Printf("fetchAlbumList: Returning %d albums (total=%d)", len(albums), totalAlbums)
+	return albums, true
+}
 
-	responseBody := &SubsonicAlbumList2{Albums: albums}
-	response := newSubsonicResponse(responseBody)
-	subsonicRespond(c, response)
+// subsonicGetAlbumList2 returns albums in ID3 form (<albumList2> of AlbumID3).
+func subsonicGetAlbumList2(c *gin.Context) {
+	albums, ok := fetchAlbumList(c)
+	if !ok {
+		return
+	}
+	subsonicRespond(c, newSubsonicResponse(&SubsonicAlbumList2{Albums: albums}))
+}
+
+// subsonicGetAlbumList returns albums in the legacy directory form
+// (<albumList> of Child objects with isDir=true).
+func subsonicGetAlbumList(c *gin.Context) {
+	albums, ok := fetchAlbumList(c)
+	if !ok {
+		return
+	}
+	children := make([]SubsonicDirectoryChild, 0, len(albums))
+	for _, a := range albums {
+		child := SubsonicDirectoryChild{
+			ID:       a.ID,
+			Parent:   a.ArtistID,
+			Title:    a.Name,
+			Album:    a.Name,
+			Artist:   a.Artist,
+			IsDir:    true,
+			CoverArt: a.CoverArt,
+			Duration: a.Duration,
+			Genre:    a.Genre,
+			Created:  a.Created,
+		}
+		children = append(children, child)
+	}
+	subsonicRespond(c, newSubsonicResponse(&SubsonicAlbumList{Albums: children}))
 }
 
 func subsonicGetAlbum(c *gin.Context) {
@@ -1091,11 +1188,14 @@ func subsonicGetAlbum(c *gin.Context) {
 	// This ensures we return songs from the SAME physical album location regardless of individual track artist
 	query := `
 		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''), s.duration, COALESCE(s.date_added, ''),
+		       s.replaygain_track_gain, s.replaygain_track_peak, s.replaygain_album_gain, s.replaygain_album_peak,
+		       COALESCE(s.track, 0), COALESCE(s.year, 0), COALESCE(s.disc_number, 0),
+		       COALESCE(s.size, 0), COALESCE(s.bitrate, 0), COALESCE(s.sample_rate, 0), COALESCE(s.channels, 0), COALESCE(s.bit_depth, 0), COALESCE(s.comment, ''),
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
 		WHERE s.album = ? AND s.path LIKE ? AND s.cancelled = 0
-		ORDER BY s.title
+		ORDER BY COALESCE(s.disc_number, 0), COALESCE(s.track, 0), s.title
 	`
 
 	// Use LIKE with the album directory to match all songs in the same folder
@@ -1111,56 +1211,66 @@ func subsonicGetAlbum(c *gin.Context) {
 	var albumDuration int
 	var albumCreated string
 	for rows.Next() {
-		var s SubsonicSong
-		var lastPlayed sql.NullString
-		var duration int
+		var r SongResult
+		var lastPlayed, genreVal, dateAdded sql.NullString
 		var starred int
-		var songPath string
-		var dateAdded string
-		if err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &songPath, &s.PlayCount, &lastPlayed, &s.Genre, &duration, &dateAdded, &starred); err != nil {
+		var rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak sql.NullFloat64
+		if err := rows.Scan(&r.ID, &r.Title, &r.Artist, &r.Album, &r.Path, &r.PlayCount, &lastPlayed, &genreVal, &r.Duration, &dateAdded,
+			&rgTrackGain, &rgTrackPeak, &rgAlbumGain, &rgAlbumPeak, &r.Track, &r.Year, &r.DiscNumber,
+			&r.Size, &r.BitRate, &r.SamplingRate, &r.ChannelCount, &r.BitDepth, &r.Comment, &starred); err != nil {
 			log.Printf("Error scanning song in getAlbum: %v", err)
 			continue
 		}
-		s.CoverArt = albumSongId
-		s.Duration = duration
-		albumDuration += duration
-		if dateAdded != "" && (albumCreated == "" || dateAdded < albumCreated) {
-			albumCreated = dateAdded
-		}
-		s.Starred = starred == 1
-		s.ArtistID = GenerateArtistID(s.Artist)        // Track artist ID
-		s.AlbumID = albumSongId                        // Album ID
-		// Use computed displayArtist (may be concatenated list) for album artist
-		s.AlbumArtist = displayArtist
-		s.AlbumArtistID = GenerateArtistID(displayArtist) // Album artist ID
 		if lastPlayed.Valid {
-			s.LastPlayed = lastPlayed.String
+			r.LastPlayed = lastPlayed.String
 		}
-		songs = append(songs, s)
+		if genreVal.Valid {
+			r.Genre = genreVal.String
+		}
+		if dateAdded.Valid {
+			r.Created = dateAdded.String
+		}
+		r.Starred = starred == 1
+		r.ReplayGain = newReplayGain(rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak)
+		// The album's representative id and display artist override the
+		// per-row derivations so all songs share a consistent album context.
+		r.AlbumID = albumSongId
+		r.AlbumArtist = displayArtist
 
-		// Log potential duplicates
-		if len(songs) <= 20 {
-			log.Printf("  Song %d: id=%s, title='%s', path='%s'", len(songs), s.ID, s.Title, songPath)
+		albumDuration += r.Duration
+		if r.Created != "" && (albumCreated == "" || r.Created < albumCreated) {
+			albumCreated = r.Created
 		}
+
+		s := buildSubsonicSong(r)
+		s.CoverArt = albumSongId // Songs share the album cover
+		songs = append(songs, s)
 	}
 
 	log.Printf("getAlbum: Returning %d songs for album '%s'", len(songs), albumName)
 
 	responseBody := &SubsonicAlbumWithSongs{
-		ID:        albumSongId,
-		Name:      albumName,
-		CoverArt:  albumSongId,
-		SongCount: len(songs),
-		Duration:  albumDuration,
-		Created:   albumCreated,
-		Songs:     songs,
+		ID:            albumSongId,
+		Name:          albumName,
+		Artist:        displayArtist,
+		ArtistID:      GenerateArtistID(displayArtist),
+		CoverArt:      albumSongId,
+		SongCount:     len(songs),
+		Duration:      albumDuration,
+		Created:       albumCreated,
+		Genre:         albumGenre,
+		DisplayArtist: displayArtist,
 	}
+	if albumGenre != "" {
+		responseBody.Genres = []SubsonicItemGenre{{Name: albumGenre}}
+	}
+	responseBody.Songs = songs
 
 	subsonicRespond(c, newSubsonicResponse(responseBody))
 }
 
 func subsonicGetSong(c *gin.Context) {
-	_ = c.MustGet("user") // Auth is handled by middleware
+	user := c.MustGet("user").(User)
 
 	songID := c.Query("id")
 	if songID == "" {
@@ -1168,30 +1278,26 @@ func subsonicGetSong(c *gin.Context) {
 		return
 	}
 
-	var s SubsonicSong
-	var lastPlayed sql.NullString
-	var duration int
-
-	// Get the song details from the database
-	err := db.QueryRow(`
-		SELECT id, title, artist, album, play_count, last_played, duration
-		FROM songs WHERE id = ?`, songID).Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &duration)
-
+	// Use the central song query so the response carries every spec-aligned
+	// Child field (suffix, contentType, created, genres, replayGain, etc.).
+	results, err := QuerySongs(db, SongQueryOptions{
+		IDs:            []string{songID},
+		IncludeGenre:   true,
+		IncludeStarred: true,
+		UserID:         user.ID,
+		Limit:          1,
+	})
 	if err != nil {
-		if err == sql.ErrNoRows {
-			subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))
-		} else {
-			log.Printf("Error querying for song in getSong: %v", err)
-			subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
-		}
+		log.Printf("Error querying for song in getSong: %v", err)
+		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
+		return
+	}
+	if len(results) == 0 {
+		subsonicRespond(c, newSubsonicErrorResponse(70, "Song not found."))
 		return
 	}
 
-	s.Duration = duration
-	if lastPlayed.Valid {
-		s.LastPlayed = lastPlayed.String
-	}
-	s.CoverArt = s.ID // A song can serve as its own cover art reference
+	s := buildSubsonicSong(results[0])
 
 	subsonicRespond(c, newSubsonicResponse(&SubsonicSongWrapper{Song: s}))
 }
@@ -1215,24 +1321,13 @@ func subsonicGetRandomSongs(c *gin.Context) {
 
 	var songs []SubsonicSong
 	for _, result := range results {
-		s := SubsonicSong{
-			ID:         result.ID,
-			Title:      result.Title,
-			Artist:     result.Artist,
-			Album:      result.Album,
-			PlayCount:  result.PlayCount,
-			Duration:   result.Duration,
-			CoverArt:   result.ID,
-			LastPlayed: result.LastPlayed,
-		}
-		songs = append(songs, s)
+		songs = append(songs, buildSubsonicSong(result))
 	}
 
-	responseBody := &SubsonicDirectory{
-		Name:      "Random Songs",
-		SongCount: len(songs),
-		Songs:     songs,
+	if songs == nil {
+		songs = []SubsonicSong{}
 	}
+	responseBody := &SubsonicRandomSongs{Songs: songs}
 	subsonicRespond(c, newSubsonicResponse(responseBody))
 }
 
@@ -1447,7 +1542,7 @@ func subsonicStar(c *gin.Context) {
 		// artistID may be an artist name or an artist ID (generated by GenerateArtistID)
 		artistName := artistID
 
-// First, check if artistID directly matches an artist name in songs (consider album_artist fallback)
+		// First, check if artistID directly matches an artist name in songs (consider album_artist fallback)
 		exists, err := ArtistExists(db, artistName)
 		if err != nil {
 			log.Printf("Artist check error for %s: %v", artistID, err)
@@ -1538,14 +1633,18 @@ func subsonicUnstar(c *gin.Context) {
 	subsonicRespond(c, newSubsonicResponse(nil))
 }
 
-// subsonicGetStarred returns starred songs, albums, and artists for the current user
-func subsonicGetStarred(c *gin.Context) {
-	user := c.MustGet("user").(User)
-	log.Printf("subsonicGetStarred called by user: %s (ID: %d)", user.Username, user.ID)
-
+// collectStarred gathers the current user's starred songs, albums and artists.
+// Shared by getStarred (<starred>) and getStarred2 (<starred2>); on a DB error
+// it responds with a Subsonic error and returns ok=false.
+func collectStarred(c *gin.Context, user User) (songsOut []SubsonicSong, albumsOut []SubsonicAlbum, artistsOut []SubsonicArtist, ok bool) {
 	// Get starred songs (deduplicated by song_id in case of duplicate starred_songs entries)
 	query := `
-		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, COALESCE(s.genre, '') as genre, COALESCE(s.duration, 0) as duration
+		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, '') as genre, COALESCE(s.duration, 0) as duration,
+			COALESCE(s.album_artist, ''), COALESCE(s.date_added, ''),
+			s.replaygain_track_gain, s.replaygain_track_peak, s.replaygain_album_gain, s.replaygain_album_peak,
+			(SELECT MIN(s2.id) FROM songs s2 WHERE s2.album_path = s.album_path AND s2.cancelled = 0) AS album_id,
+			COALESCE(s.track, 0), COALESCE(s.year, 0), COALESCE(s.disc_number, 0),
+			COALESCE(s.size, 0), COALESCE(s.bitrate, 0), COALESCE(s.sample_rate, 0), COALESCE(s.channels, 0), COALESCE(s.bit_depth, 0), COALESCE(s.comment, '')
 		FROM songs s
 		INNER JOIN (
 			SELECT song_id, MAX(starred_at) as starred_at
@@ -1561,25 +1660,45 @@ func subsonicGetStarred(c *gin.Context) {
 	if err != nil {
 		log.Printf("Starred songs query error: %v", err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
-		return
+		return nil, nil, nil, false
 	}
 	defer rows.Close()
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var s SubsonicSong
-		var lastPlayed sql.NullString
-		err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &s.Genre, &s.Duration)
+		var r SongResult
+		var lastPlayed, genreVal, albumArtist, created, albumID sql.NullString
+		var rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak sql.NullFloat64
+		var trackInt, yearInt, discInt sql.NullInt64
+		err := rows.Scan(&r.ID, &r.Title, &r.Artist, &r.Album, &r.Path, &r.PlayCount, &lastPlayed, &genreVal, &r.Duration,
+			&albumArtist, &created, &rgTrackGain, &rgTrackPeak, &rgAlbumGain, &rgAlbumPeak, &albumID,
+			&trackInt, &yearInt, &discInt,
+			&r.Size, &r.BitRate, &r.SamplingRate, &r.ChannelCount, &r.BitDepth, &r.Comment)
 		if err != nil {
 			log.Printf("Error scanning starred song: %v", err)
 			continue
 		}
-		s.Starred = true
-		s.CoverArt = s.ID
+		r.Track = int(trackInt.Int64)
+		r.Year = int(yearInt.Int64)
+		r.DiscNumber = int(discInt.Int64)
 		if lastPlayed.Valid {
-			s.LastPlayed = lastPlayed.String
+			r.LastPlayed = lastPlayed.String
 		}
-		songs = append(songs, s)
+		if genreVal.Valid {
+			r.Genre = genreVal.String
+		}
+		if albumArtist.Valid {
+			r.AlbumArtist = albumArtist.String
+		}
+		if created.Valid {
+			r.Created = created.String
+		}
+		if albumID.Valid {
+			r.AlbumID = albumID.String
+		}
+		r.Starred = true
+		r.ReplayGain = newReplayGain(rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak)
+		songs = append(songs, buildSubsonicSong(r))
 	}
 
 	// Get starred albums
@@ -1600,7 +1719,9 @@ func subsonicGetStarred(c *gin.Context) {
 			var a SubsonicAlbum
 			err := albumRows.Scan(&a.Name, &a.Artist, &a.Genre, &a.ID)
 			if err == nil {
+				a.ArtistID = GenerateArtistID(a.Artist)
 				a.CoverArt = a.ID
+				decorateAlbum(&a)
 				albums = append(albums, a)
 			}
 		}
@@ -1642,14 +1763,35 @@ func subsonicGetStarred(c *gin.Context) {
 		artists = []SubsonicArtist{}
 	}
 
-	starred := &SubsonicStarred2{
+	return songs, albums, artists, true
+}
+
+// subsonicGetStarred returns starred songs, albums and artists (<starred>).
+func subsonicGetStarred(c *gin.Context) {
+	user := c.MustGet("user").(User)
+	songs, albums, artists, ok := collectStarred(c, user)
+	if !ok {
+		return
+	}
+	subsonicRespond(c, newSubsonicResponse(&SubsonicStarred{
+		Artists: artists,
+		Albums:  albums,
+		Songs:   songs,
+	}))
+}
+
+// subsonicGetStarred2 returns starred songs, albums and artists in ID3 form (<starred2>).
+func subsonicGetStarred2(c *gin.Context) {
+	user := c.MustGet("user").(User)
+	songs, albums, artists, ok := collectStarred(c, user)
+	if !ok {
+		return
+	}
+	subsonicRespond(c, newSubsonicResponse(&SubsonicStarred2{
 		Songs:   songs,
 		Albums:  albums,
 		Artists: artists,
-	}
-
-	log.Printf("Returning %d starred songs, %d starred albums, %d starred artists", len(songs), len(albums), len(artists))
-	subsonicRespond(c, newSubsonicResponse(starred))
+	}))
 }
 
 // subsonicGetGenres returns all genres in the library
@@ -1765,11 +1907,16 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 	// Simple test: just get any songs with genres first
 	query := `
 		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''), s.duration,
+		       COALESCE(s.album_artist, ''), COALESCE(s.date_added, ''),
+		       s.replaygain_track_gain, s.replaygain_track_peak, s.replaygain_album_gain, s.replaygain_album_peak,
+		       (SELECT MIN(s2.id) FROM songs s2 WHERE s2.album_path = s.album_path AND s2.cancelled = 0) AS album_id,
+		       COALESCE(s.track, 0), COALESCE(s.year, 0), COALESCE(s.disc_number, 0),
+		       COALESCE(s.size, 0), COALESCE(s.bitrate, 0), COALESCE(s.sample_rate, 0), COALESCE(s.channels, 0), COALESCE(s.bit_depth, 0), COALESCE(s.comment, ''),
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
 		WHERE s.genre IS NOT NULL AND s.genre != '' AND LOWER(s.genre) LIKE LOWER(?)
-		ORDER BY s.artist, s.title 
+		ORDER BY s.artist, s.title
 		LIMIT ? OFFSET ?
 	`
 
@@ -1788,36 +1935,42 @@ func subsonicGetSongsByGenre(c *gin.Context) {
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var songFromDb Song
-		var lastPlayed sql.NullString
+		var r SongResult
+		var lastPlayed, genreVal, albumArtist, created, albumID sql.NullString
+		var rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak sql.NullFloat64
+		var trackInt, yearInt, discInt sql.NullInt64
 		var starred int
 
-		if err := rows.Scan(&songFromDb.ID, &songFromDb.Title, &songFromDb.Artist, &songFromDb.Album,
-			&songFromDb.Path, &songFromDb.PlayCount, &lastPlayed, &songFromDb.Genre, &songFromDb.Duration, &starred); err != nil {
+		if err := rows.Scan(&r.ID, &r.Title, &r.Artist, &r.Album,
+			&r.Path, &r.PlayCount, &lastPlayed, &genreVal, &r.Duration,
+			&albumArtist, &created, &rgTrackGain, &rgTrackPeak, &rgAlbumGain, &rgAlbumPeak, &albumID,
+			&trackInt, &yearInt, &discInt,
+			&r.Size, &r.BitRate, &r.SamplingRate, &r.ChannelCount, &r.BitDepth, &r.Comment, &starred); err != nil {
 			log.Printf("[ERROR] getSongsByGenre: Scan failed: %v", err)
 			continue
 		}
-
-		subsonicSong := SubsonicSong{
-			ID:        songFromDb.ID,
-			Title:     songFromDb.Title,
-			Artist:    songFromDb.Artist,
-			ArtistID:  GenerateArtistID(songFromDb.Artist),
-			Album:     songFromDb.Album,
-			Genre:     songFromDb.Genre,
-			CoverArt:  songFromDb.ID,
-			PlayCount: songFromDb.PlayCount,
-			Duration:  songFromDb.Duration,
-			Starred:   starred == 1,
-		}
-
-		log.Printf("[DEBUG] Found song: ID=%s, Title='%s', Genre='%s'", songFromDb.ID, songFromDb.Title, songFromDb.Genre)
-
+		r.Track = int(trackInt.Int64)
+		r.Year = int(yearInt.Int64)
+		r.DiscNumber = int(discInt.Int64)
 		if lastPlayed.Valid {
-			subsonicSong.LastPlayed = lastPlayed.String
+			r.LastPlayed = lastPlayed.String
 		}
+		if genreVal.Valid {
+			r.Genre = genreVal.String
+		}
+		if albumArtist.Valid {
+			r.AlbumArtist = albumArtist.String
+		}
+		if created.Valid {
+			r.Created = created.String
+		}
+		if albumID.Valid {
+			r.AlbumID = albumID.String
+		}
+		r.Starred = starred == 1
+		r.ReplayGain = newReplayGain(rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak)
 
-		songs = append(songs, subsonicSong)
+		songs = append(songs, buildSubsonicSong(r))
 	}
 
 	// Ensure songs is never nil for JSON marshaling

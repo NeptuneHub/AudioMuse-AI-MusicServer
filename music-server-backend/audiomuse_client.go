@@ -294,7 +294,9 @@ func (cl *AudioMuseClient) GetMap(ctx context.Context, queryParams url.Values) (
 
 // GetVoyagerSearchTracks searches tracks for the map UI's autocomplete.
 func (cl *AudioMuseClient) GetVoyagerSearchTracks(ctx context.Context, queryParams url.Values) ([]byte, int, error) {
-	return cl.Get(ctx, "/api/voyager/search_tracks", queryParams)
+	// AudioMuse-AI Core registers voyager_bp without a url_prefix, so the real
+	// endpoint is /api/search_tracks (not /api/voyager/search_tracks).
+	return cl.Get(ctx, "/api/search_tracks", queryParams)
 }
 
 // Alchemy performs alchemy operations on tracks/artists.

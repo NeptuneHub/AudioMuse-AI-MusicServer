@@ -21,7 +21,7 @@ func fileSearchTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("open: %v", err)
 	}
 	stmts := []string{
-		`CREATE TABLE songs (id TEXT PRIMARY KEY, title TEXT, artist TEXT, album TEXT, album_artist TEXT DEFAULT '', path TEXT, album_path TEXT DEFAULT '', genre TEXT DEFAULT '', duration INTEGER DEFAULT 0, play_count INTEGER DEFAULT 0, last_played TEXT, date_added TEXT, cancelled INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE TABLE songs (id TEXT PRIMARY KEY, title TEXT, artist TEXT, album TEXT, album_artist TEXT DEFAULT '', path TEXT, album_path TEXT DEFAULT '', genre TEXT DEFAULT '', duration INTEGER DEFAULT 0, play_count INTEGER DEFAULT 0, last_played TEXT, date_added TEXT, replaygain_track_gain REAL, replaygain_track_peak REAL, replaygain_album_gain REAL, replaygain_album_peak REAL, track INTEGER DEFAULT 0, year INTEGER DEFAULT 0, disc_number INTEGER DEFAULT 0, size INTEGER DEFAULT 0, bitrate INTEGER DEFAULT 0, sample_rate INTEGER DEFAULT 0, channels INTEGER DEFAULT 0, bit_depth INTEGER DEFAULT 0, comment TEXT DEFAULT '', cancelled INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE VIRTUAL TABLE songs_fts USING fts5(title, artist, album, album_artist, content='songs', content_rowid='rowid', tokenize='unicode61 remove_diacritics 2')`,
 		`CREATE TRIGGER songs_ai AFTER INSERT ON songs BEGIN INSERT INTO songs_fts(rowid,title,artist,album,album_artist) VALUES (new.rowid,new.title,new.artist,new.album,new.album_artist); END;`,
 		`CREATE TABLE starred_songs (user_id INTEGER, song_id TEXT, starred_at TEXT)`,

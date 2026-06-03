@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"encoding/xml"
 	"log"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -14,24 +14,24 @@ import (
 
 // SubsonicSearchResult2 represents the structure for search2 responses.
 type SubsonicSearchResult2 struct {
-	XMLName      xml.Name         `xml:"searchResult2" json:"-"`
-	Artists      []SubsonicArtist `xml:"artist" json:"artist,omitempty"`
-	Albums       []SubsonicAlbum  `xml:"album" json:"album,omitempty"`
-	Songs        []SubsonicSong   `xml:"song" json:"song,omitempty"`
-	ArtistCount  int              `xml:"artistCount,attr,omitempty" json:"artistCount,omitempty"`
-	AlbumCount   int              `xml:"albumCount,attr,omitempty" json:"albumCount,omitempty"`
-	SongCount    int              `xml:"songCount,attr,omitempty" json:"songCount,omitempty"`
+	XMLName     xml.Name         `xml:"searchResult2" json:"-"`
+	Artists     []SubsonicArtist `xml:"artist" json:"artist,omitempty"`
+	Albums      []SubsonicAlbum  `xml:"album" json:"album,omitempty"`
+	Songs       []SubsonicSong   `xml:"song" json:"song,omitempty"`
+	ArtistCount int              `xml:"artistCount,attr,omitempty" json:"artistCount,omitempty"`
+	AlbumCount  int              `xml:"albumCount,attr,omitempty" json:"albumCount,omitempty"`
+	SongCount   int              `xml:"songCount,attr,omitempty" json:"songCount,omitempty"`
 }
 
 // SubsonicSearchResult3 represents the structure for search3 responses (ID3 tags).
 type SubsonicSearchResult3 struct {
-	XMLName      xml.Name         `xml:"searchResult3" json:"-"`
-	Artists      []SubsonicArtist `xml:"artist" json:"artist,omitempty"`
-	Albums       []SubsonicAlbum  `xml:"album" json:"album,omitempty"`
-	Songs        []SubsonicSong   `xml:"song" json:"song,omitempty"`
-	ArtistCount  int              `xml:"artistCount,attr,omitempty" json:"artistCount,omitempty"`
-	AlbumCount   int              `xml:"albumCount,attr,omitempty" json:"albumCount,omitempty"`
-	SongCount    int              `xml:"songCount,attr,omitempty" json:"songCount,omitempty"`
+	XMLName     xml.Name         `xml:"searchResult3" json:"-"`
+	Artists     []SubsonicArtist `xml:"artist" json:"artist,omitempty"`
+	Albums      []SubsonicAlbum  `xml:"album" json:"album,omitempty"`
+	Songs       []SubsonicSong   `xml:"song" json:"song,omitempty"`
+	ArtistCount int              `xml:"artistCount,attr,omitempty" json:"artistCount,omitempty"`
+	AlbumCount  int              `xml:"albumCount,attr,omitempty" json:"albumCount,omitempty"`
+	SongCount   int              `xml:"songCount,attr,omitempty" json:"songCount,omitempty"`
 }
 
 // subsonicSearch2 handles the search2 API endpoint (old tag format).
@@ -77,7 +77,7 @@ func subsonicSearch2(c *gin.Context) {
 		if cnt, err := CountAlbums(db, searchTerm); err == nil {
 			result.AlbumCount = cnt
 		}
-	} 
+	}
 
 	// Count total songs
 	if songCount > 0 {
@@ -124,7 +124,7 @@ func subsonicSearch2(c *gin.Context) {
 				})
 			}
 		}
-	} 
+	}
 
 	// --- Enhanced Album Search Logic ---
 	// OPTIMIZED: Use display artist computation with proper song count
@@ -143,24 +143,49 @@ func subsonicSearch2(c *gin.Context) {
 			for _, ar := range albums {
 				albumName := strings.TrimSpace(ar.Name)
 				albumPath := strings.TrimSpace(ar.AlbumPath)
-				if albumName == "" && albumPath == "" { continue }
+				if albumName == "" && albumPath == "" {
+					continue
+				}
 				displayArtist := albumDisplayArtist(db, albumName, albumPath)
 				match := true
 				for _, word := range searchWords {
 					lw := strings.ToLower(word)
-					if !strings.Contains(strings.ToLower(albumName), lw) && !strings.Contains(strings.ToLower(displayArtist), lw) { match = false; break }
+					if !strings.Contains(strings.ToLower(albumName), lw) && !strings.Contains(strings.ToLower(displayArtist), lw) {
+						match = false
+						break
+					}
 				}
-				if !match { continue }
+				if !match {
+					continue
+				}
 				key := normalizeKey(albumName)
 				candidate := SubsonicAlbum{ID: ar.AlbumID, Name: albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: ar.Genre, CoverArt: ar.AlbumID, SongCount: ar.SongCount, Duration: ar.Duration, Created: ar.Created}
-				if existing, ok := seen[key]; ok { candIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, albumName, albumPath); existIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, existing.Name, ""); if candIsAlbumArtist && !existIsAlbumArtist { seen[key] = candidate } } else { seen[key] = candidate; order = append(order, key) }
+				decorateAlbum(&candidate)
+				if existing, ok := seen[key]; ok {
+					candIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, albumName, albumPath)
+					existIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, existing.Name, "")
+					if candIsAlbumArtist && !existIsAlbumArtist {
+						seen[key] = candidate
+					}
+				} else {
+					seen[key] = candidate
+					order = append(order, key)
+				}
 			}
 			start := albumOffset
 			end := start + albumCount
-			if start < 0 { start = 0 }
-			if start > len(order) { start = len(order) }
-			if end > len(order) { end = len(order) }
-			for _, k := range order[start:end] { result.Albums = append(result.Albums, seen[k]) }
+			if start < 0 {
+				start = 0
+			}
+			if start > len(order) {
+				start = len(order)
+			}
+			if end > len(order) {
+				end = len(order)
+			}
+			for _, k := range order[start:end] {
+				result.Albums = append(result.Albums, seen[k])
+			}
 			goto SKIP_OLD_ALBUM_QUERY
 		}
 		var albumQuery string
@@ -202,10 +227,13 @@ func subsonicSearch2(c *gin.Context) {
 					if err := albumRows.Scan(&albumName, &albumPath, &genre, &albumID, &songCount, &totalDuration, &created); err == nil {
 						albumName = strings.TrimSpace(albumName)
 						albumPath = strings.TrimSpace(albumPath)
-						if albumName == "" && albumPath == "" { continue }
+						if albumName == "" && albumPath == "" {
+							continue
+						}
 						displayArtist := albumDisplayArtist(db, albumName, albumPath)
 						key := normalizeKey(albumName)
 						candidate := SubsonicAlbum{ID: albumID, Name: albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: genre, CoverArt: albumID, SongCount: songCount, Duration: totalDuration, Created: created.String}
+						decorateAlbum(&candidate)
 						if existing, ok := seen[key]; ok {
 							candIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, albumName, albumPath)
 							existIsAlbumArtist, _ := CheckAlbumHasAlbumArtist(db, existing.Name, "")
@@ -220,10 +248,18 @@ func subsonicSearch2(c *gin.Context) {
 				}
 				start := albumOffset
 				end := start + albumCount
-				if start < 0 { start = 0 }
-				if start > len(order) { start = len(order) }
-				if end > len(order) { end = len(order) }
-				for _, k := range order[start:end] { result.Albums = append(result.Albums, seen[k]) }
+				if start < 0 {
+					start = 0
+				}
+				if start > len(order) {
+					start = len(order)
+				}
+				if end > len(order) {
+					end = len(order)
+				}
+				for _, k := range order[start:end] {
+					result.Albums = append(result.Albums, seen[k])
+				}
 			}
 		} else {
 			// For search terms: fetch matching songs and build albums from those song groups in Go
@@ -311,9 +347,13 @@ func subsonicSearch2(c *gin.Context) {
 					g := groups[k]
 					var artistList []string
 					if len(g.albumArts) > 0 {
-						for a := range g.albumArts { artistList = append(artistList, a) }
+						for a := range g.albumArts {
+							artistList = append(artistList, a)
+						}
 					} else {
-						for a := range g.artists { artistList = append(artistList, a) }
+						for a := range g.artists {
+							artistList = append(artistList, a)
+						}
 					}
 					sort.Strings(artistList)
 					displayArtist := "Unknown Artist"
@@ -322,6 +362,7 @@ func subsonicSearch2(c *gin.Context) {
 					}
 
 					candidate := SubsonicAlbum{ID: g.albumID, Name: g.albumName, Artist: displayArtist, ArtistID: GenerateArtistID(displayArtist), Genre: g.genre, CoverArt: g.albumID, SongCount: g.songCount, Duration: g.totalDuration, Created: g.minCreated}
+					decorateAlbum(&candidate)
 
 					nk := normalizeKey(g.albumName)
 					if existing, ok := seen[nk]; ok {
@@ -337,9 +378,15 @@ func subsonicSearch2(c *gin.Context) {
 				// paginate ordered results
 				start := albumOffset
 				end := start + albumCount
-				if start < 0 { start = 0 }
-				if start > len(orderKeys) { start = len(orderKeys) }
-				if end > len(orderKeys) { end = len(orderKeys) }
+				if start < 0 {
+					start = 0
+				}
+				if start > len(orderKeys) {
+					start = len(orderKeys)
+				}
+				if end > len(orderKeys) {
+					end = len(orderKeys)
+				}
 				for _, k := range orderKeys[start:end] {
 					result.Albums = append(result.Albums, seen[k])
 				}
@@ -371,21 +418,7 @@ SKIP_OLD_ALBUM_QUERY:
 			log.Printf("[ERROR] subsonicSearch2: Song query failed: %v", err)
 		} else {
 			for _, songFromDb := range songs {
-
-				song := SubsonicSong{
-					ID:        songFromDb.ID,
-					CoverArt:  songFromDb.ID,
-					Title:     songFromDb.Title,
-					Artist:    songFromDb.Artist,
-					ArtistID:  GenerateArtistID(songFromDb.Artist),
-					Album:     songFromDb.Album,
-					Duration:  songFromDb.Duration,
-					PlayCount: songFromDb.PlayCount,
-					Genre:     songFromDb.Genre,
-					Starred:   songFromDb.Starred,
-					LastPlayed: songFromDb.LastPlayed,
-				}
-				result.Songs = append(result.Songs, song)
+				result.Songs = append(result.Songs, buildSubsonicSong(songFromDb))
 			}
 		}
 	}
@@ -591,6 +624,7 @@ func subsonicSearch3(c *gin.Context) {
 						Duration:  totalDuration,
 						Created:   created.String,
 					}
+					decorateAlbum(&candidate)
 					candidates = append(candidates, candidate)
 				}
 			}
@@ -644,21 +678,7 @@ func subsonicSearch3(c *gin.Context) {
 			log.Printf("[ERROR] subsonicSearch3: Song query failed: %v", err)
 		} else {
 			for _, songResult := range songs {
-
-				song := SubsonicSong{
-					ID:        songResult.ID,
-					Title:     songResult.Title,
-					Artist:    songResult.Artist,
-					ArtistID:  GenerateArtistID(songResult.Artist),
-					Album:     songResult.Album,
-					Genre:     songResult.Genre,
-					Duration:  songResult.Duration,
-					PlayCount: songResult.PlayCount,
-					CoverArt:  songResult.ID,
-					Starred:   songResult.Starred,
-					LastPlayed: songResult.LastPlayed,
-				}
-				result.Songs = append(result.Songs, song)
+				result.Songs = append(result.Songs, buildSubsonicSong(songResult))
 			}
 		}
 	}

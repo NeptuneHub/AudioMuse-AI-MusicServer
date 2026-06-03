@@ -217,12 +217,16 @@ func getAlbumDirectory(c *gin.Context, user User, albumID string, albumName, art
 	displayArtist := albumDisplayArtist(db, albumName, albumDir)
 
 	query := `
-		SELECT s.id, s.title, s.artist, s.album, s.duration, s.play_count, s.last_played, COALESCE(s.genre, ''),
+		SELECT s.id, s.title, s.artist, s.album, s.path, s.duration, s.play_count, s.last_played, COALESCE(s.genre, ''),
+		       COALESCE(s.album_artist, ''), COALESCE(s.date_added, ''),
+		       s.replaygain_track_gain, s.replaygain_track_peak, s.replaygain_album_gain, s.replaygain_album_peak,
+		       COALESCE(s.track, 0), COALESCE(s.year, 0), COALESCE(s.disc_number, 0),
+		       COALESCE(s.size, 0), COALESCE(s.bitrate, 0), COALESCE(s.sample_rate, 0), COALESCE(s.channels, 0), COALESCE(s.bit_depth, 0), COALESCE(s.comment, ''),
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
 		WHERE s.album = ? AND s.path LIKE ? AND s.cancelled = 0
-		ORDER BY s.title COLLATE NOCASE
+		ORDER BY COALESCE(s.disc_number, 0), COALESCE(s.track, 0), s.title COLLATE NOCASE
 	`
 
 	pathPattern := albumDir + string(filepath.Separator) + "%"
@@ -236,34 +240,35 @@ func getAlbumDirectory(c *gin.Context, user User, albumID string, albumName, art
 
 	var children []SubsonicDirectoryChild
 	for rows.Next() {
-		var songID string
-		var title, artist, album, genre string
-		var duration, playCount int
-		var lastPlayed sql.NullString
+		var r SongResult
+		var lastPlayed, genreVal, albumArtist, created sql.NullString
+		var rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak sql.NullFloat64
 		var starred int
 
-		if err := rows.Scan(&songID, &title, &artist, &album, &duration, &playCount, &lastPlayed, &genre, &starred); err != nil {
+		if err := rows.Scan(&r.ID, &r.Title, &r.Artist, &r.Album, &r.Path, &r.Duration, &r.PlayCount, &lastPlayed, &genreVal,
+			&albumArtist, &created, &rgTrackGain, &rgTrackPeak, &rgAlbumGain, &rgAlbumPeak, &r.Track, &r.Year, &r.DiscNumber,
+			&r.Size, &r.BitRate, &r.SamplingRate, &r.ChannelCount, &r.BitDepth, &r.Comment, &starred); err != nil {
 			log.Printf("Error scanning song: %v", err)
 			continue
 		}
-
-		child := SubsonicDirectoryChild{
-			ID:        songID,
-			Title:     title,
-			Artist:    artist,
-			Album:     album,
-			IsDir:     false,
-			CoverArt:  albumID,
-			Duration:  duration,
-			Genre:     genre,
-			PlayCount: playCount,
-			Starred:   starred == 1,
-		}
-
 		if lastPlayed.Valid {
-			child.LastPlayed = lastPlayed.String
+			r.LastPlayed = lastPlayed.String
 		}
+		if genreVal.Valid {
+			r.Genre = genreVal.String
+		}
+		if albumArtist.Valid {
+			r.AlbumArtist = albumArtist.String
+		}
+		if created.Valid {
+			r.Created = created.String
+		}
+		r.Starred = starred == 1
+		r.AlbumID = albumID
+		r.ReplayGain = newReplayGain(rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak)
 
+		child := directoryChildFromSong(buildSubsonicSong(r))
+		child.CoverArt = albumID // Songs share the album cover
 		children = append(children, child)
 	}
 
@@ -338,16 +343,17 @@ func subsonicGetArtist(c *gin.Context) {
 		displayArtist := albumDisplayArtist(db, albumName, strings.TrimSpace(albumPath))
 
 		album := SubsonicAlbum{
-			ID:       albumID,
-			Name:     albumName,
-			Artist:   displayArtist,
-			ArtistID: GenerateArtistID(displayArtist),
-			CoverArt: albumID,
-			Genre:    genre,
+			ID:        albumID,
+			Name:      albumName,
+			Artist:    displayArtist,
+			ArtistID:  GenerateArtistID(displayArtist),
+			CoverArt:  albumID,
+			Genre:     genre,
 			SongCount: songCount,
 			Duration:  totalDuration,
 			Created:   created.String,
 		}
+		decorateAlbum(&album)
 		albums = append(albums, album)
 	}
 

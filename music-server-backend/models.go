@@ -4,6 +4,7 @@ package main
 import (
 	"database/sql"
 	"encoding/xml"
+	"strconv"
 )
 
 // --- Data Structures ---
@@ -105,20 +106,80 @@ type SubsonicDirectory struct {
 	Songs     []SubsonicSong `xml:"song" json:"song"`
 }
 
-type SubsonicAlbumWithSongs struct {
-	XMLName   xml.Name       `xml:"album" json:"-"`
-	ID        string         `xml:"id,attr,omitempty" json:"id,omitempty"`
-	Name      string         `xml:"name,attr,omitempty" json:"name,omitempty"`
-	CoverArt  string         `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
-	SongCount int            `xml:"songCount,attr" json:"songCount"`
-	Duration  int            `xml:"duration,attr" json:"duration"`
-	Created   string         `xml:"created,attr,omitempty" json:"created,omitempty"`
-	Songs     []SubsonicSong `xml:"song" json:"song"`
+// SubsonicRandomSongs is the getRandomSongs response (<randomSongs> of Child).
+type SubsonicRandomSongs struct {
+	XMLName xml.Name       `xml:"randomSongs" json:"-"`
+	Songs   []SubsonicSong `xml:"song" json:"song"`
 }
 
+// SubsonicPlaylistWithSongs is the getPlaylist response: a <playlist> with the
+// playlist-level attributes and its songs as <entry> children (Child objects).
+type SubsonicPlaylistWithSongs struct {
+	XMLName   xml.Name       `xml:"playlist" json:"-"`
+	ID        string         `xml:"id,attr" json:"id"`
+	Name      string         `xml:"name,attr" json:"name"`
+	Owner     string         `xml:"owner,attr,omitempty" json:"owner,omitempty"`
+	Public    bool           `xml:"public,attr" json:"public"`
+	SongCount int            `xml:"songCount,attr" json:"songCount"`
+	Duration  int            `xml:"duration,attr" json:"duration"`
+	Entries   []SubsonicSong `xml:"entry" json:"entry"`
+}
+
+// MarshalXML emits <playlist ...> with each song as an <entry> child. A custom
+// marshaler is needed because SubsonicSong's XMLName would otherwise force the
+// children to <song>; EncodeElement with an explicit start name overrides it.
+func (p SubsonicPlaylistWithSongs) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	start.Name = xml.Name{Local: "playlist"}
+	start.Attr = []xml.Attr{
+		{Name: xml.Name{Local: "id"}, Value: p.ID},
+		{Name: xml.Name{Local: "name"}, Value: p.Name},
+	}
+	if p.Owner != "" {
+		start.Attr = append(start.Attr, xml.Attr{Name: xml.Name{Local: "owner"}, Value: p.Owner})
+	}
+	start.Attr = append(start.Attr,
+		xml.Attr{Name: xml.Name{Local: "public"}, Value: strconv.FormatBool(p.Public)},
+		xml.Attr{Name: xml.Name{Local: "songCount"}, Value: strconv.Itoa(p.SongCount)},
+		xml.Attr{Name: xml.Name{Local: "duration"}, Value: strconv.Itoa(p.Duration)},
+	)
+	if err := e.EncodeToken(start); err != nil {
+		return err
+	}
+	for _, s := range p.Entries {
+		if err := e.EncodeElement(s, xml.StartElement{Name: xml.Name{Local: "entry"}}); err != nil {
+			return err
+		}
+	}
+	return e.EncodeToken(start.End())
+}
+
+// SubsonicAlbumWithSongs is the AlbumID3 returned by getAlbum, including its
+// song list. Mirrors the AlbumID3 fields so clients get artist/genre context.
+type SubsonicAlbumWithSongs struct {
+	XMLName       xml.Name            `xml:"album" json:"-"`
+	ID            string              `xml:"id,attr" json:"id"`     // Required on AlbumID3
+	Name          string              `xml:"name,attr" json:"name"` // Required on AlbumID3
+	Artist        string              `xml:"artist,attr,omitempty" json:"artist,omitempty"`
+	ArtistID      string              `xml:"artistId,attr,omitempty" json:"artistId,omitempty"`
+	CoverArt      string              `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	SongCount     int                 `xml:"songCount,attr" json:"songCount"`
+	Duration      int                 `xml:"duration,attr" json:"duration"`
+	Created       string              `xml:"created,attr" json:"created"` // Required on AlbumID3
+	Genre         string              `xml:"genre,attr,omitempty" json:"genre,omitempty"`
+	DisplayArtist string              `xml:"displayArtist,attr,omitempty" json:"displayArtist,omitempty"`
+	Genres        []SubsonicItemGenre `xml:"genres" json:"genres,omitempty"`
+	Songs         []SubsonicSong      `xml:"song" json:"song"`
+}
+
+// SubsonicSong models the OpenSubsonic "Child" object. The required fields
+// (id, isDir, title) are always emitted; the remaining standard and
+// OpenSubsonic-extension fields are populated by buildSubsonicSong when the
+// underlying data is available. See https://opensubsonic.netlify.app/docs/responses/child/
 type SubsonicSong struct {
 	XMLName       xml.Name `xml:"song" json:"-"`
 	ID            string   `xml:"id,attr" json:"id"`
+	Parent        string   `xml:"parent,attr,omitempty" json:"parent,omitempty"`
+	IsDir         bool     `xml:"isDir,attr" json:"isDir"` // Required by spec; songs are always false
 	CoverArt      string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
 	Title         string   `xml:"title,attr" json:"title"`
 	Artist        string   `xml:"artist,attr" json:"artist"`
@@ -128,11 +189,44 @@ type SubsonicSong struct {
 	AlbumArtist   string   `xml:"albumArtist,attr,omitempty" json:"albumArtist,omitempty"`
 	AlbumArtistID string   `xml:"albumArtistId,attr,omitempty" json:"albumArtistId,omitempty"`
 	Path          string   `xml:"path,attr,omitempty" json:"path,omitempty"`
+	Suffix        string   `xml:"suffix,attr,omitempty" json:"suffix,omitempty"`
+	ContentType   string   `xml:"contentType,attr,omitempty" json:"contentType,omitempty"`
+	Size          int64    `xml:"size,attr,omitempty" json:"size,omitempty"`
+	BitRate       int      `xml:"bitRate,attr,omitempty" json:"bitRate,omitempty"`
+	SamplingRate  int      `xml:"samplingRate,attr,omitempty" json:"samplingRate,omitempty"` // OpenSubsonic
+	ChannelCount  int      `xml:"channelCount,attr,omitempty" json:"channelCount,omitempty"` // OpenSubsonic
+	BitDepth      int      `xml:"bitDepth,attr,omitempty" json:"bitDepth,omitempty"`         // OpenSubsonic
+	Track         int      `xml:"track,attr,omitempty" json:"track,omitempty"`
+	Year          int      `xml:"year,attr,omitempty" json:"year,omitempty"`
+	DiscNumber    int      `xml:"discNumber,attr,omitempty" json:"discNumber,omitempty"`
 	Duration      int      `xml:"duration,attr,omitempty" json:"duration,omitempty"` // Duration in seconds
 	PlayCount     int      `xml:"playCount,attr,omitempty" json:"playCount,omitempty"`
 	LastPlayed    string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
+	Created       string   `xml:"created,attr,omitempty" json:"created,omitempty"`
 	Starred       bool     `xml:"starred,attr,omitempty" json:"starred,omitempty"`
 	Genre         string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
+	Comment       string   `xml:"comment,attr,omitempty" json:"comment,omitempty"`     // OpenSubsonic
+	Type          string   `xml:"type,attr,omitempty" json:"type,omitempty"`           // Always "music" for songs
+	MediaType     string   `xml:"mediaType,attr,omitempty" json:"mediaType,omitempty"` // OpenSubsonic: "song"
+	DisplayArtist string   `xml:"displayArtist,attr,omitempty" json:"displayArtist,omitempty"`
+	// Nested OpenSubsonic-extension objects.
+	Genres     []SubsonicItemGenre `xml:"genres" json:"genres,omitempty"`
+	ReplayGain *SubsonicReplayGain `xml:"replayGain" json:"replayGain,omitempty"`
+}
+
+// SubsonicItemGenre is an OpenSubsonic ItemGenre entry (Child.genres / AlbumID3.genres).
+type SubsonicItemGenre struct {
+	XMLName xml.Name `xml:"genres" json:"-"`
+	Name    string   `xml:"name,attr" json:"name"`
+}
+
+// SubsonicReplayGain is the OpenSubsonic ReplayGain object on a Child.
+type SubsonicReplayGain struct {
+	XMLName   xml.Name `xml:"replayGain" json:"-"`
+	TrackGain *float64 `xml:"trackGain,attr,omitempty" json:"trackGain,omitempty"`
+	AlbumGain *float64 `xml:"albumGain,attr,omitempty" json:"albumGain,omitempty"`
+	TrackPeak *float64 `xml:"trackPeak,attr,omitempty" json:"trackPeak,omitempty"`
+	AlbumPeak *float64 `xml:"albumPeak,attr,omitempty" json:"albumPeak,omitempty"`
 }
 
 type SubsonicArtistIndex struct {
@@ -161,19 +255,33 @@ type SubsonicAlbumList2 struct {
 }
 
 type SubsonicAlbum struct {
-	XMLName   xml.Name `xml:"album" json:"-"`
-	ID        string   `xml:"id,attr" json:"id"`
-	Name      string   `xml:"name,attr" json:"name"`
-	Artist    string   `xml:"artist,attr" json:"artist"`
-	ArtistID  string   `xml:"artistId,attr,omitempty" json:"artistId,omitempty"`
-	CoverArt  string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
-	Genre     string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
-	SongCount int      `xml:"songCount,attr,omitempty" json:"songCount,omitempty"`
-	// Duration is the aggregate of song durations in seconds. The OpenSubsonic
-	// spec marks it required for AlbumID3, so it is always emitted (even 0).
-	Duration int `xml:"duration,attr" json:"duration"`
-	// Created is the album's earliest song date_added (RFC3339), omitted when unknown.
-	Created string `xml:"created,attr,omitempty" json:"created,omitempty"`
+	XMLName  xml.Name `xml:"album" json:"-"`
+	ID       string   `xml:"id,attr" json:"id"`
+	Name     string   `xml:"name,attr" json:"name"`
+	Artist   string   `xml:"artist,attr" json:"artist"`
+	ArtistID string   `xml:"artistId,attr,omitempty" json:"artistId,omitempty"`
+	CoverArt string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	Genre    string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
+	// songCount, duration and created are REQUIRED on AlbumID3, so they are
+	// always emitted (even when 0/empty) for strict spec compliance.
+	SongCount int    `xml:"songCount,attr" json:"songCount"`
+	Duration  int    `xml:"duration,attr" json:"duration"`
+	Created   string `xml:"created,attr" json:"created"`
+	// OpenSubsonic-extension fields.
+	DisplayArtist string              `xml:"displayArtist,attr,omitempty" json:"displayArtist,omitempty"`
+	Genres        []SubsonicItemGenre `xml:"genres" json:"genres,omitempty"`
+}
+
+// decorateAlbum fills the OpenSubsonic-extension AlbumID3 fields (displayArtist,
+// genres) that are pure derivations of the already-populated artist/genre, so
+// every album construction site emits a spec-aligned object via one call.
+func decorateAlbum(a *SubsonicAlbum) {
+	if a.Artist != "" && a.DisplayArtist == "" {
+		a.DisplayArtist = a.Artist
+	}
+	if a.Genre != "" && len(a.Genres) == 0 {
+		a.Genres = []SubsonicItemGenre{{Name: a.Genre}}
+	}
 }
 
 type SubsonicPlaylists struct {
@@ -268,15 +376,17 @@ type SubsonicGenre struct {
 }
 
 type SubsonicStarred struct {
-	XMLName xml.Name       `xml:"starred" json:"-"`
-	Songs   []SubsonicSong `xml:"song" json:"song"`
+	XMLName xml.Name         `xml:"starred" json:"-"`
+	Artists []SubsonicArtist `xml:"artist" json:"artist"`
+	Albums  []SubsonicAlbum  `xml:"album" json:"album"`
+	Songs   []SubsonicSong   `xml:"song" json:"song"`
 }
 
 type SubsonicStarred2 struct {
 	XMLName xml.Name         `xml:"starred2" json:"-"`
-	Songs   []SubsonicSong   `xml:"song" json:"song"`
-	Albums  []SubsonicAlbum  `xml:"album" json:"album"`
 	Artists []SubsonicArtist `xml:"artist" json:"artist"`
+	Albums  []SubsonicAlbum  `xml:"album" json:"album"`
+	Songs   []SubsonicSong   `xml:"song" json:"song"`
 }
 
 type SubsonicSongsByGenre struct {
@@ -318,20 +428,48 @@ type SubsonicIndexes struct {
 	Indices         []SubsonicIndex `xml:"index" json:"index"`
 }
 
+// SubsonicDirectoryChild is the OpenSubsonic "Child" used by the legacy
+// directory-browsing endpoints (getMusicDirectory, getAlbumList). It carries the
+// same standard/extension fields as SubsonicSong so both formats stay aligned.
 type SubsonicDirectoryChild struct {
-	XMLName    xml.Name `xml:"child" json:"-"`
-	ID         string   `xml:"id,attr" json:"id"`
-	Parent     string   `xml:"parent,attr,omitempty" json:"parent,omitempty"`
-	Title      string   `xml:"title,attr" json:"title"`
-	Album      string   `xml:"album,attr,omitempty" json:"album,omitempty"`
-	Artist     string   `xml:"artist,attr,omitempty" json:"artist,omitempty"`
-	IsDir      bool     `xml:"isDir,attr" json:"isDir"`
-	CoverArt   string   `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
-	Duration   int      `xml:"duration,attr,omitempty" json:"duration,omitempty"` // Duration in seconds
-	Genre      string   `xml:"genre,attr,omitempty" json:"genre,omitempty"`
-	PlayCount  int      `xml:"playCount,attr,omitempty" json:"playCount,omitempty"`
-	LastPlayed string   `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
-	Starred    bool     `xml:"starred,attr,omitempty" json:"starred,omitempty"`
+	XMLName       xml.Name            `xml:"child" json:"-"`
+	ID            string              `xml:"id,attr" json:"id"`
+	Parent        string              `xml:"parent,attr,omitempty" json:"parent,omitempty"`
+	Title         string              `xml:"title,attr" json:"title"`
+	Album         string              `xml:"album,attr,omitempty" json:"album,omitempty"`
+	Artist        string              `xml:"artist,attr,omitempty" json:"artist,omitempty"`
+	ArtistID      string              `xml:"artistId,attr,omitempty" json:"artistId,omitempty"`
+	AlbumID       string              `xml:"albumId,attr,omitempty" json:"albumId,omitempty"`
+	IsDir         bool                `xml:"isDir,attr" json:"isDir"`
+	CoverArt      string              `xml:"coverArt,attr,omitempty" json:"coverArt,omitempty"`
+	Suffix        string              `xml:"suffix,attr,omitempty" json:"suffix,omitempty"`
+	ContentType   string              `xml:"contentType,attr,omitempty" json:"contentType,omitempty"`
+	Size          int64               `xml:"size,attr,omitempty" json:"size,omitempty"`
+	BitRate       int                 `xml:"bitRate,attr,omitempty" json:"bitRate,omitempty"`
+	SamplingRate  int                 `xml:"samplingRate,attr,omitempty" json:"samplingRate,omitempty"`
+	ChannelCount  int                 `xml:"channelCount,attr,omitempty" json:"channelCount,omitempty"`
+	BitDepth      int                 `xml:"bitDepth,attr,omitempty" json:"bitDepth,omitempty"`
+	Track         int                 `xml:"track,attr,omitempty" json:"track,omitempty"`
+	Year          int                 `xml:"year,attr,omitempty" json:"year,omitempty"`
+	DiscNumber    int                 `xml:"discNumber,attr,omitempty" json:"discNumber,omitempty"`
+	Duration      int                 `xml:"duration,attr,omitempty" json:"duration,omitempty"` // Duration in seconds
+	Genre         string              `xml:"genre,attr,omitempty" json:"genre,omitempty"`
+	PlayCount     int                 `xml:"playCount,attr,omitempty" json:"playCount,omitempty"`
+	LastPlayed    string              `xml:"lastPlayed,attr,omitempty" json:"lastPlayed,omitempty"`
+	Created       string              `xml:"created,attr,omitempty" json:"created,omitempty"`
+	Starred       bool                `xml:"starred,attr,omitempty" json:"starred,omitempty"`
+	Comment       string              `xml:"comment,attr,omitempty" json:"comment,omitempty"`
+	Type          string              `xml:"type,attr,omitempty" json:"type,omitempty"`
+	MediaType     string              `xml:"mediaType,attr,omitempty" json:"mediaType,omitempty"`
+	DisplayArtist string              `xml:"displayArtist,attr,omitempty" json:"displayArtist,omitempty"`
+	Genres        []SubsonicItemGenre `xml:"genres" json:"genres,omitempty"`
+	ReplayGain    *SubsonicReplayGain `xml:"replayGain" json:"replayGain,omitempty"`
+}
+
+// SubsonicAlbumList is the legacy getAlbumList response (Child objects).
+type SubsonicAlbumList struct {
+	XMLName xml.Name                 `xml:"albumList" json:"-"`
+	Albums  []SubsonicDirectoryChild `xml:"album" json:"album"`
 }
 
 type SubsonicMusicDirectory struct {

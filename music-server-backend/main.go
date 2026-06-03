@@ -12,12 +12,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/mattn/go-sqlite3"
@@ -167,6 +167,7 @@ func main() {
 		subsonicCompatibilityHandler(subsonic, "GET", "/getMusicDirectory", subsonicGetMusicDirectory)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getArtist", subsonicGetArtist)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getArtists", subsonicGetArtists)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getAlbumList", subsonicGetAlbumList)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getAlbumList2", subsonicGetAlbumList2)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getPlaylists", subsonicGetPlaylists)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getPlaylist", subsonicGetPlaylist)
@@ -185,6 +186,11 @@ func main() {
 		subsonicCompatibilityHandler(subsonic, "GET", "/getTopSongs", subsonicGetTopSongs)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getSimilarSongs2", subsonicGetSimilarSongs2)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getSimilarArtists2", subsonicGetSimilarArtists2)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getArtistInfo", subsonicGetArtistInfo)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getArtistInfo2", subsonicGetArtistInfo2)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getNowPlaying", subsonicGetNowPlaying)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getBookmarks", subsonicGetBookmarks)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getVideos", subsonicGetVideos)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getAlbumInfo", subsonicGetAlbumInfo)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getAlbumInfo2", subsonicGetAlbumInfo)
 		subsonicCompatibilityHandler(subsonic, "GET", "/download", subsonicDownload)
@@ -210,6 +216,7 @@ func main() {
 		subsonicCompatibilityHandler(subsonic, "GET", "/star", subsonicStar)
 		subsonicCompatibilityHandler(subsonic, "GET", "/unstar", subsonicUnstar)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getStarred", subsonicGetStarred)
+		subsonicCompatibilityHandler(subsonic, "GET", "/getStarred2", subsonicGetStarred2)
 		subsonicCompatibilityHandler(subsonic, "GET", "/getGenres", subsonicGetGenres)
 
 		// API Key Management
@@ -769,6 +776,15 @@ func initDB() {
 		replaygain_album_gain REAL,
 		replaygain_album_peak REAL,
 		waveform_peaks TEXT,
+		track INTEGER DEFAULT 0,
+		year INTEGER DEFAULT 0,
+		disc_number INTEGER DEFAULT 0,
+		size INTEGER DEFAULT 0,
+		bitrate INTEGER DEFAULT 0,
+		sample_rate INTEGER DEFAULT 0,
+		channels INTEGER DEFAULT 0,
+		bit_depth INTEGER DEFAULT 0,
+		comment TEXT DEFAULT '',
 		cancelled INTEGER NOT NULL DEFAULT 0
 	);`)
 	if err != nil {

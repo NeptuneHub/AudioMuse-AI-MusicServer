@@ -79,7 +79,12 @@ func subsonicGetPlaylist(c *gin.Context) {
 	}
 
 	query := `
-		SELECT s.id, s.title, s.artist, s.album, s.play_count, s.last_played, s.duration
+		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''), s.duration,
+			COALESCE(s.album_artist, ''), COALESCE(s.date_added, ''),
+			s.replaygain_track_gain, s.replaygain_track_peak, s.replaygain_album_gain, s.replaygain_album_peak,
+			(SELECT MIN(s2.id) FROM songs s2 WHERE s2.album_path = s.album_path AND s2.cancelled = 0) AS album_id,
+			COALESCE(s.track, 0), COALESCE(s.year, 0), COALESCE(s.disc_number, 0),
+			COALESCE(s.size, 0), COALESCE(s.bitrate, 0), COALESCE(s.sample_rate, 0), COALESCE(s.channels, 0), COALESCE(s.bit_depth, 0), COALESCE(s.comment, '')
 		FROM songs s
 		JOIN playlist_songs ps ON s.id = ps.song_id
 		WHERE ps.playlist_id = ? AND s.cancelled = 0
@@ -94,26 +99,52 @@ func subsonicGetPlaylist(c *gin.Context) {
 
 	var songs []SubsonicSong
 	for rows.Next() {
-		var s SubsonicSong
-		var duration int
-		var lastPlayed sql.NullString
-		if err := rows.Scan(&s.ID, &s.Title, &s.Artist, &s.Album, &s.PlayCount, &lastPlayed, &duration); err != nil {
+		var r SongResult
+		var lastPlayed, genreVal, albumArtist, created, albumID sql.NullString
+		var rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak sql.NullFloat64
+		var trackInt, yearInt, discInt sql.NullInt64
+		if err := rows.Scan(&r.ID, &r.Title, &r.Artist, &r.Album, &r.Path, &r.PlayCount, &lastPlayed, &genreVal, &r.Duration,
+			&albumArtist, &created, &rgTrackGain, &rgTrackPeak, &rgAlbumGain, &rgAlbumPeak, &albumID,
+			&trackInt, &yearInt, &discInt,
+			&r.Size, &r.BitRate, &r.SamplingRate, &r.ChannelCount, &r.BitDepth, &r.Comment); err != nil {
 			log.Printf("Error scanning playlist song row: %v", err)
 			continue
 		}
-		s.CoverArt = s.ID
-		s.Duration = duration
+		r.Track = int(trackInt.Int64)
+		r.Year = int(yearInt.Int64)
+		r.DiscNumber = int(discInt.Int64)
 		if lastPlayed.Valid {
-			s.LastPlayed = lastPlayed.String
+			r.LastPlayed = lastPlayed.String
 		}
-		songs = append(songs, s)
+		if genreVal.Valid {
+			r.Genre = genreVal.String
+		}
+		if albumArtist.Valid {
+			r.AlbumArtist = albumArtist.String
+		}
+		if created.Valid {
+			r.Created = created.String
+		}
+		if albumID.Valid {
+			r.AlbumID = albumID.String
+		}
+		r.ReplayGain = newReplayGain(rgTrackGain, rgTrackPeak, rgAlbumGain, rgAlbumPeak)
+		songs = append(songs, buildSubsonicSong(r))
 	}
 
-	responseBody := &SubsonicDirectory{
+	totalDuration := 0
+	for _, s := range songs {
+		totalDuration += s.Duration
+	}
+
+	responseBody := &SubsonicPlaylistWithSongs{
 		ID:        playlistID,
 		Name:      playlistName,
+		Owner:     ownerUsername,
+		Public:    ownerIsAdmin, // admin-owned playlists are visible to all users
 		SongCount: len(songs),
-		Songs:     songs,
+		Duration:  totalDuration,
+		Entries:   songs,
 	}
 	subsonicRespond(c, newSubsonicResponse(responseBody))
 }
