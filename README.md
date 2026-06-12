@@ -202,7 +202,8 @@ Frontend will be reacheable on http://localhost:3000/ you can do the first login
 
 **IMPORTANT** as you can see, running the code OUT of the container, you had the front-end on the different port 3000
 
+## Code Mirror
+AudioMuse-AI-MusicServer repository code is mirrored here:
+- https://codeberg.org/NeptuneHub/AudioMuse-AI-MusicServer
 
-
-
-
+DO **NOT** USE MIRROR TO RAISE ISSUE, PR OTHER ACTION DIFFERENT FROM GET THE CODE
