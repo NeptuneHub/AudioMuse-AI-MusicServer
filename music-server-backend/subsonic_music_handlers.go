@@ -1100,8 +1100,9 @@ func fetchAlbumList(c *gin.Context) (resultAlbums []SubsonicAlbum, ok bool) {
 	}
 	defer rows.Close()
 
+	// One entry per albums row, no name/artist dedupe: hiding rows strands
+	// their songs and desyncs pages from COUNT(*) (AudioMuse-AI#726).
 	var albums []SubsonicAlbum
-	seen := make(map[string]bool)
 	for rows.Next() {
 		var album SubsonicAlbum
 		if err := rows.Scan(&album.ID, &album.Name, &album.Artist, &album.ArtistID, &album.Genre, &album.SongCount, &album.Duration, &album.Created); err != nil {
@@ -1111,11 +1112,6 @@ func fetchAlbumList(c *gin.Context) (resultAlbums []SubsonicAlbum, ok bool) {
 		if album.Name == "Unknown" {
 			album.Name = "Unknown Album"
 		}
-		key := normalizeKey(album.Artist) + "|||" + normalizeKey(album.Name)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
 		album.CoverArt = album.ID
 		decorateAlbum(&album)
 		albums = append(albums, album)
@@ -1169,23 +1165,25 @@ func subsonicGetAlbum(c *gin.Context) {
 		return
 	}
 
-	var albumName, artistName, albumGenre, albumPath string
-	err := db.QueryRow("SELECT album, artist, COALESCE(genre, ''), path FROM songs WHERE id = ? AND cancelled = 0", albumSongId).Scan(&albumName, &artistName, &albumGenre, &albumPath)
+	var albumName, artistName, albumGenre, albumPath, albumDir string
+	err := db.QueryRow("SELECT album, artist, COALESCE(genre, ''), path, COALESCE(album_path, '') FROM songs WHERE id = ? AND cancelled = 0", albumSongId).Scan(&albumName, &artistName, &albumGenre, &albumPath, &albumDir)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Album not found."))
 		return
 	}
 
-	// Extract the album's directory path (parent directory of the song file)
-	// This ensures we only return songs from the SAME physical album location
-	albumDir := filepath.Dir(albumPath)
+	// The album group is (album_path, album), matching the derived albums
+	// table. Legacy rows without album_path fall back to the song's directory.
+	if albumDir == "" {
+		albumDir = filepath.Dir(albumPath)
+	}
 	log.Printf("getAlbum: Fetching songs for album='%s', artist='%s', albumId=%s, albumDir='%s'", albumName, artistName, albumSongId, albumDir)
 
 	// Display album artist (precomputed in the derived albums table)
 	displayArtist := albumDisplayArtist(db, albumName, albumDir)
 
-	// Query songs that match the album title and are in the same directory
-	// This ensures we return songs from the SAME physical album location regardless of individual track artist
+	// Exact album_path equality matches the albums-row grouping; a path LIKE
+	// prefix over-matched subdirs and unescaped %/_ (AudioMuse-AI#726).
 	query := `
 		SELECT s.id, s.title, s.artist, s.album, s.path, s.play_count, s.last_played, COALESCE(s.genre, ''), s.duration, COALESCE(s.date_added, ''),
 		       s.replaygain_track_gain, s.replaygain_track_peak, s.replaygain_album_gain, s.replaygain_album_peak,
@@ -1194,13 +1192,11 @@ func subsonicGetAlbum(c *gin.Context) {
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
-		WHERE s.album = ? AND s.path LIKE ? AND s.cancelled = 0
+		WHERE s.album = ? AND s.album_path = ? AND s.cancelled = 0
 		ORDER BY COALESCE(s.disc_number, 0), COALESCE(s.track, 0), s.title
 	`
 
-	// Use LIKE with the album directory to match all songs in the same folder
-	pathPattern := albumDir + string(filepath.Separator) + "%"
-	rows, err := db.Query(query, user.ID, albumName, pathPattern)
+	rows, err := db.Query(query, user.ID, albumName, albumDir)
 	if err != nil {
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Error querying for songs in album."))
 		return

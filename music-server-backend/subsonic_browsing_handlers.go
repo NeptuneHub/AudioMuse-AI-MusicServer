@@ -203,16 +203,18 @@ func getArtistDirectory(c *gin.Context, artistName string) {
 // getAlbumDirectory returns all songs in an album
 func getAlbumDirectory(c *gin.Context, user User, albumID string, albumName, artistName string) {
 	// Get the album's directory path from the albumID song
-	var albumPath string
-	err := db.QueryRow("SELECT path FROM songs WHERE id = ? AND cancelled = 0", albumID).Scan(&albumPath)
+	var albumPath, albumDir string
+	err := db.QueryRow("SELECT path, COALESCE(album_path, '') FROM songs WHERE id = ? AND cancelled = 0", albumID).Scan(&albumPath, &albumDir)
 	if err != nil {
 		log.Printf("Error getting album path for ID %s: %v", albumID, err)
 		subsonicRespond(c, newSubsonicErrorResponse(70, "Album not found."))
 		return
 	}
 
-	// Extract the album's directory to prevent mixing duplicate albums from different paths
-	albumDir := filepath.Dir(albumPath)
+	// Legacy rows without album_path fall back to the song's directory.
+	if albumDir == "" {
+		albumDir = filepath.Dir(albumPath)
+	}
 	// Display album artist (precomputed in the derived albums table)
 	displayArtist := albumDisplayArtist(db, albumName, albumDir)
 
@@ -225,12 +227,11 @@ func getAlbumDirectory(c *gin.Context, user User, albumID string, albumName, art
 		       CASE WHEN ss.song_id IS NOT NULL THEN 1 ELSE 0 END as starred
 		FROM songs s
 		LEFT JOIN starred_songs ss ON s.id = ss.song_id AND ss.user_id = ?
-		WHERE s.album = ? AND s.path LIKE ? AND s.cancelled = 0
+		WHERE s.album = ? AND s.album_path = ? AND s.cancelled = 0
 		ORDER BY COALESCE(s.disc_number, 0), COALESCE(s.track, 0), s.title COLLATE NOCASE
 	`
 
-	pathPattern := albumDir + string(filepath.Separator) + "%"
-	rows, err := db.Query(query, user.ID, albumName, pathPattern)
+	rows, err := db.Query(query, user.ID, albumName, albumDir)
 	if err != nil {
 		log.Printf("Error querying songs for album %s: %v", albumName, err)
 		subsonicRespond(c, newSubsonicErrorResponse(0, "Database error."))
