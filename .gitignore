@@ -99,7 +99,8 @@ music-server-backend/hls_cache/
 #go
 
 #npm
-music-server-frontend/package-lock.json
+# package-lock.json is committed on purpose: the Docker build uses `npm ci`,
+# and unpinned installs have broken CI when transitive deps released.
 
 
 #go frontend

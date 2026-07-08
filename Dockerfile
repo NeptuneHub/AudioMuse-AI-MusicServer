@@ -23,7 +23,10 @@ COPY --from=source-fetcher /src/AudioMuse-AI-MusicServer .
 WORKDIR /src/music-server-frontend
 ARG REACT_APP_API_URL
 ENV REACT_APP_API_URL=${REACT_APP_API_URL}
-RUN npm install
+# Linting is a dev-time concern; CRA's eslint chain is unmaintained and its
+# transitive releases have broken production builds before.
+ENV DISABLE_ESLINT_PLUGIN=true
+RUN npm ci
 RUN npm run build
 
 # STAGE 4: Final runtime image

@@ -84,10 +84,11 @@ music-server-backend/hls_cache/
 .gitignore
 
 # NPM/Yarn files
+# package-lock.json must stay IN the build context: npm ci needs it, and
+# without it every build re-resolves dependencies and drifts over time.
 .npm/
 .yarn/
 yarn.lock
-package-lock.json
 
 # Build outputs
 build/
